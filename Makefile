@@ -1,4 +1,4 @@
-.PHONY: install dev test lint format type-check clean
+.PHONY: install dev test lint format type-check hygiene check clean
 
 install:
 	pip install -r requirements-dev.txt
@@ -18,7 +18,10 @@ format:
 type-check:
 	mypy core/ adapters/ features/
 
-check: lint type-check test
+hygiene:
+	bash scripts/check_repo_hygiene.sh
+
+check: lint type-check test hygiene
 	@echo "All checks passed!"
 
 clean:
