@@ -1,0 +1,23 @@
+[project]
+name = "mxa-tutor"
+version = "0.0.1"
+description = "工科仿真 AI 助教 — MATLAB/Simulink 工程导览与智能问答"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_unused_ignores = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
