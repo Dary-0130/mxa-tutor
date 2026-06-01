@@ -25,12 +25,17 @@
    ```bash
    pip install -r requirements-dev.txt
    ```
-5. 运行测试:
+5. 运行本地检查:
    ```bash
    make test
+   make hygiene
+   make check
    ```
 
 Windows 用户请在 Git Bash 或 WSL 内执行 `make` 命令。
+
+本仓库使用 GitHub Actions 在每个 PR 上运行 lint、format check、type-check、
+test 和仓库卫生检查。所有 PR 必须 CI 全绿后才能合并。
 
 ## 文档导航
 
