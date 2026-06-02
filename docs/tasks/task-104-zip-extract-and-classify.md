@@ -39,7 +39,8 @@
 ### 必须已完成的 Task
 
 - ✅ TASK-001(项目骨架,已合并 commit `01413a7`)
-- ✅ TASK-002(开发环境 + CI,已合并 commit `64d337d`):配置层 `app/config.py` 已建,**本 Task 扩展 3 个字段**(详见"输出 / 修改文件")
+- ✅ TASK-002(开发环境 + CI,已合并 commit `64d337d`):工具链已就绪
+- ✅ **TASK-108(app/config.py + pydantic-settings 配置层基建桥接)**:本 Task 直接消费 `AppSettings`,**不再修改 `app/config.py` 字段**
 - ✅ TASK-003(4 个真实 MATLAB demo 测试集,已合并 commit `6bbea80`,位于 `tests/fixtures/slx_samples/`):**辅助验收**(走"合法 zip 不被沙箱误拒"反衬测试,策略 B 白名单扩展后的语义)
 - ✅ TASK-101(core 接口 + domain 数据结构,已合并 commit `bf50aba`):**直接契约依赖**,本 Task 用 `FileInfo` / `UploadError` 系列异常 / `ProjectTooLargeError`
 - ✅ TASK-102(.slx XML 解析器,已合并 commit `2317bb6`):间接依赖,本 Task 在 `tests/adapters/parser/conftest.py` 里**扩展**(不覆盖)TASK-102 已建的 fixture
