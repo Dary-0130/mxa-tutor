@@ -17,8 +17,7 @@ RE_LOAD_CALL = re.compile(
     r")",
 )
 RE_SIM_CALL = re.compile(
-    r"\b(?:sim|load_system|open_system|set_param)\s*"
-    r"\(\s*['\"]([^'\"]+)['\"]",
+    r"\b(?:sim|load_system|open_system|set_param)\s*" r"\(\s*['\"]([^'\"]+)['\"]",
 )
 RE_IDENTIFIER_CALL = re.compile(r"(?<![.\w@])([A-Za-z_]\w*)\s*\(")
 
