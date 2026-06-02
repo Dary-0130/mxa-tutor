@@ -121,12 +121,7 @@
   ```
   并把 `__all__` 扩展为 `['SlxParserImpl', 'MParserImpl', 'safe_extract', 'classify_files']`
 - **`adapters/parser/README.md`** — TASK-102 / 103 已建,本 Task **追加**一段说明新增的 4 个模块各自的一句话职责,以及 `safe_extract` + `classify_files` 的对外用法 2-3 行示例
-- **`app/config.py`** — TASK-002 已建,本 Task **新增 3 个字段**:
-  ```python
-  max_extraction_seconds: int = 30
-  max_total_uncompressed_mb: int = 200
-  max_entries_per_project: int = 200  # 与 max_files_per_project 同值,但语义独立(目录也计数)
-  ```
+- **`app/config.py`** — TASK-108 已建完整 `AppSettings`(含 `max_extraction_seconds=30` / `max_total_uncompressed_mb=200` / `max_entries_per_project=200` 三字段),**本 Task 不再修改**,只 `from app.config import AppSettings` 消费
 - **`.env.example`** — TASK-002 已建,本 Task **新增 3 行**:
   ```
   MAX_EXTRACTION_SECONDS=30
