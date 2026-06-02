@@ -100,7 +100,7 @@ pydantic-settings==2.6.1
 
 ### 新增配置项
 
-17 个字段(完整清单见 § 7.1),已在 task-104 v1.0 范围说明里全部出现过。
+16 个字段(完整清单见 § 7.1),已在 task-104 v1.0 范围说明里全部出现过。
 
 ---
 
@@ -202,7 +202,7 @@ class AppSettings(BaseSettings):
     )
 ```
 
-**字段总数 17**(1 必填 + 16 带默认)。
+**字段总数 16**(1 必填 + 15 带默认)。
 
 **字段顺序约束**:对齐 02 § 7 配置块顺序 + task-104 扩展段在 File limits 末尾。**不要**按字母序重排;**不要**把 quota 类放到 LLM 段。
 
@@ -369,7 +369,7 @@ grep -cE "^(DEEPSEEK_API_KEY|DEEPSEEK_BASE_URL|DB_PATH|UPLOAD_DIR|UPLOAD_TTL_HOU
 grep -cE "^\s+[a-z_]+:" app/config.py
 ```
 
-期望:输出 `17`(17 个字段声明)。
+期望:输出 `16`(16 个字段声明)。
 
 ### 5. 不引入除 pydantic-settings 外的依赖
 
