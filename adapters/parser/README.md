@@ -32,3 +32,19 @@ from adapters.parser import MParserImpl
 
 m_file = MParserImpl().parse("init_params.m")
 ```
+
+## .zip 安全解压与粗分类
+
+- `zip_extractor.py`:对外入口,提供 `safe_extract()` 七道闸安全解压。
+- `file_classifier.py`:对外入口,提供 `classify_files()` 按扩展名粗分类。
+- `_zip_paths.py`:规范化 zip 路径并识别跨平台不安全路径名。
+- `_zip_policy.py`:维护 allow / deny / other 三档扩展名策略。
+
+用法示例:
+
+```python
+from adapters.parser import classify_files, safe_extract
+
+root = safe_extract(zip_bytes, dest_dir, settings)
+files = classify_files(root, root)
+```
