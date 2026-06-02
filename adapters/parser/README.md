@@ -48,3 +48,16 @@ from adapters.parser import classify_files, safe_extract
 root = safe_extract(zip_bytes, dest_dir, settings)
 files = classify_files(root, root)
 ```
+
+## 文件依赖关系分析
+
+- `dependency_analyzer.py`:对外入口,提供 `analyze_dependencies()` 生成 `.m` 文件到工程内 `.m` / `.mat` / `.slx` 的粗粒度依赖映射。
+- `_dep_patterns.py`:维护依赖分析用正则模式和 MATLAB 常见内置函数白名单。
+
+用法示例:
+
+```python
+from adapters.parser import analyze_dependencies
+
+dependencies = analyze_dependencies(file_infos, m_files, project_root=str(root))
+```

@@ -14,7 +14,7 @@
 
 - `.m → .m`:跨文件函数调用(基于 `MFile.functions` 函数名 → 文件名的查表)
 - `.m → .mat`:数据加载(扫 `MFile.raw_code` 里的 `load / loadmat / importdata`)
-- `.m → .slx`:仿真调用(扫 `MFile.raw_code` 里的 `sim / load_system / set_param`)
+- `.m → .slx`:仿真调用(扫 `MFile.raw_code` 里的 `sim / load_system / open_system / set_param`)
 
 下游消费者:
 
@@ -129,14 +129,14 @@
 - [ ] **依赖结构理解**:实施前**第一件事**,`cat adapters/parser/__init__.py tests/adapters/parser/conftest.py adapters/parser/README.md` 看实际内容,确认本 Task 文档"输入"小节描述与实际一致。若 conftest.py 已有的 fixture 名与本 Task 文档"接口契约"§ 7.5 描述的工厂 fixture 名冲突,**停手抛冲突给 PM**
 - [ ] **建 `adapters/parser/_dep_patterns.py`**(详见接口契约 § 7.4):
   - [ ] `BUILTIN_FUNCTIONS: frozenset[str]` 内置函数白名单(详见 § 7.4)
-  - [ ] `STRIP_LINE_COMMENT: re.Pattern` 单行 `%` 注释剥离(注意避开字符串内的 `%`)
-  - [ ] `STRIP_BLOCK_COMMENT: re.Pattern` 块注释 `%{ %}` 剥离(独占行)
+  - [ ] `RE_LINE_COMMENT: re.Pattern` 单行 `%` 注释剥离(简化:不区分字符串内的 `%`,接受少量误报)
+  - [ ] `RE_BLOCK_COMMENT: re.Pattern` 块注释 `%{ %}` 剥离(独占行)
   - [ ] `RE_LOAD_CALL: re.Pattern` `load(...)` / `loadmat(...)` / `importdata(...)` 提取目标字符串
-  - [ ] `RE_SIM_CALL: re.Pattern` `sim(...)` / `load_system(...)` / `set_param(...)` 提取目标字符串
+  - [ ] `RE_SIM_CALL: re.Pattern` `sim(...)` / `load_system(...)` / `open_system(...)` / `set_param(...)` 提取目标字符串
   - [ ] `RE_IDENTIFIER_CALL: re.Pattern` `identifier\s*\(` 提取候选函数名(用于 .m → .m 候选)
 - [ ] **建 `adapters/parser/dependency_analyzer.py`**(详见接口契约 § 7.1):
   - [ ] 实现 `analyze_dependencies(file_infos, m_files, project_root=None) -> dict[str, list[str]]`
-  - [ ] 实现 `_build_function_name_map(m_files) -> dict[str, list[str]]`(函数名 → 定义文件列表)
+  - [ ] 实现 `_build_function_name_map(m_files, project_root) -> dict[str, list[str]]`(函数名 → 定义文件列表)
   - [ ] 实现 `_strip_comments(raw_code) -> str`(简化版,单行 `%` + 块 `%{ %}`,不处理字符串)
   - [ ] 实现 `_extract_m_to_m_targets(stripped_code, fn_to_file, self_file) -> set[str]`
   - [ ] 实现 `_extract_data_load_targets(stripped_code, mat_files_index) -> set[str]`
@@ -214,7 +214,7 @@
 
 - ``.m → .m``  : 跨文件函数调用
 - ``.m → .mat``: 数据加载 (load / loadmat / importdata)
-- ``.m → .slx``: 仿真调用 (sim / load_system / set_param)
+- ``.m → .slx``: 仿真调用 (sim / load_system / open_system / set_param)
 
 输出格式严格对齐 ``core/domain/project.py::Project.file_dependencies``
 (``dict[str, list[str]]``,key 与 value 都是 ``FileInfo.relative_path``)。
@@ -286,7 +286,7 @@ def analyze_dependencies(
 ```python
 def _build_function_name_map(
     m_files: Iterable[MFile],
-    relpath_normalize: callable,
+    project_root: str | None,
 ) -> dict[str, list[str]]:
     """{function_name: [defining_relpath_normalized_1, ...]} 索引。
 
