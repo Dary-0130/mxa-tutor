@@ -49,6 +49,8 @@
 ### 必须存在的文件 / 状态
 
 - `main` 分支处于 commit `9edef50` 或之后
+- 以下文件由 TASK-108 建好,本 Task **直接 import 使用**(契约不变):
+  - `app/config.py` — `AppSettings` 含 `max_extraction_seconds` / `max_total_uncompressed_mb` / `max_entries_per_project` 三个 TASK-104 需要的配置字段
 - 以下 `core/` 文件由 TASK-101 建好,本 Task **直接 import 使用**(契约不变):
   - `core/domain/project.py` — `FileInfo` dataclass
   - `core/domain/exceptions.py` — `UploadError` / `ZipBombError` / `ZipSlipError` / `FileTypeNotAllowedError` / `ProjectTooLargeError` / `ProjectError` / `MxaError`
