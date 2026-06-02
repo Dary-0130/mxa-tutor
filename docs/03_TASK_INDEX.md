@@ -62,6 +62,7 @@ TASK-WNN
 | TASK-105 | 文件依赖关系分析 | 🔲 | Codex | 103 |
 | TASK-106 | DeepSeek TextProvider 实现 | 🔲 | Codex | 101 |
 | TASK-107 | **ProjectGraph + TeachingUnit 基础构建器** ⭐ | 🔲 | Codex | 102, 103, 105 |
+| TASK-108 | app/config.py + pydantic-settings 配置层(基建桥接) | 🔲 | Codex | 无 |
 
 ### Week 1 验收(分级)
 
