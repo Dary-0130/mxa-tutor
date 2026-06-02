@@ -841,10 +841,10 @@ def parse(self, m_file_path: str) -> MFile:
 |---|---|---|---|
 | `BuckVoltageControlData.m` | `script` | 0 | `Data` 后缀,参数 |
 | `BuckVoltageControlExample.m` | `script` | 0 | `Example` 后缀,Live Script 导出 |
-| `BuckVoltageControlPlotVoltage.m` | `function` | 1(名为 `BuckVoltageControlPlotVoltage`) | `Plot*` 工具函数 |
+| `BuckVoltageControlPlotVoltage.m` | `script` | 0 | 懒加载脚本:`if ~exist('simlog_...', 'var') → sim(...) → 画图`(v1.3 修订:实际不是 function,是脚本) |
 | `simlogNeedsUpdate.m` | `function` | 1(名为 `simlogNeedsUpdate`,返回 bool) | 小辅助函数,486B |
 
-工程 2 小计:2 script + 2 function + 0 class。
+工程 2 小计:3 script + 1 function + 0 class。
 
 #### 工程 3(`03_pid_antiwindup.zip`,1 个 .m,~14KB)
 
@@ -864,11 +864,26 @@ def parse(self, m_file_path: str) -> MFile:
 
 #### 总计
 
-**11 个 .m 文件:9 script + 2 function + 0 class**。
+**11 个 .m 文件:10 script + 1 function + 0 class**。
 
 分类正确率验收门槛:**11 / 11 全部正确**(架构总览第 6 节决策 4 授权"够用即可"不等于"接受 20% 错误",`docs/03_TASK_INDEX.md` Week 1 验收的"80% 正确"是面向旧版 10 个测试工程的宽松基线,本 Task 测试集仅 11 个文件且预期清晰,应**做到 100%**)。
 
 如果 Codex cat 实际文件后发现某个文件实际不符预期(比如某个 `_data.m` 其实开头是 `function`),**停手抛冲突**,**不要**改测试断言绕过——这是规模太小不允许误差的清单。
+
+#### v1.3 修订特别提醒:function 真实工程覆盖单薄
+
+v1.3 修订后,11 个 .m 文件里**只有 `simlogNeedsUpdate.m` 一个是 function**。这意味着 `file_role == "function"` 分类逻辑和 top-level function 提取逻辑,**真实工程测试只能覆盖到这一个文件**(简单返回 bool 的 helper 函数)。
+
+为了不让 function 分类逻辑"靠 1 个真实文件守住",**单元测试(验收第 7 项)必须强化 function 覆盖**:
+
+- 至少覆盖 function 签名 5 种形式(已在原计划单元测试要求里,不变)
+- 至少覆盖一个含 `arguments` 块的 function(R2019b+ 语法)
+- 至少覆盖一个含多行续行 `...` 签名的 function(测 `line_range` 经 line_map 回填正确)
+- 至少覆盖一个含 docstring 的 function(测 docstring 从 `original_lines` 提取,不是 preprocessed)
+- 至少覆盖一个含 nested function 的文件(测 nested 不被加入 functions list)
+- 至少覆盖一个含多个 local function 的文件(测都加入 list,不只第一个)
+
+这些单元测试是 function 分类逻辑的**主要质量保证**,真实工程的 `simlogNeedsUpdate.m` 只是"端到端 sanity check"。
 
 ### 9. `conftest.py` 扩展骨架
 
@@ -1091,7 +1106,7 @@ pytest tests/adapters/parser/test_m_parser_real.py -v
 
 - [ ] `BuckVoltageControlData.m`:`file_role == "script"`, `len(functions) == 0`
 - [ ] `BuckVoltageControlExample.m`:`file_role == "script"`, `len(functions) == 0`
-- [ ] `BuckVoltageControlPlotVoltage.m`:`file_role == "function"`, `len(functions) >= 1`, 第一个 function 的 `name == "BuckVoltageControlPlotVoltage"`
+- [ ] `BuckVoltageControlPlotVoltage.m`:`file_role == "script"`, `len(functions) == 0`(v1.3 修订:Codex 实施前 dump 抓到,该文件实际是懒加载脚本而非 function)
 - [ ] `simlogNeedsUpdate.m`:`file_role == "function"`, `len(functions) >= 1`, 第一个 function 的 `name == "simlogNeedsUpdate"`
 
 #### 工程 3(`03_pid_antiwindup.zip`,1 个 .m)
@@ -1492,7 +1507,7 @@ done | less
 pytest tests/adapters/parser/test_m_parser_real.py::test_lms_main -v
 ```
 
-绿了再扩展到工程 3(1 个 .m)→ 工程 2(4 个,含 2 个真 function)→ 工程 1(5 个 _data.m + 1 个主)。
+绿了再扩展到工程 3(1 个 .m)→ 工程 2(4 个,含 1 个真 function `simlogNeedsUpdate.m`)→ 工程 1(5 个 _data.m + 1 个主)。
 
 ### 4. Commit 拆分建议(Conventional Commits)
 
@@ -1673,7 +1688,7 @@ PM 在 GitHub 网页手动创建 PR。CI 自动触发,绿了之后 PM 把 Codex 
 
 ---
 
-**版本**:Task 文档 v1.2
+**版本**:Task 文档 v1.3
 **作者**:Claude(架构师,第五任)
 **日期**:2026-06-02
 **修订记录**:
@@ -1695,6 +1710,11 @@ PM 在 GitHub 网页手动创建 PR。CI 自动触发,绿了之后 PM 把 Codex 
   - **风险 10 改硬**:明确 04 第 8.4 节 `parse_warnings` 是通用原则,本 Task 因 TASK-101 契约不同而**局部例外**;契约 > 通用原则(GPT round-2 收口 3)
   - **toolbox 真实工程验收去硬门槛**:删除验收第 8 项"11 个 .m 至少 1 个命中至少 1 个 toolbox"硬断言,改为类型正确即可。Toolbox 命中精度移到单元测试守(8 个高置信样例 + 4 个误报排除样例)(GPT round-2 收口 4)
   - **classdef 守卫**:测试集 0 classdef,真实工程拦不住。新增"接口契约 7.1 classdef 守卫"小节 + 主入口伪代码 short-circuit + 验收第 7 项单元测试守住(`file_role == "class"` 时 `functions == []`,即使 methods 块内有 `function` 行也不提取)(GPT round-2 收口 5)
+- v1.3(2026-06-02 实施前 cat 验证抓到矩阵预估误差,修订 1 项):
+  - **`BuckVoltageControlPlotVoltage.m` 实际是 script 不是 function**:Codex 实施前按 task-103 文档"给 Codex 提示第 1 条"cat 11 个 .m 实际内容,发现该文件第一非注释行是 `if ~exist('simlog_BuckVoltageControl', 'var')...`(MATLAB 常见的"懒加载脚本"模式:数据不存在时先跑仿真再画图),不是 `function ...` 开头。架构师 v1.0 基于"`Plot*` 后缀通常是工具函数"的文件名启发预估错误。
+  - 修订内容:接口契约 8 段工程 2 表格 + 小计(2 script + 2 function → 3 script + 1 function)+ 总计(9 script + 2 function → 10 script + 1 function);验收第 8 项工程 2 该文件断言反转(`file_role == "function"` → `"script"`);"给 Codex 的提示"第 3 条"工程 2 含 2 个真 function"改为"1 个"
+  - **副作用提醒**:11 个 .m 里只剩 `simlogNeedsUpdate.m` 一个 function,function 分类逻辑的真实工程覆盖单薄。**接口契约 8 段新增 "v1.3 修订特别提醒" 子节**,要求单元测试(验收第 7 项)强化 function 分类覆盖(5 种签名形式 / arguments 块 / 多行续行签名 / docstring / nested / 多 local function),保证 function 分类质量不靠 1 个真实文件守住。
+  - **纪律实证**:Codex"看见冲突就停手"纪律在 task-103 首次触发——这是 task-102 实战培养的协作模式延续,完美兑现。架构师预估有误差,Codex 停手抛冲突,PM 转给架构师裁决,15 分钟内回到正轨。无此纪律的 cost 是:Codex 默默改测试断言"绕过",在后续 review 时被发现,需要返工。
 
 **关联宪法版本**:v2.1(冻结)
 **关联决策**:`docs/decisions/20260601-04-*.md` / `20260601-05-*.md` / `20260601-06-*.md` / `20260601-07-*.md` / `20260602-08-*.md`
