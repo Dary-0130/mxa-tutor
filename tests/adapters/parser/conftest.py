@@ -1,8 +1,10 @@
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
+from core.domain.m_file import MFile, MFunction
+from core.domain.project import FileInfo
 from tests.fixtures.malicious_zips.build_fixtures import build_all
 
 SLX_SAMPLES_DIR = Path(__file__).parents[2] / "fixtures" / "slx_samples"
@@ -47,3 +49,46 @@ def malicious_zip_dir(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Pat
     fixture_root = tmp_path_factory.mktemp("malicious_zips")
     build_all(fixture_root)
     return {path.stem: path for path in sorted(fixture_root.glob("*.zip"))}
+
+
+@pytest.fixture
+def make_m_file():
+    """Factory for compact ``MFile`` test objects."""
+
+    def _make(
+        file_path: str,
+        raw_code: str = "",
+        functions: list[MFunction] | None = None,
+        file_role: str = "script",
+        imports: list[str] | None = None,
+        uses_toolbox: list[str] | None = None,
+    ) -> MFile:
+        return MFile(
+            file_path=file_path,
+            file_role=file_role,
+            functions=functions or [],
+            imports=imports or [],
+            uses_toolbox=uses_toolbox or [],
+            raw_code=raw_code,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_file_info():
+    """Factory for compact ``FileInfo`` test objects."""
+
+    def _make(
+        relative_path: str,
+        file_type: str | None = None,
+        size_bytes: int = 0,
+    ) -> FileInfo:
+        inferred_type = file_type or PurePosixPath(relative_path).suffix or "other"
+        return FileInfo(
+            relative_path=relative_path,
+            file_type=inferred_type,
+            size_bytes=size_bytes,
+        )
+
+    return _make
