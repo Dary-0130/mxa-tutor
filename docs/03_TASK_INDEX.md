@@ -59,7 +59,7 @@ TASK-WNN
 | TASK-102 | .slx XML 解析器(P0/P1/P2 分级) | ✅ | Codex | 101 + 测试集 |
 | TASK-103 | .m 文件解析器 | ✅ | Codex | 101 |
 | TASK-104 | 工程压缩包安全解压 + 文件分类(含沙箱) | ✅ | Codex | 101 |
-| TASK-105 | 文件依赖关系分析 | 🔲 | Codex | 103 |
+| TASK-105 | 文件依赖关系分析 | 🔍 | Codex | 103 |
 | TASK-106 | DeepSeek TextProvider 实现 | 🔲 | Codex | 101 |
 | TASK-107 | **ProjectGraph + TeachingUnit 基础构建器** ⭐ | 🔲 | Codex | 102, 103, 105 |
 | TASK-108 | app/config.py + pydantic-settings 配置层(基建桥接) | ✅ | Codex | 无 |
@@ -334,7 +334,7 @@ P2 v0.1 不承诺:
 
 ```
 Week 0:  [✅🔍✅⬜]              2/4
-Week 1:  [✅✅✅✅⬜⬜⬜✅]           5/8  (含 TASK-107 / TASK-108)
+Week 1:  [✅✅✅✅🔍⬜⬜✅]           5/8  (含 TASK-107 / TASK-108)
 Week 2:  [⬜⬜⬜⬜⬜⬜⬜]         0/7  (含 TASK-207)
 Week 3:  [⬜⬜⬜⬜⬜⬜⬜]         0/7  (含 TASK-307)
 Week 4:  [⬜⬜⬜⬜⬜⬜]           0/6
