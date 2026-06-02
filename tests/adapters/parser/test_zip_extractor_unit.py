@@ -122,7 +122,7 @@ def test_entry_flags_reject_bad_method_symlink_and_encrypted_bit(tmp_path: Path)
 
     link = zipfile.ZipInfo("linkdir")
     link.create_system = 3
-    link.external_attr = ((stat.S_IFLNK | 0o777) << 16)
+    link.external_attr = (stat.S_IFLNK | 0o777) << 16
     with pytest.raises(ZipSlipError, match="zip 内含符号链接或非普通文件"):
         safe_extract(_zip_with_info(link, "/tmp/outside"), dest, config)
 

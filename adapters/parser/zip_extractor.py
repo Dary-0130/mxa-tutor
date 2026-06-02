@@ -179,7 +179,10 @@ def _check_total_size_and_ratio(
     max_total = config.max_total_uncompressed_mb * 1024 * 1024
     if total_uncompressed > max_total:
         raise ZipBombError("工程解压后总大小超限,疑似 zip bomb")
-    if total_compressed > 0 and total_uncompressed / total_compressed > config.max_compression_ratio:
+    if (
+        total_compressed > 0
+        and total_uncompressed / total_compressed > config.max_compression_ratio
+    ):
         raise ZipBombError("压缩比异常,疑似 zip bomb")
 
 

@@ -33,7 +33,7 @@ def build_symlink_chain(out_dir: Path) -> None:
     with zipfile.ZipFile(out_dir / "symlink_chain.zip", "w") as zf:
         link = zipfile.ZipInfo("linkdir")
         link.create_system = 3
-        link.external_attr = ((stat.S_IFLNK | 0o777) << 16)
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
         zf.writestr(link, "/tmp/outside-target")
         zf.writestr("linkdir/payload.m", "disp('should not be written');")
 
