@@ -128,6 +128,7 @@
 
 ### 不动文件
 
+- `app/config.py`(TASK-108 已建完整 `AppSettings`,**字段定义不许动**;如发现需新增字段,**停手问 PM**,走单独 chore PR)
 - `core/domain/*.py` 和 `core/interfaces/*.py`(TASK-101 已建,**契约不许动**;尤其**不允许**新增 `FileType` enum 或修改 `FileInfo.file_type` 字段类型;如发现需要调整,**停手问 PM**,走宪法修订流程,不能在本 Task 顺带改)
 - `adapters/parser/slx_parser.py` / `_slx_*.py`(TASK-102 已建,**与本 Task 解耦**,不允许修改)
 - `adapters/parser/m_parser.py` / `_m_*.py`(TASK-103 已建,**与本 Task 解耦**,不允许修改;**且本 Task 不调用** `MParserImpl`)
