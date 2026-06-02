@@ -122,12 +122,7 @@
   并把 `__all__` 扩展为 `['SlxParserImpl', 'MParserImpl', 'safe_extract', 'classify_files']`
 - **`adapters/parser/README.md`** — TASK-102 / 103 已建,本 Task **追加**一段说明新增的 4 个模块各自的一句话职责,以及 `safe_extract` + `classify_files` 的对外用法 2-3 行示例
 - **`app/config.py`** — TASK-108 已建完整 `AppSettings`(含 `max_extraction_seconds=30` / `max_total_uncompressed_mb=200` / `max_entries_per_project=200` 三字段),**本 Task 不再修改**,只 `from app.config import AppSettings` 消费
-- **`.env.example`** — TASK-002 已建,本 Task **新增 3 行**:
-  ```
-  MAX_EXTRACTION_SECONDS=30
-  MAX_TOTAL_UNCOMPRESSED_MB=200
-  MAX_ENTRIES_PER_PROJECT=200
-  ```
+- **`.env.example`** — TASK-108 已扩展所有需要字段(含 `MAX_EXTRACTION_SECONDS=30` / `MAX_TOTAL_UNCOMPRESSED_MB=200` / `MAX_ENTRIES_PER_PROJECT=200`),**本 Task 不再修改**
 - **`tests/adapters/parser/conftest.py`** — TASK-102 / 103 已建 `extracted_slx_projects` / `extracted_m_files` fixture,本 Task **追加** `malicious_zip_dir` fixture(session scope,首次跑 `build_fixtures.py` 在 `tmp_path_factory` 临时目录生成 7 个 fixture zip,返回 `dict[risk_family_name, Path]`)
 - **`docs/03_TASK_INDEX.md`** — 把 TASK-104 行状态从 🔲 改为 🔍,Week 1 进度条 `[✅✅✅⬜⬜⬜⬜]` → `[✅✅✅🔍⬜⬜⬜]`(4/7 数字不变,Codex 推 🔍 后)。**必须用字节级 Python 操作(决策 08)**,详见"风险与注意点"风险 1
 
