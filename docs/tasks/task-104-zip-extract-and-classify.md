@@ -219,8 +219,7 @@
 - [ ] **`adapters/parser/__init__.py` 扩展**:追加 `safe_extract` / `classify_files` 到 `__all__`
 - [ ] **`adapters/parser/README.md` 更新**:追加 4 个新模块的一句话职责 + 用法示例
 - [ ] **`tests/adapters/parser/conftest.py` 扩展**:追加 `malicious_zip_dir` session-scope fixture
-- [ ] **`app/config.py` 扩展**:新增 3 个字段
-- [ ] **`.env.example` 扩展**:新增 3 行
+- [ ] **验证 `from app.config import AppSettings` 可用**(TASK-108 已建,本 Task 仅消费)
 - [ ] **本地全检通过**:`make check` 全绿(lint / type-check / pytest / hygiene)
 - [ ] **改 `docs/03_TASK_INDEX.md`**:
   - 把 TASK-104 状态从 🔲 改为 🔍,Week 1 进度条第 4 位 ⬜ 改为 🔍
