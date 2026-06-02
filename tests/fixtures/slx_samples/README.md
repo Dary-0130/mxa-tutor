@@ -13,7 +13,7 @@
 
 | 文件名 | 主题 | 来源路径 | 文件特征 |
 |---|---|---|---|
-| `01_pmsm_foc_c2000.zip` | PMSM 矢量控制(电机控制 + TI C2000 嵌入式硬件目标) | `c2b/FieldOrientedControlOfPMSMWithQEPUsingC2000ProcessorsExample` | 10 个 `.slx`(3 种芯片版本 F28035/F280049C/F28335 + host 模型 + 多个子系统)、5 个 `.m`(参数初始化)、8 个 `.png` 文档图 |
+| `01_pmsm_foc_c2000.zip` | PMSM 矢量控制(电机控制 + TI C2000 嵌入式硬件目标) | `c2b/FieldOrientedControlOfPMSMWithQEPUsingC2000ProcessorsExample` | 11 个 `.slx`(3 种芯片版本 F28035/F280049C/F28335 + host 模型 + 多个子系统)、5 个 `.m`(参数初始化)、8 个 `.png` 文档图 |
 | `02_buck_voltage_control.zip` | Buck 变换器电压控制(电力电子) | `simscapeelectrical/BuckVoltageControlExample` | 1 个 `.slx` 主模型、4 个 `.m`(参数/绘图/工具脚本)、1 个 `.ssc`(Simscape 自定义元件,非白名单扩展)、1 个 `.svg` |
 | `03_pid_antiwindup.zip` | PID 抗积分饱和控制(经典控制系统) | `simulink_industrial/AntiWindupControlUsingAPIDControllerExample` | 3 个 `.slx` 变体(基础/执行器饱和/前馈)、1 个 `.m`、1 个 `.png` |
 | `04_lms_noise_cancel.zip` | LMS 自适应噪声消除(信号处理) | `dsp/AcousticNoiseCancellationLMSExample` | 2 个 `.slx`(浮点版 + 定点版)、1 个 `.m` |
