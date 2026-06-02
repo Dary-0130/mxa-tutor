@@ -39,7 +39,8 @@
 ### 必须已完成的 Task
 
 - ✅ TASK-001(项目骨架,已合并 commit `01413a7`)
-- ✅ TASK-002(开发环境 + CI,已合并 commit `64d337d`):配置层 `app/config.py` 已建,**本 Task 扩展 3 个字段**(详见"输出 / 修改文件")
+- ✅ TASK-002(开发环境 + CI,已合并 commit `64d337d`):工具链已就绪
+- ✅ **TASK-108(app/config.py + pydantic-settings 配置层基建桥接)**:本 Task 直接消费 `AppSettings`,**不再修改 `app/config.py` 字段**
 - ✅ TASK-003(4 个真实 MATLAB demo 测试集,已合并 commit `6bbea80`,位于 `tests/fixtures/slx_samples/`):**辅助验收**(走"合法 zip 不被沙箱误拒"反衬测试,策略 B 白名单扩展后的语义)
 - ✅ TASK-101(core 接口 + domain 数据结构,已合并 commit `bf50aba`):**直接契约依赖**,本 Task 用 `FileInfo` / `UploadError` 系列异常 / `ProjectTooLargeError`
 - ✅ TASK-102(.slx XML 解析器,已合并 commit `2317bb6`):间接依赖,本 Task 在 `tests/adapters/parser/conftest.py` 里**扩展**(不覆盖)TASK-102 已建的 fixture
@@ -48,6 +49,8 @@
 ### 必须存在的文件 / 状态
 
 - `main` 分支处于 commit `9edef50` 或之后
+- 以下文件由 TASK-108 建好,本 Task **直接 import 使用**(契约不变):
+  - `app/config.py` — `AppSettings` 含 `max_extraction_seconds` / `max_total_uncompressed_mb` / `max_entries_per_project` 三个 TASK-104 需要的配置字段
 - 以下 `core/` 文件由 TASK-101 建好,本 Task **直接 import 使用**(契约不变):
   - `core/domain/project.py` — `FileInfo` dataclass
   - `core/domain/exceptions.py` — `UploadError` / `ZipBombError` / `ZipSlipError` / `FileTypeNotAllowedError` / `ProjectTooLargeError` / `ProjectError` / `MxaError`
@@ -118,23 +121,14 @@
   ```
   并把 `__all__` 扩展为 `['SlxParserImpl', 'MParserImpl', 'safe_extract', 'classify_files']`
 - **`adapters/parser/README.md`** — TASK-102 / 103 已建,本 Task **追加**一段说明新增的 4 个模块各自的一句话职责,以及 `safe_extract` + `classify_files` 的对外用法 2-3 行示例
-- **`app/config.py`** — TASK-002 已建,本 Task **新增 3 个字段**:
-  ```python
-  max_extraction_seconds: int = 30
-  max_total_uncompressed_mb: int = 200
-  max_entries_per_project: int = 200  # 与 max_files_per_project 同值,但语义独立(目录也计数)
-  ```
-- **`.env.example`** — TASK-002 已建,本 Task **新增 3 行**:
-  ```
-  MAX_EXTRACTION_SECONDS=30
-  MAX_TOTAL_UNCOMPRESSED_MB=200
-  MAX_ENTRIES_PER_PROJECT=200
-  ```
+- **`app/config.py`** — TASK-108 已建完整 `AppSettings`(含 `max_extraction_seconds=30` / `max_total_uncompressed_mb=200` / `max_entries_per_project=200` 三字段),**本 Task 不再修改**,只 `from app.config import AppSettings` 消费
+- **`.env.example`** — TASK-108 已扩展所有需要字段(含 `MAX_EXTRACTION_SECONDS=30` / `MAX_TOTAL_UNCOMPRESSED_MB=200` / `MAX_ENTRIES_PER_PROJECT=200`),**本 Task 不再修改**
 - **`tests/adapters/parser/conftest.py`** — TASK-102 / 103 已建 `extracted_slx_projects` / `extracted_m_files` fixture,本 Task **追加** `malicious_zip_dir` fixture(session scope,首次跑 `build_fixtures.py` 在 `tmp_path_factory` 临时目录生成 7 个 fixture zip,返回 `dict[risk_family_name, Path]`)
 - **`docs/03_TASK_INDEX.md`** — 把 TASK-104 行状态从 🔲 改为 🔍,Week 1 进度条 `[✅✅✅⬜⬜⬜⬜]` → `[✅✅✅🔍⬜⬜⬜]`(4/7 数字不变,Codex 推 🔍 后)。**必须用字节级 Python 操作(决策 08)**,详见"风险与注意点"风险 1
 
 ### 不动文件
 
+- `app/config.py`(TASK-108 已建完整 `AppSettings`,**字段定义不许动**;如发现需新增字段,**停手问 PM**,走单独 chore PR)
 - `core/domain/*.py` 和 `core/interfaces/*.py`(TASK-101 已建,**契约不许动**;尤其**不允许**新增 `FileType` enum 或修改 `FileInfo.file_type` 字段类型;如发现需要调整,**停手问 PM**,走宪法修订流程,不能在本 Task 顺带改)
 - `adapters/parser/slx_parser.py` / `_slx_*.py`(TASK-102 已建,**与本 Task 解耦**,不允许修改)
 - `adapters/parser/m_parser.py` / `_m_*.py`(TASK-103 已建,**与本 Task 解耦**,不允许修改;**且本 Task 不调用** `MParserImpl`)
@@ -152,7 +146,7 @@
 
 ### 新增配置项
 
-3 个,见上方"修改文件 · `app/config.py`"。语义说明:
+本 Task **不**新增配置项 — TASK-108 已建完整 `AppSettings`,包含本 Task 需要的全部字段。语义说明(下游消费者应理解):
 
 - `max_extraction_seconds`:整个 `safe_extract` 的 cooperative deadline,默认 30 秒(对齐 02 § 11"上传响应硬上限 30s")。Codex 实施完成跑 fixture 时若发现 50MB 真实 zip 接近 30 秒,允许**单独**走 chore PR 上调到 60 秒,**不**在 TASK-104 范围内预先调
 - `max_total_uncompressed_mb`:总解压后大小硬上限,默认 200。防止 `200 文件 × 20MB = 4GB` 隐式攻击面。**v1.0 暂定 200**,Codex 实施完成跑 fixture 时若发现 200MB 上限对真实工程不够,允许**在 TASK-104 PR 内**顺手把默认调到合理值,并在"风险与注意点"补一笔(这是本 Task 内的自由度)
@@ -226,8 +220,7 @@
 - [ ] **`adapters/parser/__init__.py` 扩展**:追加 `safe_extract` / `classify_files` 到 `__all__`
 - [ ] **`adapters/parser/README.md` 更新**:追加 4 个新模块的一句话职责 + 用法示例
 - [ ] **`tests/adapters/parser/conftest.py` 扩展**:追加 `malicious_zip_dir` session-scope fixture
-- [ ] **`app/config.py` 扩展**:新增 3 个字段
-- [ ] **`.env.example` 扩展**:新增 3 行
+- [ ] **验证 `from app.config import AppSettings` 可用**(TASK-108 已建,本 Task 仅消费)
 - [ ] **本地全检通过**:`make check` 全绿(lint / type-check / pytest / hygiene)
 - [ ] **改 `docs/03_TASK_INDEX.md`**:
   - 把 TASK-104 状态从 🔲 改为 🔍,Week 1 进度条第 4 位 ⬜ 改为 🔍
@@ -1382,5 +1375,5 @@ PM 在 GitHub 网页手动创建 PR。CI 自动触发,绿了之后 PM 把 Codex 
 **日期**:2026-06-02
 **关联宪法版本**:v2.1(冻结)
 **关联决策**:`docs/decisions/20260601-04-*.md` / `20260601-05-*.md` / `20260601-06-*.md` / `20260601-07-*.md` / `20260602-08-*.md`
-**关联 Task**:依赖 TASK-101(契约) / TASK-002(配置层) / TASK-003(测试集);下游 TASK-105 / TASK-202
+**关联 Task**:依赖 TASK-101(契约) / TASK-108(配置层) / TASK-003(测试集);下游 TASK-105 / TASK-202
 **GPT 二审历史**:round-1 抓 13 项必采 + 5 项部分采纳;round-2 Q1-Q7 细化到代码骨架,无新发散,直接进 v1.0
