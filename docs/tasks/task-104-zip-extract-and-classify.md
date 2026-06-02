@@ -145,7 +145,7 @@
 
 ### 新增配置项
 
-3 个,见上方"修改文件 · `app/config.py`"。语义说明:
+本 Task **不**新增配置项 — TASK-108 已建完整 `AppSettings`,包含本 Task 需要的全部字段。语义说明(下游消费者应理解):
 
 - `max_extraction_seconds`:整个 `safe_extract` 的 cooperative deadline,默认 30 秒(对齐 02 § 11"上传响应硬上限 30s")。Codex 实施完成跑 fixture 时若发现 50MB 真实 zip 接近 30 秒,允许**单独**走 chore PR 上调到 60 秒,**不**在 TASK-104 范围内预先调
 - `max_total_uncompressed_mb`:总解压后大小硬上限,默认 200。防止 `200 文件 × 20MB = 4GB` 隐式攻击面。**v1.0 暂定 200**,Codex 实施完成跑 fixture 时若发现 200MB 上限对真实工程不够,允许**在 TASK-104 PR 内**顺手把默认调到合理值,并在"风险与注意点"补一笔(这是本 Task 内的自由度)
