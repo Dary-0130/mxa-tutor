@@ -856,7 +856,7 @@ out = fixture_dir / "total_uncompressed_exceeds_cap.zip"
 chunk = os.urandom(64 * 1024)  # 避免压缩比闸先触发
 with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
     for i in range(24):
-        zf.writestr(f"data/part_{i:03d}.bin", chunk)
+        zf.writestr(f"data/part_{i:03d}.dat", chunk)
 # 测试时把 config.max_total_uncompressed_mb 覆盖为 1
 # 单文件 64KB 远小于 20MB(不触发单文件闸)
 # 总解压 ~1.5MB 超过 1MB cap(触发总解压闸)
