@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures.malicious_zips.build_fixtures import build_all
+
 SLX_SAMPLES_DIR = Path(__file__).parents[2] / "fixtures" / "slx_samples"
 
 
@@ -37,3 +39,11 @@ def _project_extract_root(sample_path: Path, project_name: str) -> Path:
         if parent.name == project_name:
             return parent
     return sample_path.parent
+
+
+@pytest.fixture(scope="session")
+def malicious_zip_dir(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    """生成 TASK-104 的 7 个恶意 zip fixture。"""
+    fixture_root = tmp_path_factory.mktemp("malicious_zips")
+    build_all(fixture_root)
+    return {path.stem: path for path in sorted(fixture_root.glob("*.zip"))}

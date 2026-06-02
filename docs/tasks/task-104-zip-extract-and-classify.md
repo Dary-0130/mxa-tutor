@@ -215,7 +215,7 @@
 - [ ] **真实工程反衬测试**(`test_zip_extractor_real.py`):**4 个真实 zip 在策略 B 下全部通过沙箱**,且 `classify_files` 输出 `list[FileInfo]` 含 `.png` / `.svg` / `.ssc` 等扩展(file_type 为对应扩展或 `"other"`)
 - [ ] **恶意 zip 集成测试**(`test_zip_extractor_errors.py`):**7 个 fixture 各被对应异常拒绝**;Windows 不安全路径参数化覆盖 13+ 变体;超时路径单测(局部 config 把 `max_extraction_seconds=0.1` + 构造 hang 的解压)
 - [ ] **classifier 测试**(`test_file_classifier.py`):
-  - [ ] 在 `tmp_path` 手造 `.m` / `.exe` / `.gif` 三类文件,断言:`.m` → `file_type=".m"`;`.exe` → 抛 `FileTypeNotAllowedError`;`.gif` → `file_type="other"`(灰名单)
+  - [ ] 在 `tmp_path` 手造 `.m` / `.exe` / `.bak` 三类文件,断言:`.m` → `file_type=".m"`;`.exe` → 抛 `FileTypeNotAllowedError`;`.bak` → `file_type="other"`(灰名单)
   - [ ] `classify_extension` 单测:每个边界值(空字符串、无点、大小写、白名单成员、黑名单成员、灰名单成员)
 - [ ] **`adapters/parser/__init__.py` 扩展**:追加 `safe_extract` / `classify_files` 到 `__all__`
 - [ ] **`adapters/parser/README.md` 更新**:追加 4 个新模块的一句话职责 + 用法示例
@@ -856,7 +856,7 @@ out = fixture_dir / "total_uncompressed_exceeds_cap.zip"
 chunk = os.urandom(64 * 1024)  # 避免压缩比闸先触发
 with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zf:
     for i in range(24):
-        zf.writestr(f"data/part_{i:03d}.bin", chunk)
+        zf.writestr(f"data/part_{i:03d}.dat", chunk)
 # 测试时把 config.max_total_uncompressed_mb 覆盖为 1
 # 单文件 64KB 远小于 20MB(不触发单文件闸)
 # 总解压 ~1.5MB 超过 1MB cap(触发总解压闸)
@@ -996,7 +996,7 @@ pytest tests/adapters/parser/test_zip_extractor_unit.py -v
 - 闸 4:加密 entry 拒绝;BZIP2 entry 拒绝;symlink entry 拒绝(用 ZipInfo + external_attr 构造)
 - 闸 5:`../foo` 拒绝;`/abs/path` 拒绝;`C:\foo` 拒绝;`file:ads` 拒绝;`CON.txt` 拒绝;`evil.exe.` 拒绝(尾随点)
 - 闸 6:`a.m` 重复 2 次拒绝;NFC 碰撞拒绝;casefold 碰撞拒绝
-- 闸 7:20MB 单文件通过 / 21MB 拒绝;压缩比 100 通过 / 101 拒绝;`.exe` 拒绝;`.gif` 通过为 "other"
+- 闸 7:20MB 单文件通过 / 21MB 拒绝;压缩比 100 通过 / 101 拒绝;`.exe` 拒绝;`.bak` 通过为 "other"
 
 ### 10. 7 个恶意 zip 集成测试全绿(`test_zip_extractor_errors.py`)
 
