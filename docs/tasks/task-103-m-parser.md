@@ -143,7 +143,7 @@ TASK-101 已建好 `MFile` / `MFunction` / `MParser` 抽象接口 / `MParseError
   - [ ] `MFile.file_path` 填充原始路径
   - [ ] `MFile.raw_code` 用 **bytes-first 策略** 读取(详见"接口契约"小节"2.1 文件读取策略",GPT 二审采纳):`Path.read_bytes()` → 二进制检测 → `utf-8-sig` → `utf-8` → `gbk` → `errors='replace'` 兜底,**优先保住中文注释**。读 `.m` 文件本身**不**违反决策 08——决策 08 禁的是改**已有仓库内部**的文本文件;读用户上传 / 测试集的工程文件是正常 IO
   - [ ] `MFile.file_role` 填充 `"script"` / `"function"` / `"class"`(分类规则详见"接口契约"小节)
-  - [ ] `MFile.functions` 填充 top-level function 列表(每个 `MFunction` 含 `name` / `inputs` / `outputs` / `line_range` / `docstring`)
+  - [ ] `MFile.functions` 填充 top-level function 列表(每个 `MFunction` 含 `name` / `inputs` / `outputs` / `line_range` / `docstring`)。**若 `MFile.file_role == "class"`,`functions` 必须为空列表 `[]`**——MCS 阶段不展开 classdef 内部 methods,详见接口契约 8 节 "classdef 守卫"(GPT round-2 采纳)
   - [ ] `MFile.imports` 填充 `import` 语句的目标列表(如 `["matlab.io.*", "containers.Map"]`)
   - [ ] `MFile.uses_toolbox` 填充启发式识别的 toolbox 列表(基于本文档"接口契约"小节定义的白名单 dict)
 - [ ] **词法预处理**(`_m_lex.py`):
@@ -347,9 +347,9 @@ def read_m_file(m_file_path: str) -> str:
 | 4 | 续行折叠 | `_m_lex` | **变化**(`...\n` 替换为空格,多行合一行) | 字符串已占位,`...` 一定是续行;**必须更新 line_map** |
 | 5 | 结构识别 | `_m_structure` | (在 folded code 上分析) | 此时代码已"纯净",正则和 `end` 嵌套深度计数都可靠 |
 
-**关键约束**:`_m_lex` 模块的预处理函数必须**同时返回 `line_map`**(`processed_line_index → original_line_index` 映射)。步骤 1 把块注释行替换为空行而**不是删除行**,就是为了保住行号;步骤 4 续行折叠会改变行数,必须更新映射。
+**关键约束**(GPT 二审 round-2 升级:line_map 是 tuple 形态):`_m_lex` 模块的预处理函数必须**同时返回 `line_map`**,类型是 `dict[int, tuple[int, int]]`(`processed_line → (original_start_line, original_end_line)`,1-based)。步骤 1 把块注释行替换为空行而**不是删除行**,就是为了保住行号;步骤 4 续行折叠会让一个 processed line 覆盖多个原始行,**必须用 tuple 表达这种 "1 → N" 的覆盖关系**——单一 int 映射会丢失续行 function 签名的起始行号信息(详见接口契约 5.1 节"line_map 必须是 tuple,不是单一 int")。
 
-`_m_structure::extract_functions` 接受 `(folded_code, line_map)`,内部识别出 function 的 folded 行号后,通过 `line_map` 翻译回原始行号填进 `MFunction.line_range`。详见接口契约第 5 节"function 块提取规则"。
+`_m_structure::extract_functions` 接受 `(folded_code, line_map, original_lines)`:在 folded 上识别 function 起止 → 通过 line_map 翻译回原始行号填 `MFunction.line_range` → **从 `original_lines` 提取 docstring**(不能从 folded,因为 % 已剥光)。详见接口契约第 5 节"function 块提取规则"。
 
 #### 坑 1:单行注释 `%`
 
@@ -541,12 +541,13 @@ def classify_file_role(preprocessed_code: str) -> str:
 - 文件以 `function name` 开头但后面跟 `end`(单 function 文件)→ `"function"`
 - 文件以 `function name` 开头但后面又有 top-level 语句(MATLAB R2016b+ 允许 script 文件含 local function,但 local function 不能在 script 顶部)→ **应该判 `"function"`**,因为第一个 token 是 `function`
 
-### 5. function 块提取规则(GPT 二审采纳:line_map 行号回填)
+### 5. function 块提取规则(GPT 二审采纳:line_map 行号回填 + docstring 来源)
 
 ```python
 def extract_functions(
     preprocessed_code: str,
-    line_map: dict[int, int],  # processed_line_index -> original_line_index
+    line_map: dict[int, tuple[int, int]],  # processed_line -> (original_start, original_end),1-based
+    original_lines: list[str],              # 原始 .m 文件按行切分(1-based 索引,index 0 留空或填 "")
 ) -> list[MFunction]:
     """提取 top-level function 列表。
 
@@ -555,48 +556,113 @@ def extract_functions(
     3. 从 function 行向下追踪 `end` 配对(用坑 6 的嵌套深度启发),
        找到对应的块结束行
     4. **仅保留 top-level function**(不在另一个 function 内部)
-    5. 提取 docstring:function 行下方第一段连续 `%` 注释,
-       跳过 arguments 块(若存在)
+    5. 提取 docstring:**从 `original_lines` 中提取**(GPT round-2 采纳)——
+       function 起始行的原始行号 + 1 开始,跳过 arguments 块(若存在),
+       找第一段连续 `%` 注释。**绝对禁止**从已剥离单行注释的 preprocessed code
+       提取 docstring,否则所有 docstring 都会是 `None`(因为 % 行已经被剥光了)
     6. **`line_range` 必须用原始文件行号**:processed_line_index 通过
-       `line_map` 翻译回 original_line_index 填入 `MFunction.line_range`,
-       **绝对禁止**直接使用 folded code 的行号(GPT 二审指出的真实漏洞)
+       `line_map` 翻译回 (original_start, original_end) 填入 `MFunction.line_range`,
+       **绝对禁止**直接使用 folded code 的行号
 
     Returns:
         list[MFunction]
     """
 ```
 
-**关键纪律**(GPT 二审采纳):
+**关键纪律**(GPT 二审 round-2 采纳:line_map 形态升级 + docstring 来源):
 
-`_m_lex` 模块的预处理流程(详见接口契约 3 节"5 步顺序")会**改变行数**——尤其是步骤 5 续行折叠会把多行 `...` 表达式合成一行。如果 `extract_functions` 直接用 folded code 的行号填 `MFunction.line_range`,就会出现:
+#### 5.1 line_map 必须是 tuple,不是单一 int
+
+`_m_lex` 模块的预处理流程(详见接口契约 3 节"5 步顺序")步骤 4 续行折叠会把**多行 `...` 表达式合成一行**。这意味着**一个 processed line 可能源自原始代码的多行**,单一 `dict[int, int]` 不够用,**必须**是 `dict[int, tuple[int, int]]`(processed line → 原始起始行 + 原始结束行)。
+
+举例:
 
 ```
-原始 .m 文件:
-  10: function y = f(x, ...
-  11:               y, z)
-  12:    % docstring
-  13:    y = x + z;
-  14: end
+原始 .m 文件(1-based):
+  10: function [a, b] = longFunc(x, ...
+  11:                            y, ...
+  12:                            z)
+  13:    % docstring
+  14:    a = x + y + z;
+  15:    b = x * y;
+  16: end
 
 folded code(行号被压缩):
-  10: function y = f(x, y, z)
-  11:    % docstring
-  12:    y = x + z;
-  13: end
+  1:  function [a, b] = longFunc(x, y, z)   ← 源自原始 10-12 行
+  2:     % docstring                        ← 源自原始 13 行
+  3:     a = x + y + z;                     ← 源自原始 14 行
+  4:     b = x * y;                         ← 源自原始 15 行
+  5:  end                                   ← 源自原始 16 行
 
-错误做法(直接用 folded 行号):MFunction.line_range == (10, 13)  ← 错!
-正确做法(经 line_map 回填):  MFunction.line_range == (10, 14)  ← 对!
+line_map(1-based,tuple 形态):
+  {1: (10, 12), 2: (13, 13), 3: (14, 14), 4: (15, 15), 5: (16, 16)}
+
+function 起始 processed_line=1,line_map[1] = (10, 12),取 [0]=10 作为起始
+function 结束 processed_line=5,line_map[5] = (16, 16),取 [1]=16 作为结束
+MFunction.line_range == (10, 16)  ← 正确!
 ```
 
-单元测试至少覆盖一个 case:**含 `...` 续行的多行 function 签名**,验证 `line_range[1]` 等于原始文件中 `end` 关键字所在行号,**不是** folded 后的行号。
+如果用旧的 `dict[int, int]` 单一映射,这条 function 会被错误填成 `line_range = (10, 16)` 或 `(12, 16)` 之类——**起始行号丢失了原始 `function` 关键字所在的真正第一行**。
 
-`_m_lex` 模块输出契约建议:
+#### 5.2 docstring 必须从 original_lines 提取(GPT round-2 提醒的真实陷阱)
+
+预处理 5 步顺序的步骤 3 会**剥掉所有单行 `%` 注释**。如果你在 folded code 上找 docstring,会发现 function 行下面**所有 `%` 注释都没了**——所有 docstring 都会是 `None`。
+
+正确做法:
 
 ```python
-def preprocess(raw_code: str) -> tuple[str, dict[int, int]]:
+def _extract_docstring(
+    original_lines: list[str],
+    function_start_original_line: int,
+) -> str | None:
+    """从原始文件行中提取 docstring。
+
+    Args:
+        original_lines: 原始 .m 按行切分,1-based(index 0 为占位)
+        function_start_original_line: function 关键字所在原始行号(1-based)
+
+    Returns:
+        docstring 字符串(多行连续 % 注释拼接,去掉 % 和前导空白),或 None
+    """
+    # 从 function 行 + 1 开始往下扫
+    i = function_start_original_line + 1
+    # 跳过 arguments 块(如果存在)
+    if i < len(original_lines) and original_lines[i].strip().startswith('arguments'):
+        # 找到对应 end,跳过整个 arguments 块
+        ...
+    # 跳过空行
+    while i < len(original_lines) and original_lines[i].strip() == '':
+        i += 1
+    # 收集连续 % 注释
+    doc_lines = []
+    while i < len(original_lines):
+        line = original_lines[i].strip()
+        if line.startswith('%') and not line.startswith('%{') and not line.startswith('%%'):
+            doc_lines.append(line.lstrip('%').strip())
+            i += 1
+        else:
+            break
+    return '\n'.join(doc_lines) if doc_lines else None
+```
+
+#### 5.3 单元测试硬要求
+
+单元测试至少覆盖以下两个 case:
+
+- **case A**:含 `...` 续行的多行 function 签名,验证 `line_range[0]` 等于原始 `function` 关键字所在行号,`line_range[1]` 等于原始 `end` 所在行号
+- **case B**:function 行下方有 docstring 注释,验证 `docstring` 字段非 None 且内容为原始注释文本(去掉 `%` 前缀)。如果 Codex 把 docstring 从 preprocessed code 提取,这个 case 会失败
+
+#### 5.4 `_m_lex` 模块输出契约
+
+```python
+def preprocess(raw_code: str) -> tuple[str, dict[int, tuple[int, int]]]:
     """返回 (folded_code, line_map)。
 
-    line_map[i] 是 folded_code 第 i 行(0-indexed)对应的原始 raw_code 行号(0-indexed)。
+    line_map[i] = (orig_start, orig_end),都是 1-based 行号:
+      - i 是 folded_code 中的行号
+      - orig_start / orig_end 是原始 raw_code 中,该 processed 行所覆盖的起始 / 结束行
+      - 单行情况下 orig_start == orig_end
+      - 续行折叠后 orig_start < orig_end
     """
 ```
 
@@ -725,6 +791,33 @@ def detect_toolboxes(preprocessed_code: str) -> list[str]:
 ```
 
 **已知缺陷**:白名单覆盖不全,真实 MATLAB 工程可能用很多 toolbox 函数本白名单未列(如 Image Processing / Symbolic Math 等)。**本 Task 接受这个缺陷**,验收只检查"命中的 toolbox 必须正确",不要求"必须命中所有应该命中的 toolbox"。Phase 2 可扩展白名单。
+
+### 7.1 classdef 守卫(GPT round-2 采纳:测试集 0 classdef,必须靠实现守住)
+
+测试集 4 个工程 0 个 classdef 文件,所以**真实工程测试无法守住 classdef 处理正确性**——必须靠实现层 short-circuit + 单元测试守住。
+
+**实施纪律**:`MParserImpl.parse()` 中,**必须在调用 `extract_functions()` 之前先检查 `file_role`**:
+
+```python
+def parse(self, m_file_path: str) -> MFile:
+    # ... 前面词法预处理略 ...
+    role = classify_file_role(folded)
+    if role == "class":
+        # classdef short-circuit:不展开 methods,functions 直接置空
+        funcs: list[MFunction] = []
+    else:
+        funcs = extract_functions(folded, line_map=line_map, original_lines=original_lines)
+    # ... 后面组装 MFile 略 ...
+```
+
+**为什么需要这个守卫**:如果 `extract_functions()` 无脑扫所有 `^\s*function` 行,classdef 内 methods 块里的 `function y = run(obj, x)` 会被当成 top-level function 提取出来,然后 `MFile.functions` 里就出现了一个不该有的 `MFunction(name="run", ...)`,污染下游 ProjectGraph 构建。
+
+实施有两种选择(详见 GPT round-2 反馈):
+
+- **选项 A(推荐,MCS 阶段更简单)**:在 `m_parser.py` 主入口做 short-circuit,如上代码所示
+- **选项 B**:在 `_m_structure.extract_functions()` 内部维护 classdef 嵌套栈,深度 > 0 时跳过 function。**实现复杂,本 Task 不必这么做**
+
+验收第 7 项单元测试已加 classdef 守卫断言(`file_role == "class"` 且 `functions == []`),即使 methods 块内有 function 也不允许提取。
 
 ### 8. 11 个 .m 文件预期分类矩阵(本 Task **核心验收依据**)
 
@@ -911,6 +1004,8 @@ pytest tests/adapters/parser/test_m_parser_unit.py tests/adapters/parser/test_m_
 
 单元测试至少覆盖以下场景(每个一条以上测试用例):
 
+**词法预处理**:
+
 - [ ] 块注释 `%{ %}` 独占行识别(剥离后不影响后续解析)
 - [ ] 块注释 `%{ %}` 非独占行不识别为块注释(降级为单行注释)
 - [ ] 单行注释 `%` 剥离(字符串内 `%` 不剥离)
@@ -920,17 +1015,61 @@ pytest tests/adapters/parser/test_m_parser_unit.py tests/adapters/parser/test_m_
 - [ ] 双引号字符串 `"..."` 识别
 - [ ] `'` 转置 vs 字符串区分(至少 3 个 case:`A'` 转置、`'hello'` 字符串、`[A B]'` 转置)
 - [ ] `end` 块结束 vs 数组索引区分(至少 2 个 case:`A(end)` 索引、`if x; ...; end` 块结束)
+
+**`line_map` 形态(GPT round-2 采纳)**:
+
+- [ ] `line_map` 类型是 `dict[int, tuple[int, int]]`,不是 `dict[int, int]`(可写一个直接断言 `line_map` 返回值类型的测试)
+- [ ] **续行折叠后 line_map 正确**:输入一个含 `function y = f(x, ...\n            z)\n y=x+z;\n end` 的 .m,验证 folded line 1 的 `line_map[1] == (1, 2)`(覆盖原始 1-2 行),`line_map` 后续行依次推
+
+**结构提取**:
+
 - [ ] `function` 签名 5 种形式(每种至少一个 case)
 - [ ] `arguments` 块识别(在 docstring 提取时被跳过)
 - [ ] `file_role` 分类 3 种:script / function / class(每种至少一个 case)
 - [ ] top-level function 提取(单 function 文件 / 多 local function 文件)
 - [ ] nested function 不提取(只识别 top-level)
 - [ ] anonymous function 不提取(`f = @(x) x.^2;` 不进 functions list)
-- [ ] docstring 提取(function 行下方第一段连续 `%`,跳过 `arguments` 块)
+- [ ] **续行 function 签名的 `line_range` 正确**(GPT round-2 采纳):输入 `function y = f(x, ...\n            z)\n y=x+z;\n end`(原始 4 行),验证 `MFunction.line_range == (1, 4)`,即起始等于原始 `function` 行号,结束等于原始 `end` 行号;**不是** folded 后的 (1, 3)
+- [ ] **docstring 提取从原始行**(GPT round-2 采纳):输入 `function y = f(x)\n  % This is the doc\n  y = x+1;\n end`,验证 `MFunction.docstring` 非 None 且内容含 "This is the doc"。如果 Codex 从 preprocessed code 提取(% 行已被剥光),这个 case 会失败
+- [ ] 单 function 签名解析失败时跳过(不影响其他 function,且**不**在 `MFile` 任何字段汇报)
+
+**classdef 守卫(GPT round-2 采纳:测试集 0 classdef,必须靠 unit test 守住)**:
+
+- [ ] classdef 文件:`file_role == "class"` 且 `functions == []`,**即使** methods 块内有 `function` 行也**不**提取。输入示例:
+  ```matlab
+  classdef MyClass
+      methods
+          function y = run(obj, x)
+              y = x + 1;
+          end
+      end
+  end
+  ```
+  断言 `mfile.file_role == "class"` 且 `mfile.functions == []`(空列表,**不是** `[MFunction(name="run", ...)]`)
+- [ ] classdef 文件含多个 method 块(`methods (Static)` / `methods (Access = private)` 等),验证 `functions == []`
+
+**imports / toolbox 启发式**:
+
 - [ ] `import pkg.Class` 识别
 - [ ] `import pkg.*` 识别
-- [ ] `uses_toolbox` 启发式识别(至少覆盖 Control System / Signal Processing / DSP 三个工具箱各一例)
-- [ ] 单 function 签名解析失败时跳过(不影响其他 function)
+
+**toolbox 高置信命中样例(GPT round-2 采纳,每个 toolbox 至少 1 例)**:
+
+- [ ] Control System:`sys = tf([1], [1 2 1]);` → `uses_toolbox` 含 `"Control System Toolbox"`
+- [ ] Signal Processing:`[pxx, f] = pwelch(x);` → `uses_toolbox` 含 `"Signal Processing Toolbox"`
+- [ ] Simulink:`sim("modelName");` → `uses_toolbox` 含 `"Simulink"`
+- [ ] DSP System:`lms = dsp.LMSFilter(...);` → `uses_toolbox` 含 `"DSP System Toolbox"`
+- [ ] Communications:`y = qammod(data, 16);` → `uses_toolbox` 含 `"Communications Toolbox"`
+- [ ] Optimization:`opts = optimoptions("fmincon");` → `uses_toolbox` 含 `"Optimization Toolbox"`
+- [ ] System Identification:`data = iddata(y, u, Ts);` → `uses_toolbox` 含 `"System Identification Toolbox"`
+- [ ] Fixed-Point Designer:`x = fi(0.5, 1, 16, 12);` → `uses_toolbox` 含 `"Fixed-Point Designer"`
+
+**toolbox 误报排除样例(GPT round-2 采纳,关键)**:
+
+- [ ] `tf = 0.01;` → `uses_toolbox` **不**含 Control System Toolbox(变量名 `tf` 不是函数调用)
+- [ ] `filter = 3;` → `uses_toolbox` **不**含 Signal Processing(`filter` 此处是变量名;但注意:`filter` 已经从白名单删除,所以这条本来就不该命中)
+- [ ] `my_tf_value = 1;` → `uses_toolbox` **不**含 Control System(子串包含但不是 token 边界)
+- [ ] `fi = 5;` → `uses_toolbox` **不**含 Fixed-Point Designer(变量名 `fi`,不是 `fi(...)` 调用)
 
 ### 8. 11 个 .m 真实工程测试矩阵(**全部 PASSED**)
 
@@ -969,8 +1108,8 @@ pytest tests/adapters/parser/test_m_parser_real.py -v
 - [ ] 每个 `MFile.file_path` 非空且对得上输入路径
 - [ ] 每个 `MFile.raw_code` 非空(`len(raw_code) > 0`,因为 11 个 .m 都不是空文件)
 - [ ] 每个 `MFile.imports` 是 `list[str]`(可空)
-- [ ] 每个 `MFile.uses_toolbox` 是 `list[str]`(可空)
-- [ ] `uses_toolbox` 至少在 11 个 .m 中**有 1 个文件命中至少 1 个 toolbox**(因为 `_data.m` / `Example.m` 通常调用 Control System / Simulink 等函数)——这一条是合理性 sanity check,不要求精确数量
+- [ ] 每个 `MFile.uses_toolbox` 是 `list[str]`(可空,**类型正确即可,不要求命中**)
+- [ ] **不**要求"11 个 .m 中至少 1 个文件命中至少 1 个 toolbox"——白名单变保守后,实际可能因白名单覆盖不全而完全不命中,这是 toolbox 启发式的已知缺陷,**不**反映 parser 错误。Toolbox 命中精度由单元测试(验收第 7 项的高置信样例 + 误报样例)覆盖,**不在真实工程测试中硬断言命中**(GPT round-2 采纳)
 
 **真实工程验收 = 11 / 11 文件全部通过。任一文件未通过,本 Task 打回返工。**
 
@@ -1219,10 +1358,10 @@ end
 
 白名单 dict(详见接口契约第 7 段)只覆盖常见 toolbox 的常见函数。真实 MATLAB 工程可能用:
 
-- 不在白名单的 toolbox(如 Mapping Toolbox / Optimization Toolbox / Image Processing Toolbox)
-- 已知 toolbox 的不常见函数(如 Control System 的 `hsvplot`)
+- 不在白名单的 toolbox(如 Mapping Toolbox / Image Processing Toolbox / Symbolic Math)
+- 已知 toolbox 的不常见函数
 
-**本 Task 接受这个缺陷**,验收 sanity check 只要求"11 个 .m 中至少有 1 个文件命中至少 1 个 toolbox"。
+**本 Task 接受这个缺陷**(GPT round-2 采纳):**不**把"真实 11 个 .m 至少 1 个命中"作为硬验收门槛——白名单保守可能导致实际不命中,但这**不**反映 parser 错误。Toolbox 检测精度由单元测试(验收第 7 项)用高置信样例和误报样例守住,真实工程测试只验证 `uses_toolbox` 是 `list[str]` 类型正确、无异常。
 
 Phase 2 可以扩展白名单,或改用更精确的方法(扫 MATLAB 标准 doc 自动生成全量映射),**不在本 Task 范围**。
 
@@ -1250,6 +1389,12 @@ Phase 2 可以扩展白名单,或改用更精确的方法(扫 MATLAB 标准 doc 
 - 不要为了"对称美"而在本 Task 加 `parse_warnings` 字段——那是改契约,违反"单一 Task 单一职责"。如果**强烈认为**需要这个字段,**停手问 PM**,走宪法修订流程
 
 **关于下游缺料的担忧(GPT 二审采纳)**:你可能会担心"跳过 function 不报告,下游 TASK-105 / TASK-107 缺料怎么办"。**不用担心**——架构总览第 2 节明确,`ProjectGraph` dataclass 有 `unresolved_symbols: list[str]` 字段(TASK-101 已建,见 `core/domain/project_graph.py`),专门收纳"扫到了但解析不到定义"的符号。TASK-105 做调用关系分析时,从 `MFile.raw_code` 扫到但 `MFile.functions` 里没有的函数调用,就归入 `unresolved_symbols`。也就是说,**架构层面已经有正确位置承接这类缺料,本 Task 不需要在 `MFile` 上加任何 warning 字段**。
+
+**04 工程规范的 `parse_warnings` 是通用失败隔离原则,本 Task 局部例外**(GPT round-2 强调):
+
+`docs/04_ENGINEERING_STANDARDS.md` 第 8.4 节"失败隔离"提到 `parse_warnings` / `unresolved_symbols` 作为**通用失败隔离原则**(适用于多个 parser)。但对 `MFile` 而言,**本 Task 以 TASK-101 契约为准**——`MFile` 没有 `parse_warnings` 字段,所以可恢复问题**不在 parser 输出中报告**。这是契约差异导致的**局部例外**,不是设计缺陷。后续未解析符号由 `ProjectGraph.unresolved_symbols` 在 TASK-107 层承接,各得其所。
+
+**Codex 实施时若觉得"为了符合 04 第 8.4 节要给 MFile 补 parse_warnings"**——错了。04 是通用原则,TASK-101 是具体契约,**契约 > 通用原则**(冲突时以宪法/契约为准,详见 `docs/01_PROJECT_CONSTITUTION.md` 第 15 节)。停手问 PM 而不是默默改契约。
 
 ### 风险 11:测试 .m 文件路径解析
 
@@ -1397,12 +1542,13 @@ from adapters.parser._m_dependencies import extract_imports, detect_toolboxes
 
 - **第 1 步**:`.m` 文件用 **bytes-first** 策略读取,优先保住中文注释(GBK 兼容)
 - **第 2-6 步**:按"接口契约 → 2.1 / 3. 预处理 5 步顺序"严格执行,不许颠倒
-- **整个过程维护 `line_map`**:`processed_line_index -> original_line_index`,用于回填 `MFunction.line_range`
+- **整个过程维护 `line_map`**:`processed_line -> (original_start_line, original_end_line)`(GPT round-2 采纳:tuple 形态而非单 int),用于回填 `MFunction.line_range`
 
 ```python
 def parse(self, m_file_path: str) -> MFile:
     # 1. 读文件(bytes-first,详见接口契约 2.1)
     raw = read_m_file(m_file_path)   # utf-8-sig → utf-8 → gbk → replace
+    original_lines = raw.splitlines()   # 用于 docstring 提取(不能从 preprocessed code 提取)
 
     # 2. 块注释剥离(保留行号:把 %{...%} 行替换为空行,不删行)
     after_block, line_map_1 = strip_block_comments_keep_lines(raw)
@@ -1414,12 +1560,24 @@ def parse(self, m_file_path: str) -> MFile:
     after_line = strip_line_comments(placeheld)
 
     # 5. 续行折叠(此时字符串已占位,... 一定是续行)
-    #    折叠会改变行数,line_map_2 记录 folded -> original 的映射
+    #    折叠会改变行数,line_map_2 记录 folded -> (orig_start, orig_end) 的 tuple 映射
     folded, line_map_2 = fold_continuations_with_map(after_line, line_map_1)
 
-    # 6. 在 folded 上做结构分析,传 line_map_2 回填原始行号
+    # 6. 在 folded 上做结构分析
     role = classify_file_role(folded)
-    funcs = extract_functions(folded, line_map=line_map_2)
+
+    # 6.1 classdef short-circuit(GPT round-2 采纳)
+    #     测试集 0 classdef,Codex 必须在这里短路,否则 methods 块内 function 会被误提
+    if role == "class":
+        funcs: list[MFunction] = []
+    else:
+        # docstring 必须从 original_lines 提取(不是从 folded!),否则所有 docstring 都会是 None
+        funcs = extract_functions(
+            preprocessed_code=folded,
+            line_map=line_map_2,
+            original_lines=original_lines,
+        )
+
     imports = extract_imports(folded)
     toolboxes = detect_toolboxes(folded)
 
@@ -1434,23 +1592,47 @@ def parse(self, m_file_path: str) -> MFile:
     )
 ```
 
-**关键约束**:
+**关键约束**(GPT round-2 强化):
 
 - `MFile.raw_code` 必须是**未预处理**的原始字符串(用户可能要看到原代码做对照,不能给它"剥过注释的"版本)
-- `MFunction.line_range` **绝对禁止**用 folded code 的行号——必须经 `line_map` 回填原始行号
+- `MFunction.line_range` **绝对禁止**用 folded code 的行号——必须经 `line_map` 回填:起始用 `line_map[folded_func_line][0]`,结束用 `line_map[folded_end_line][1]`
+- `MFunction.docstring` **绝对禁止**从 preprocessed code 提取——必须从 `original_lines` 提取。原因:预处理步骤 4 把所有 `%` 行剥光了,从 folded 找永远找不到 docstring,所有 docstring 会是 `None`
 - 步骤 2 块注释剥离时,**把整行替换为空行(`\n`)而不是删除行**,这样行号不变,line_map 处理简化
+- **classdef short-circuit**:`role == "class"` 时 `funcs = []`,不走 `extract_functions`,否则 methods 块内 `function` 会被误提
 
-### 9. line_range 行号映射纪律(GPT 二审采纳)
+### 9. line_range / docstring 来源纪律(GPT 二审 round-2 强化)
 
-这是最容易出 bug 的地方。Codex 在写 `_m_lex` 模块时,**步骤 2 / 5 必须都更新 line_map**:
+这是最容易出 bug 的地方,Codex 写 `_m_lex` / `_m_structure` 模块时,**两条铁律**:
 
-- 步骤 2(块注释剥离):把 `%{ ... %}` 块内每行替换为空字符串(保留换行符),行号不变 → line_map 是 identity
-- 步骤 3 / 4(字符串占位、单行注释剥离):**逐字符替换,不改变行数** → line_map 不变
-- 步骤 5(续行折叠):`...\n` 替换为空格 → **行数减少**,必须更新 line_map
+**(a) `line_map` 必须是 `dict[int, tuple[int, int]]`**(processed line → 原始起始行 + 结束行)
 
-`_m_structure.py::extract_functions` 接受的参数应该是 `(folded_code, line_map)`,函数内部用 line_map 把 folded 行号翻译回原始行号填进 `MFunction.line_range`。
+预处理 5 步顺序里:
 
-单元测试至少覆盖一个 case:**含 `...` 续行的多行 function 签名**,验证 `line_range[0]` 等于原始 `function` 关键字所在行,**不是** folded 后的行号。
+- 步骤 1(块注释剥离):把 `%{ ... %}` 块内每行替换为空字符串(保留换行符),行号不变 → line_map 单行情况 `(i, i)`
+- 步骤 2 / 3(字符串占位、单行注释剥离):**逐字符替换,不改变行数** → line_map 不变
+- 步骤 4(续行折叠):`...\n` 替换为空格 → **行数减少**,**多行原始 → 单行 processed**,line_map 必须用 tuple 表达"这一行覆盖原始 (start, end)"
+
+**(b) `MFunction.docstring` **必须**从 `original_lines` 提取,不是 folded code**
+
+预处理步骤 3 会**剥光所有 `%` 行**。如果你在 folded code 上找 docstring,会发现 function 行下面没有任何 `%` 注释——所有 docstring 都会是 `None`。
+
+正确做法:`extract_functions()` 在 folded 上识别出 function 起始/结束行,**通过 `line_map` 翻译回原始行号**,然后**从 `original_lines`** 找 function 起始行 + 1 之后的连续 `%` 注释作为 docstring。
+
+`_m_structure.py::extract_functions` 签名:
+
+```python
+def extract_functions(
+    preprocessed_code: str,                       # folded code
+    line_map: dict[int, tuple[int, int]],         # processed -> (orig_start, orig_end)
+    original_lines: list[str],                    # 原始 .m 按行切分
+) -> list[MFunction]:
+    ...
+```
+
+单元测试覆盖(详见验收第 7 项,GPT round-2 强制):
+
+- 含 `...` 续行的多行 function 签名 → `line_range[0]` 等于原始 `function` 行,`line_range[1]` 等于原始 `end` 行
+- function 行下方有 `%` docstring 注释 → `MFunction.docstring` 非 None,内容含原文。**如果 Codex 从 preprocessed code 提取,这个 case 必失败**——这就是测试用来守住实施纪律的
 
 ### 10. 改 `docs/03_TASK_INDEX.md` 必须按决策 08
 
@@ -1491,7 +1673,7 @@ PM 在 GitHub 网页手动创建 PR。CI 自动触发,绿了之后 PM 把 Codex 
 
 ---
 
-**版本**:Task 文档 v1.1
+**版本**:Task 文档 v1.2
 **作者**:Claude(架构师,第五任)
 **日期**:2026-06-02
 **修订记录**:
@@ -1506,6 +1688,14 @@ PM 在 GitHub 网页手动创建 PR。CI 自动触发,绿了之后 PM 把 Codex 
   - 验收标准第 9 项错误处理测试补两条:UTF-8 BOM 自动剥离 / GBK 文件中文注释保留
   - 给 Codex 提示第 8 条"整体解析流程伪代码"重写:bytes-first + 5 步预处理 + line_map 回填
   - 给 Codex 提示新增第 9 条"line_range 行号映射纪律"
+- v1.2(2026-06-02 GPT 二审 round-2 采纳 5 项):
+  - **line_map 形态升级**:`dict[int, int]` → `dict[int, tuple[int, int]]`(processed → 原始起始/结束行 tuple)。续行折叠后一个 processed line 可覆盖多个原始行,单一 int 映射会丢失续行 function 签名的起始行号(GPT round-2 收口 1)
+  - **docstring 来源约束**:docstring 必须从 `original_lines` 提取,**不**能从 preprocessed code 提取——预处理步骤 3 会剥光所有 `%` 行。`extract_functions` 签名加 `original_lines` 参数(GPT round-2 收口 1 延伸)
+  - **GBK 测试断言改硬**:验收第 9 项 GBK 用例从"`errors='replace'` 容错"改为"bytes-first 命中 GBK 解码,`raw_code` **正确保留中文**,不是 `\ufffd` 替换字符";风险 7 同步删旧口径(GPT round-2 收口 2)
+  - **风险 10 改硬**:明确 04 第 8.4 节 `parse_warnings` 是通用原则,本 Task 因 TASK-101 契约不同而**局部例外**;契约 > 通用原则(GPT round-2 收口 3)
+  - **toolbox 真实工程验收去硬门槛**:删除验收第 8 项"11 个 .m 至少 1 个命中至少 1 个 toolbox"硬断言,改为类型正确即可。Toolbox 命中精度移到单元测试守(8 个高置信样例 + 4 个误报排除样例)(GPT round-2 收口 4)
+  - **classdef 守卫**:测试集 0 classdef,真实工程拦不住。新增"接口契约 7.1 classdef 守卫"小节 + 主入口伪代码 short-circuit + 验收第 7 项单元测试守住(`file_role == "class"` 时 `functions == []`,即使 methods 块内有 `function` 行也不提取)(GPT round-2 收口 5)
+
 **关联宪法版本**:v2.1(冻结)
 **关联决策**:`docs/decisions/20260601-04-*.md` / `20260601-05-*.md` / `20260601-06-*.md` / `20260601-07-*.md` / `20260602-08-*.md`
 **关联 Task**:依赖 TASK-101(契约) / TASK-003(测试集) / TASK-102(同目录文件,不动);下游 TASK-105 / TASK-107
