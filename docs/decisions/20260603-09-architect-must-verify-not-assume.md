@@ -108,6 +108,14 @@ Makefile target 与 ci.yml steps 经常漂移(实施时一方更新另一方未�
 | 7 | task-104 v1.0 § 7.6 fixture 7 | `.bin` 蓝图与 DENY 黑名单冲突 | 纪律 5 | Codex 写 fixture 7 测试时矛盾 |
 | 8 | TASK-104 review 命令 | 用 `make check` 替代 CI 实际步骤,漏 `ruff format --check` | 纪律 7 | CI failed: 3 files would be reformatted |
 | 9 | 第七任交接文案"当前进度"段 | 凭印象写"TASK-002 状态是 🔍",未 view 03 索引 | 纪律 1 + 8 | 第七任 onboard 实地核查时抓住 |
+| 10 | task-106 v1.1 line 117 / 04 § 6 line 267 | 选 `openai==1.54.0` 凭 04 § 6 工程规范模板,没核查与 transitive deps(httpx 0.28.x)兼容性。模板本身锁定的版本号在写时已过期 1.5 年(openai 1.55.3 已修复 proxies bug) | 纪律 6 | Codex 实施时抓:`OpenAI()` 初始化抛 `TypeError: Client.__init__() got an unexpected keyword argument 'proxies'`(冲突 2) |
+| 11 | task-106 v1.1 § 5 line 188-190 | 改 § 7.1 构造函数签名为 `api_key: str` 必填后,没全文 grep 同步 § 5 测试 case 描述,三处仍写 `DeepSeekTextProvider()` / `DeepSeekTextProvider(model=...)` 无 api_key | 纪律 5 | Codex 派活时抓(冲突 1) |
+| 12 | task-106 v1.1 § 5 line 170 / § 7.1 line 249 | 写"用 loguru 记录元数据"时,凭 04 § 6 模板假设 loguru 已在仓库,实际 TASK-001 / 002 / 101 / 102 / 103 / 104 / 105 / 108 全部没人加;同根因反例 10(凭 04 § 6 模板做"已加"假设) | 纪律 1 / 6 同源 | Codex 实施时抓:`ModuleNotFoundError: No module named 'loguru'`(冲突 3) |
+| 13 | 第八任 onboarding 开场白第 99-103 行 | 凭 Task 名字面 "ProjectGraph + TeachingUnit 基础构建器" 描述 TASK-107 范围,没核查 03 索引 line 99-103 验收点只列 ProjectGraph;与 02 § 2 "TeachingUnit 才用 LLM" + 03 索引 "本 Task 不调用 LLM" 三处约束的唯一一致解读是仅做 ProjectGraph | 纪律 1 | 第八任 onboard 自审抓(实地核查 03 索引时发现) |
+| 14 | TASK-107 设计阶段 disambiguate 策略 | 凭印象认为 task-105 暴露多候选 `dict[name, list[relpath]]` 可供 TASK-107 消费做函数级 disambiguate,实际是 `dependency_analyzer.py::_build_function_name_map` 私有 helper(`_` 前缀),跨边界访问违反决策 06(adapter 模块封装) | 纪律 1 | GPT 一审抓(指出 v0.1 料源不支持 function symbol 级,只能文件级 CALLS) |
+| 15 | TASK-107 设计阶段 SUBSYSTEM 节点 | 没核查 `SlxModel.subsystems` 与 `SlxModel.blocks` 的语义重叠 — `block_type == "SubSystem"` 时同一实体同时出现在 `blocks` 列表 + `subsystems` 字典 key。若分别建 BLOCK + SUBSYSTEM 节点会导致 LLM 召回 / RAG 链路上同一实体重复 | 纪律 1 | GPT 一审抓(指出 Subsystem 与 Block 不应双重建模) |
+| 16 | task-107.md § 输出 line 138 | 凭直觉列 `tests/features/__init__.py` 为必须文件,实际 pytest 默认 `--import-mode=prepend` 不需要 namespace package 显式 init。Codex 实施时漏建反而是更简洁的实现,但报告 17 个文件不含此项让 Step B 核查触发疑问 | 纪律 4 | Step B PM 核查发现(`git diff main --stat` 比对 task 文档预期清单) |
+| 17 | 第八任 chore-pr-execution-plan.md § 2 / § 3 / commit 5 | 凭印象写"反例 12-18"假设编号,同时方案另处给了"按 last_n+1 灵活编号"规则,两套指令矛盾;且 `openai==1.54.0` 实际 10 处误数为 9 处 | 纪律 5 / 纪律 4 同源 | Codex 实地 grep 抓住停手抛冲突 |
 
 **共同特征**:每次架构师**有机会**实地核查(view / cat / grep / git ls-files / 看 ci.yml)就能避免,**但没做**。这 8 次踩坑没有任何一次是"知识缺失",全部是"流程缺失"。
 

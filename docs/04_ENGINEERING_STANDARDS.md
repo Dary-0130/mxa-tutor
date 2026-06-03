@@ -262,7 +262,7 @@ fastapi==0.115.4
 uvicorn[standard]==0.32.0
 pydantic==2.9.2
 pydantic-settings==2.6.1
-openai==1.54.0
+openai==1.55.3
 aiosqlite==0.20.0
 loguru==0.7.2
 sentence-transformers==3.3.0
