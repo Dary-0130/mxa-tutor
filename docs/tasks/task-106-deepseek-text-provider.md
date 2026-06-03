@@ -185,9 +185,9 @@ Codex 实施前**必须 `cat requirements-dev.txt` 核查 `pytest-mock` 是否�
   - [ ] `test_server_error_translated_and_retried`:mock 前 2 次 503,第 3 次 200 → 重试 2 次后成功
   - [ ] `test_timeout_translated_and_retried`:mock 前 1 次 `APITimeoutError`,第 2 次 200 → 重试 1 次后成功
   - [ ] `test_unknown_error_translated_to_server_error`:mock 未知异常 → 抛 `LLMServerError`(且 `__cause__` 保留原异常)
-  - [ ] `test_capability_returns_v4_flash_by_default`:`DeepSeekTextProvider()` 默认 → `capability().model_name == "deepseek-v4-flash"`
-  - [ ] `test_capability_returns_v4_pro_when_constructed`:`DeepSeekTextProvider(model="deepseek-v4-pro")` → `capability().model_name == "deepseek-v4-pro"`
-  - [ ] `test_capability_unknown_model_raises_value_error`:`DeepSeekTextProvider(model="invalid")` 在构造时立即抛 `ValueError`(不等到 chat 调用)
+  - [ ] `test_capability_returns_v4_flash_by_default`:`DeepSeekTextProvider(api_key="fake")` 默认 → `capability().model_name == "deepseek-v4-flash"`
+  - [ ] `test_capability_returns_v4_pro_when_constructed`:`DeepSeekTextProvider(api_key="fake", model="deepseek-v4-pro")` → `capability().model_name == "deepseek-v4-pro"`
+  - [ ] `test_capability_unknown_model_raises_value_error`:`DeepSeekTextProvider(api_key="fake", model="invalid")` 在构造时立即抛 `ValueError`(不等到 chat 调用)
   - [ ] `test_no_message_content_logged`:跑一次 chat,**断言 loguru 输出里不包含 messages 原文**(用 `caplog` 或 loguru fixture)
 - [ ] **建集成测试**(`tests/adapters/llm/test_deepseek_integration.py`):
   - [ ] **整个测试文件标记 `@pytest.mark.integration`**,默认跳过(CI 不跑,本地手动 `pytest -m integration` 才跑)
