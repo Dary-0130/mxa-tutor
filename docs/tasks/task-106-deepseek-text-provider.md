@@ -27,7 +27,7 @@
 
 **本 Task 不在 `docs/01_PROJECT_CONSTITUTION.md` 第 5 节"何时找 AI 二审复审"的核心 Task 清单里**(清单:101/102/104/107/205/304),Task 文档完稿后**直接交给 Codex 实施**,不走 GPT 二审。
 
-**本 Task 同时是项目第二个加 runtime 依赖的 Task**(项目第一个是 TASK-108 加的 `pydantic-settings==2.6.1`),本次加 `openai==1.54.0`(04 § 6 工程规范第 265 行模板已列,本 Task 是首次实际入仓)。
+**本 Task 同时是项目第二个加 runtime 依赖的 Task**(项目第一个是 TASK-108 加的 `pydantic-settings==2.6.1`),本次加 `openai==1.55.3`(04 § 6 工程规范第 265 行模板已列,本 Task 是首次实际入仓)。
 
 上下游依赖:
 
@@ -91,7 +91,7 @@
 
 ### 修改文件
 
-- **`requirements.txt`** — TASK-108 已含 `pydantic-settings==2.6.1`,本 Task **新增 1 行** `openai==1.54.0`(**项目第二个 runtime 依赖**,04 § 6 工程规范第 265 行模板已列)
+- **`requirements.txt`** — TASK-108 已含 `pydantic-settings==2.6.1`,本 Task **新增 1 行** `openai==1.55.3`(**项目第二个 runtime 依赖**,04 § 6 工程规范第 265 行模板已列)
 - **`requirements-dev.txt`** — 本 Task **新增 1 行** `pytest-mock==3.14.0`(若 TASK-108 已经加过则跳过;**先 `cat` 核查**)
 - **`adapters/llm/__init__.py`** — TASK-001 建,本 Task **追加** `from .deepseek import DeepSeekTextProvider`,**不动**现有内容(若为空)
 - **`adapters/llm/README.md`** — TASK-001 占位,本 Task **重写**:列出 `DeepSeekTextProvider` 的职责 + 用法示例(5-10 行)
@@ -114,7 +114,7 @@
 **1 个 runtime 依赖**(项目第二个):
 
 ```
-openai==1.54.0
+openai==1.55.3
 ```
 
 **可能 0-1 个 dev 依赖**(取决于 TASK-108 是否已加):
@@ -148,7 +148,7 @@ Codex 实施前**必须 `cat requirements-dev.txt` 核查 `pytest-mock` 是否�
   cat pyproject.toml
   ```
   若发现与本文档"输出"小节描述显著不符,**停手抛冲突给 PM**,不要默默偏离
-- [ ] **追加 `openai==1.54.0` 到 `requirements.txt`**(单行追加,不动现有 `pydantic-settings==2.6.1`)
+- [ ] **追加 `openai==1.55.3` 到 `requirements.txt`**(单行追加,不动现有 `pydantic-settings==2.6.1`)
 - [ ] **核查并必要时追加 `pytest-mock==3.14.0` 到 `requirements-dev.txt`**(若不在)
 - [ ] `pip install -r requirements-dev.txt` 把新依赖装上(本地验证)
 - [ ] **建 `adapters/llm/_deepseek_errors.py`**(详见接口契约 § 7.3):
@@ -560,7 +560,7 @@ def translate_openai_error(exc: Exception) -> LLMError:
 
 **关键设计**:
 
-- **不 import openai SDK 私有异常类**(用 `type(exc).__name__` 字符串匹配)。原因:`openai==1.54.0` 与未来版本的私有异常类名 / 路径可能漂移;duck typing 更稳
+- **不 import openai SDK 私有异常类**(用 `type(exc).__name__` 字符串匹配)。原因:`openai==1.55.3` 与未来版本的私有异常类名 / 路径可能漂移;duck typing 更稳
 - 翻译时**不抛异常**,返回 `LLMError` 实例,由调用方 `raise translated from exc` 保留原异常链
 - 优先级:status_code → 类名 → 字符串关键词 → 兜底
 
@@ -713,7 +713,7 @@ ls adapters/llm/deepseek.py adapters/llm/_deepseek_errors.py tests/adapters/llm/
 grep -nE "^(pydantic-settings|openai)==" requirements.txt
 ```
 
-期望:看到两行,版本号 `pydantic-settings==2.6.1` + `openai==1.54.0`。
+期望:看到两行,版本号 `pydantic-settings==2.6.1` + `openai==1.55.3`。
 
 ### 3. `adapters/llm/__init__.py` 已追加 export
 
@@ -728,7 +728,7 @@ git fetch origin main
 git diff origin/main..HEAD -- requirements.txt
 ```
 
-期望:只看到 `+openai==1.54.0` 一行,无其他新增 / 删除。
+期望:只看到 `+openai==1.55.3` 一行,无其他新增 / 删除。
 
 ### 5. 不修改 TASK-001-105 / 108 已建文件
 
@@ -816,7 +816,7 @@ make check
 
 - PR 标题:`TASK-106: DeepSeek TextProvider 实现`
 - 分支名:`task/TASK-106-deepseek-text-provider`
-- PR 描述按 `docs/04_ENGINEERING_STANDARDS.md` 第 3 节模板,**逐条勾选上面 1-12 项**并简述每项做了什么;**变更摘要必须明示**:本 Task 引入**项目第二个 runtime 依赖** `openai==1.54.0`,transitively 引入 `httpx` / `anyio` 等
+- PR 描述按 `docs/04_ENGINEERING_STANDARDS.md` 第 3 节模板,**逐条勾选上面 1-12 项**并简述每项做了什么;**变更摘要必须明示**:本 Task 引入**项目第二个 runtime 依赖** `openai==1.55.3`,transitively 引入 `httpx` / `anyio` 等
 
 ### 14. 完工报告含 git 三件套(决策 08)
 
@@ -877,7 +877,7 @@ p.write_bytes(data)
 
 ### 风险 2:openai SDK 版本兼容
 
-`openai==1.54.0`(2024 年底版本)对 DeepSeek V4 API 的 `response_format` JSON mode + 基础 chat completions 是支持的。但 V4 特有的 thinking 字段(`reasoning_content`)在 1.54.0 可能未原生支持。
+`openai==1.55.3`(2024 年底版本)对 DeepSeek V4 API 的 `response_format` JSON mode + 基础 chat completions 是支持的。但 V4 特有的 thinking 字段(`reasoning_content`)在 1.54.0 可能未原生支持。
 
 **本 Task 不消费 reasoning_content**,所以无影响。如果 Codex 实施时发现 chat.completions.create 因为 V4 新参数报错,**停手问 PM**,不要单方面升级 openai 版本。
 
@@ -1022,7 +1022,7 @@ CI 跑的 ruff 来自 `requirements-dev.txt` 锁定的 `ruff==0.7.0`(04 § 6 模
 
 1. 切分支 `task/TASK-106-deepseek-text-provider`
 2. `cat adapters/llm/__init__.py adapters/llm/README.md requirements.txt requirements-dev.txt pyproject.toml` 看现状
-3. 追加 `openai==1.54.0` 到 `requirements.txt`
+3. 追加 `openai==1.55.3` 到 `requirements.txt`
 4. 核查并追加 `pytest-mock==3.14.0` 到 `requirements-dev.txt`(若不在)
 5. `pip install -r requirements-dev.txt` 装新依赖
 6. 建 `_deepseek_errors.py`(直接抄 § 7.3)
