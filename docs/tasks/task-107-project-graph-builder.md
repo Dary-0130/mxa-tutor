@@ -1468,5 +1468,5 @@ mypy 命令对齐 CI:`mypy core/ adapters/ features/`。
 **关联宪法版本**:v2.1(冻结)
 **关联决策**:`docs/decisions/20260601-04-*.md`(实现位置)/ `20260601-05-*.md` / `20260601-06-*.md` / `20260601-07-*.md` / `20260602-08-*.md` / `20260603-09-*.md`
 **关联 Task**:依赖 TASK-101(契约源)/ 102 / 103 / 104 / 105(上游产物);下游 TASK-203 / 205 / 305 / 307
-**是否走 GPT 二审**:**一审 1 轮(已通过,12 条建议全采纳)**。本 Task 在宪法 § 5 核心二审清单,但范围从"ProjectGraph + TeachingUnit"缩到"仅 ProjectGraph"后,复杂度降至接近 task-103 / 105 一审级别,PM 拍板降级为一审 1 轮。这条调整记入决策攒账事项第 21 项,待下次决策 chore PR 入仓。
+**是否走 GPT 二审**:**一审 1 轮(已通过,12 条建议全采纳)**。本 Task 在宪法 § 5 核心二审清单,但范围从"ProjectGraph + TeachingUnit"缩到"仅 ProjectGraph"后,复杂度降至接近 task-103 / 105 一审级别,PM 拍板降级为一审 1 轮。**决策依据**:`docs/decisions/20260604-10-task-107-one-round-review.md`(本次 docs chore PR 入仓)。
 **实地核查日期**:2026-06-03(架构师 Codex 协同核查 main 真实代码 + GPT 一审 1 轮)

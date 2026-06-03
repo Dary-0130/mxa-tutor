@@ -27,7 +27,7 @@
 
 **本 Task 不在 `docs/01_PROJECT_CONSTITUTION.md` 第 5 节"何时找 AI 二审复审"的核心 Task 清单里**(清单:101/102/104/107/205/304),Task 文档完稿后**直接交给 Codex 实施**,不走 GPT 二审。
 
-**本 Task 同时是项目第二个加 runtime 依赖的 Task**(项目第一个是 TASK-108 加的 `pydantic-settings==2.6.1`),本次加 `openai==1.54.0`(04 § 6 工程规范第 265 行模板已列,本 Task 是首次实际入仓)。
+**本 Task 同时是项目第二个加 runtime 依赖的 Task**(项目第一个是 TASK-108 加的 `pydantic-settings==2.6.1`),本次加 `openai==1.55.3`(04 § 6 工程规范第 265 行模板已列,本 Task 是首次实际入仓)。
 
 上下游依赖:
 
@@ -91,7 +91,7 @@
 
 ### 修改文件
 
-- **`requirements.txt`** — TASK-108 已含 `pydantic-settings==2.6.1`,本 Task **新增 1 行** `openai==1.54.0`(**项目第二个 runtime 依赖**,04 § 6 工程规范第 265 行模板已列)
+- **`requirements.txt`** — TASK-108 已含 `pydantic-settings==2.6.1`,本 Task **新增 1 行** `openai==1.55.3`(**项目第二个 runtime 依赖**,04 § 6 工程规范第 265 行模板已列)
 - **`requirements-dev.txt`** — 本 Task **新增 1 行** `pytest-mock==3.14.0`(若 TASK-108 已经加过则跳过;**先 `cat` 核查**)
 - **`adapters/llm/__init__.py`** — TASK-001 建,本 Task **追加** `from .deepseek import DeepSeekTextProvider`,**不动**现有内容(若为空)
 - **`adapters/llm/README.md`** — TASK-001 占位,本 Task **重写**:列出 `DeepSeekTextProvider` 的职责 + 用法示例(5-10 行)
@@ -114,7 +114,7 @@
 **1 个 runtime 依赖**(项目第二个):
 
 ```
-openai==1.54.0
+openai==1.55.3
 ```
 
 **可能 0-1 个 dev 依赖**(取决于 TASK-108 是否已加):
@@ -148,7 +148,7 @@ Codex 实施前**必须 `cat requirements-dev.txt` 核查 `pytest-mock` 是否�
   cat pyproject.toml
   ```
   若发现与本文档"输出"小节描述显著不符,**停手抛冲突给 PM**,不要默默偏离
-- [ ] **追加 `openai==1.54.0` 到 `requirements.txt`**(单行追加,不动现有 `pydantic-settings==2.6.1`)
+- [ ] **追加 `openai==1.55.3` 到 `requirements.txt`**(单行追加,不动现有 `pydantic-settings==2.6.1`)
 - [ ] **核查并必要时追加 `pytest-mock==3.14.0` 到 `requirements-dev.txt`**(若不在)
 - [ ] `pip install -r requirements-dev.txt` 把新依赖装上(本地验证)
 - [ ] **建 `adapters/llm/_deepseek_errors.py`**(详见接口契约 § 7.3):
@@ -185,9 +185,9 @@ Codex 实施前**必须 `cat requirements-dev.txt` 核查 `pytest-mock` 是否�
   - [ ] `test_server_error_translated_and_retried`:mock 前 2 次 503,第 3 次 200 → 重试 2 次后成功
   - [ ] `test_timeout_translated_and_retried`:mock 前 1 次 `APITimeoutError`,第 2 次 200 → 重试 1 次后成功
   - [ ] `test_unknown_error_translated_to_server_error`:mock 未知异常 → 抛 `LLMServerError`(且 `__cause__` 保留原异常)
-  - [ ] `test_capability_returns_v4_flash_by_default`:`DeepSeekTextProvider()` 默认 → `capability().model_name == "deepseek-v4-flash"`
-  - [ ] `test_capability_returns_v4_pro_when_constructed`:`DeepSeekTextProvider(model="deepseek-v4-pro")` → `capability().model_name == "deepseek-v4-pro"`
-  - [ ] `test_capability_unknown_model_raises_value_error`:`DeepSeekTextProvider(model="invalid")` 在构造时立即抛 `ValueError`(不等到 chat 调用)
+  - [ ] `test_capability_returns_v4_flash_by_default`:`DeepSeekTextProvider(api_key="fake")` 默认 → `capability().model_name == "deepseek-v4-flash"`
+  - [ ] `test_capability_returns_v4_pro_when_constructed`:`DeepSeekTextProvider(api_key="fake", model="deepseek-v4-pro")` → `capability().model_name == "deepseek-v4-pro"`
+  - [ ] `test_capability_unknown_model_raises_value_error`:`DeepSeekTextProvider(api_key="fake", model="invalid")` 在构造时立即抛 `ValueError`(不等到 chat 调用)
   - [ ] `test_no_message_content_logged`:跑一次 chat,**断言 loguru 输出里不包含 messages 原文**(用 `caplog` 或 loguru fixture)
 - [ ] **建集成测试**(`tests/adapters/llm/test_deepseek_integration.py`):
   - [ ] **整个测试文件标记 `@pytest.mark.integration`**,默认跳过(CI 不跑,本地手动 `pytest -m integration` 才跑)
@@ -560,7 +560,7 @@ def translate_openai_error(exc: Exception) -> LLMError:
 
 **关键设计**:
 
-- **不 import openai SDK 私有异常类**(用 `type(exc).__name__` 字符串匹配)。原因:`openai==1.54.0` 与未来版本的私有异常类名 / 路径可能漂移;duck typing 更稳
+- **不 import openai SDK 私有异常类**(用 `type(exc).__name__` 字符串匹配)。原因:`openai==1.55.3` 与未来版本的私有异常类名 / 路径可能漂移;duck typing 更稳
 - 翻译时**不抛异常**,返回 `LLMError` 实例,由调用方 `raise translated from exc` 保留原异常链
 - 优先级:status_code → 类名 → 字符串关键词 → 兜底
 
@@ -713,7 +713,7 @@ ls adapters/llm/deepseek.py adapters/llm/_deepseek_errors.py tests/adapters/llm/
 grep -nE "^(pydantic-settings|openai)==" requirements.txt
 ```
 
-期望:看到两行,版本号 `pydantic-settings==2.6.1` + `openai==1.54.0`。
+期望:看到两行,版本号 `pydantic-settings==2.6.1` + `openai==1.55.3`。
 
 ### 3. `adapters/llm/__init__.py` 已追加 export
 
@@ -728,7 +728,7 @@ git fetch origin main
 git diff origin/main..HEAD -- requirements.txt
 ```
 
-期望:只看到 `+openai==1.54.0` 一行,无其他新增 / 删除。
+期望:只看到 `+openai==1.55.3` 一行,无其他新增 / 删除。
 
 ### 5. 不修改 TASK-001-105 / 108 已建文件
 
@@ -816,7 +816,7 @@ make check
 
 - PR 标题:`TASK-106: DeepSeek TextProvider 实现`
 - 分支名:`task/TASK-106-deepseek-text-provider`
-- PR 描述按 `docs/04_ENGINEERING_STANDARDS.md` 第 3 节模板,**逐条勾选上面 1-12 项**并简述每项做了什么;**变更摘要必须明示**:本 Task 引入**项目第二个 runtime 依赖** `openai==1.54.0`,transitively 引入 `httpx` / `anyio` 等
+- PR 描述按 `docs/04_ENGINEERING_STANDARDS.md` 第 3 节模板,**逐条勾选上面 1-12 项**并简述每项做了什么;**变更摘要必须明示**:本 Task 引入**项目第二个 runtime 依赖** `openai==1.55.3`,transitively 引入 `httpx` / `anyio` 等
 
 ### 14. 完工报告含 git 三件套(决策 08)
 
@@ -877,7 +877,7 @@ p.write_bytes(data)
 
 ### 风险 2:openai SDK 版本兼容
 
-`openai==1.54.0`(2024 年底版本)对 DeepSeek V4 API 的 `response_format` JSON mode + 基础 chat completions 是支持的。但 V4 特有的 thinking 字段(`reasoning_content`)在 1.54.0 可能未原生支持。
+`openai==1.55.3`(2024 年底版本)对 DeepSeek V4 API 的 `response_format` JSON mode + 基础 chat completions 是支持的。但 V4 特有的 thinking 字段(`reasoning_content`)在 1.54.0 可能未原生支持。
 
 **本 Task 不消费 reasoning_content**,所以无影响。如果 Codex 实施时发现 chat.completions.create 因为 V4 新参数报错,**停手问 PM**,不要单方面升级 openai 版本。
 
@@ -1022,7 +1022,7 @@ CI 跑的 ruff 来自 `requirements-dev.txt` 锁定的 `ruff==0.7.0`(04 § 6 模
 
 1. 切分支 `task/TASK-106-deepseek-text-provider`
 2. `cat adapters/llm/__init__.py adapters/llm/README.md requirements.txt requirements-dev.txt pyproject.toml` 看现状
-3. 追加 `openai==1.54.0` 到 `requirements.txt`
+3. 追加 `openai==1.55.3` 到 `requirements.txt`
 4. 核查并追加 `pytest-mock==3.14.0` 到 `requirements-dev.txt`(若不在)
 5. `pip install -r requirements-dev.txt` 装新依赖
 6. 建 `_deepseek_errors.py`(直接抄 § 7.3)
@@ -1095,11 +1095,12 @@ Codex 没有 `gh` 登录态,**不要** `gh pr create`。push 完分支后给 PM:
 
 ---
 
-**版本**:Task 文档 v1.1
+**版本**:Task 文档 v1.2
 **作者**:Claude(架构师,第七任)
 **日期**:2026-06-03
 **修订纪录**:
 - v1.0 → v1.1(2026-06-03):TASK-105 实施时 CI 抓到 ruff format 本地与 CI 漂移(Codex 本地 ruff 不是 venv 锁定的 0.7.0),增量修订:6 处 `ruff format ...` 改为 `python -m ruff format ...`(命令字面);新增 § 9 风险 12(toolchain 版本漂移);§ 11.5 完工三件套加一条要求贴 `python -m ruff format --check .` 输出。Line 1045 描述 CI yml 字面**不改**(决策 09 反例 8 精神)。这条事故来源待入决策 09 反例集第 11 行,延后到下次 docs 维护 PR 批量入仓。
+- v1.1 → v1.2(2026-06-04,docs/chore PR):本次 chore PR 批处理:① § 5 line 188-190 三处测试 case 签名同步 § 7.1(`api_key="fake"` 注入,反例 11 沉淀),② 全文 `openai==1.54.0` → `openai==1.55.3`(反例 10 沉淀,与 04 § 6 模板同步)。反例 10 / 11 / 12 同时入决策 09 反例集第 10 / 11 / 12 行。
 **关联宪法版本**:v2.1(冻结)
 **关联决策**:`docs/decisions/20260601-04-*.md` / `20260601-05-*.md` / `20260601-06-*.md` / `20260601-07-*.md` / `20260602-08-*.md` / `20260603-09-*.md`
 **关联 Task**:依赖 TASK-101(契约源)/ TASK-108(配置层);下游 TASK-203 / TASK-205 / TASK-305 / TASK-307
