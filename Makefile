@@ -17,7 +17,7 @@ format:
 	ruff format .
 
 type-check:
-	mypy core/ adapters/ features/
+	mypy core/ adapters/ features/ api/
 
 hygiene:
 	bash scripts/check_repo_hygiene.sh

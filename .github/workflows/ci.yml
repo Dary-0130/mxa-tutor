@@ -30,7 +30,7 @@ jobs:
         run: ruff format --check .
 
       - name: Type check (mypy)
-        run: mypy core/ adapters/ features/
+        run: mypy core/ adapters/ features/ api/
 
       - name: Test (pytest)
         run: pytest -v --tb=short
