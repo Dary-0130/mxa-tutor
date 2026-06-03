@@ -1,5 +1,16 @@
 # adapters/llm
 
-DeepSeek V4-Flash / V4-Pro 适配器。
+DeepSeek TextProvider adapter for OpenAI-compatible chat completions.
 
-详见 `docs/02_ARCHITECTURE_OVERVIEW.md` 第 3 节。
+`DeepSeekTextProvider` implements `core.interfaces.llm_provider.TextProvider` and translates
+SDK errors into project-level `LLMError` subclasses. It logs only call metadata such as model,
+token counts, and latency.
+
+```python
+from adapters.llm import DeepSeekTextProvider
+from core.interfaces.llm_provider import LLMMessage
+
+provider = DeepSeekTextProvider(api_key="sk-xxx")
+response = provider.chat([LLMMessage(role="user", content="hello")])
+print(response.text)
+```
