@@ -1,8 +1,8 @@
 """Project JSON 序列化辅助(TASK-204)。"""
 
+import json
 from dataclasses import asdict
 from datetime import datetime
-import json
 from typing import Any
 
 from core.domain.m_file import MFile, MFunction

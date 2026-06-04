@@ -1,7 +1,7 @@
 import asyncio
+import sqlite3
 from datetime import datetime
 from pathlib import Path
-import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient

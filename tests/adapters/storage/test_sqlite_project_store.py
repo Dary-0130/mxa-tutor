@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta
 import json
 import sqlite3
+from datetime import datetime, timedelta
 
 import pytest
 
