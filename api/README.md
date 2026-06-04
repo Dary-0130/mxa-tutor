@@ -8,7 +8,10 @@ FastAPI 后端。所有 HTTP 端点在此层装配,通过 feature service 调用
 - `main.py` — FastAPI app 工厂(`create_app()`)+ 模块级 `app` 实例 + lifespan 钩子
 - `dependencies.py` — DI 容器,`get_settings()` 返回 `AppSettings` 单例
 - `routes/health.py` — `GET /health` 健康检查端点(readiness check,不查外部依赖)
+- `routes/upload.py` — `POST /upload` 上传 zip 并返回 `202 + project_id`;
+  `GET /projects/{project_id}/status` 轮询解析状态
 - `schemas/health.py` — `HealthResponse` Pydantic 响应模型(`extra="forbid"` 锁契约)
+- `schemas/upload.py` — `UploadResponse` / `ProjectStatusResponse`,status 响应固定 5 字段
 - `middleware/error_handler.py` — minimal ERROR_MAP(8 handler,响应体 shape `{"error", "message"}`);命名沿用历史目录,实为 exception handler 挂载点,不是 ASGI middleware
 
 ## 启动
@@ -38,15 +41,24 @@ uvicorn api.main:app --reload --port 8000
 uvicorn api.main:app --port 8000
 ```
 
+TASK-202 使用 `InMemoryProjectStore` 和 lifespan 内的 `CleanupWorker`,仅支持单
+worker。启动 upload/status 端点时不要传 `--workers`;TASK-204 替换为 SQLite
+store 后再放开多进程。
+
 ## 测试
 
 ```bash
 pytest tests/api/ -v
 ```
 
+`TestClient` 会等待 `BackgroundTasks` 完成,因此测试里上传后通常能立刻查到
+`ready` / `failed`。生产 uvicorn 是先返回 202 再后台解析,前端必须按
+`project_id` 轮询 `/projects/{project_id}/status`。
+
 ## 后续 Task 扩展点
 
-- TASK-202:在 `routes/upload.py` 实现上传 + 解析 API;禁止在 route 内 `try/except` 翻译业务异常(直接抛 `MxaError` 子类,让 ERROR_MAP 处理)
+- TASK-202:已在 `routes/upload.py` 实现上传 + 解析 API;route 内不
+  `try/except` 翻译业务异常(直接抛 `MxaError` 子类,让 ERROR_MAP 处理)
 - TASK-203:在 `routes/overview.py` 实现导览端点
 - TASK-205:在 `routes/chat.py` 实现问答端点
 - TASK-206:在 `middleware/error_handler.py` 追加剩余 9 项 handler(`LLMError` 5 子类 + `ParseError` 2 + `Quota` + `Evidence`)+ 404/422 中文化,不改本 Task 锁定的响应体 shape
