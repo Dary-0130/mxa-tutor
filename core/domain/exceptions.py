@@ -76,3 +76,11 @@ class EvidenceMissingError(MxaError):
 
 class OverviewGenerationError(MxaError):
     """项目导览生成失败。"""
+
+
+class ChatSessionNotFoundError(ProjectError):
+    """指定对话会话不存在。"""
+
+
+class StoreError(MxaError):
+    """持久化存储层异常。"""
