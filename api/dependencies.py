@@ -28,6 +28,7 @@ from adapters.parser.m_parser import MParserImpl
 from adapters.parser.slx_parser import SlxParserImpl
 from adapters.parser.zip_extractor import safe_extract
 from app.config import AppSettings
+from core.interfaces.chat_store import ChatStore
 from core.interfaces.llm_provider import TextProvider
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
@@ -46,6 +47,14 @@ def get_settings() -> AppSettings:
 def get_project_store(request: Request) -> ProjectStore:
     """从 app.state.project_store 取 ProjectStore。"""
     return cast(ProjectStore, request.app.state.project_store)
+
+
+def get_chat_store(request: Request) -> ChatStore:
+    """从 app.state.chat_store 取 ChatStore。"""
+    store = getattr(request.app.state, "chat_store", None)
+    if store is None:
+        raise RuntimeError("ChatStore not initialized; lifespan misconfigured")
+    return cast(ChatStore, store)
 
 
 def get_upload_service(

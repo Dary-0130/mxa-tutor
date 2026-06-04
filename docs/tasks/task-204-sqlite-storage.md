@@ -127,7 +127,7 @@ grep -n "abstractmethod" core/interfaces/project_store.py
 #       / get_status_view / get_project / list_expired / delete 7 方法
 
 # ProjectStatusRecord 7 字段在位
-grep -E "^\s+[a-z_]+:" core/domain/project_status.py | head -10
+grep -E "^[[:space:]]+[a-z_]+:" core/domain/project_status.py | head -10
 # 期望:project_id / name / status / created_at / updated_at / project / error_code(7 字段)
 
 # AppSettings.db_path 字段在位
@@ -136,7 +136,7 @@ grep -n "db_path" app/config.py
 
 # adapters/storage 目录现状
 ls -la adapters/storage/
-# 期望:in_memory_project_store.py / file_storage.py / README.md / __init__.py
+# 期望:in_memory_project_store.py / README.md / __init__.py / __pycache__(可选)
 
 # InMemoryProjectStore 当前装配点
 grep -n "InMemoryProjectStore" api/main.py
@@ -147,7 +147,7 @@ grep -n "aiosqlite" requirements.txt
 # 期望:空输出(本 Task 新增)
 
 # datetime 用法核查(风险 2):task-202 用 naive datetime.utcnow()
-grep -n 'datetime\.\(now\|utcnow\)' adapters/storage/in_memory_project_store.py features/upload/
+grep -n 'datetime\.\(now\|utcnow\)' adapters/storage/in_memory_project_store.py features/ingest/cleanup_worker.py features/ingest/upload_service.py
 # 期望:全部 datetime.utcnow();若出现 datetime.now(tz=...) → 上游已变,停手抛冲突
 
 # CI workflow 装 runtime 依赖(风险 9):若 CI 仍只装 dev 且 dev 不传递 -r requirements.txt,本 Task 加 aiosqlite 会挂
@@ -209,7 +209,6 @@ grep -n "^-r requirements.txt" requirements-dev.txt
 - ❌ `core/domain/project_status.py`(7 字段冻结)
 - ❌ `core/domain/project.py`(9 字段冻结)
 - ❌ `app/config.py`(配置零增量,`db_path` 已存在)
-- ❌ `adapters/storage/file_storage.py`(task-202 范围,不动)
 - ❌ TASK-201 ERROR_MAP / TASK-202 UploadService / TASK-203 ProjectOverviewService 任何代码
 - ❌ `core/prompts/` 任何 yaml
 - ❌ `Makefile` / `pyproject.toml` / `.github/workflows/ci.yml`(本 Task 不改 CI / 工具链)

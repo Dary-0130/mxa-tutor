@@ -19,7 +19,10 @@ from fastapi import FastAPI
 from loguru import logger
 
 from adapters.llm import DeepSeekTextProvider
-from adapters.storage.in_memory_project_store import InMemoryProjectStore
+from adapters.storage._connection import open_connection
+from adapters.storage.schema import init_schema
+from adapters.storage.sqlite_chat_store import SqliteChatStore
+from adapters.storage.sqlite_project_store import SqliteProjectStore
 from api.dependencies import get_settings
 from api.middleware.error_handler import register_error_handlers
 from api.routes.health import router as health_router
@@ -27,6 +30,15 @@ from api.routes.overview import router as overview_router
 from api.routes.upload import router as upload_router
 from features.ingest.cleanup_worker import CleanupWorker
 from features.overview import InMemoryOverviewCache
+
+
+@asynccontextmanager
+async def _bootstrap_db(db_path: str) -> AsyncIterator[None]:
+    """启动时初始化 SQLite schema,不在 lifespan 期间持有连接。"""
+
+    async with open_connection(db_path) as conn:
+        await init_schema(conn)
+    yield
 
 
 @asynccontextmanager
@@ -43,13 +55,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     async with AsyncExitStack() as stack:
-        store = InMemoryProjectStore()
+        await stack.enter_async_context(_bootstrap_db(settings.db_path))
+        store = SqliteProjectStore(settings.db_path)
+        chat_store = SqliteChatStore(settings.db_path)
         app.state.project_store = store
+        app.state.chat_store = chat_store
         app.state.overview_cache = InMemoryOverviewCache()
         app.state.text_provider = DeepSeekTextProvider(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
         )
+        stack.push_async_callback(chat_store.aclose)
+        stack.push_async_callback(store.aclose)
 
         worker = CleanupWorker(
             store=store,
