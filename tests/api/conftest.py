@@ -1,12 +1,24 @@
 """tests/api 共享 fixture。"""
 
-from collections.abc import Iterator
+import os
 
-import pytest
+# 在 import 任何应用模块前先设 env,避免 collection 阶段 `from api.main import app`
+# 触发 AppSettings.deepseek_api_key 必填校验崩。用 setdefault,本地 .env 真 key 不被覆盖。
+_DID_SET_DEEPSEEK_API_KEY = "DEEPSEEK_API_KEY" not in os.environ
+os.environ.setdefault("DEEPSEEK_API_KEY", "fake-for-test")
 
-from api.dependencies import get_settings
-from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability
-from features.overview import InMemoryOverviewCache
+from collections.abc import Iterator  # noqa: E402
+
+import pytest  # noqa: E402
+
+from api.dependencies import get_settings  # noqa: E402
+from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability  # noqa: E402
+from features.overview import InMemoryOverviewCache  # noqa: E402
+
+
+def pytest_collection_finish() -> None:
+    if _DID_SET_DEEPSEEK_API_KEY and os.environ.get("DEEPSEEK_API_KEY") == "fake-for-test":
+        os.environ.pop("DEEPSEEK_API_KEY", None)
 
 
 class FakeTextProvider:
