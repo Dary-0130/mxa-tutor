@@ -1,4 +1,4 @@
-"""进程内 dict + asyncio.Lock 实现,TASK-204 SQLite 接管前的临时桥接。"""
+"""进程内 dict + asyncio.Lock 测试 fake;生产使用 SqliteProjectStore。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from core.interfaces.project_store import ProjectStatusView, ProjectStore
 
 
 class InMemoryProjectStore(ProjectStore):
-    """进程内 dict 实现(7 方法),仅支持单进程单 worker。"""
+    """进程内 dict 实现(7 方法),仅用于测试 fake。"""
 
     def __init__(self) -> None:
         self._records: dict[str, ProjectStatusRecord] = {}
