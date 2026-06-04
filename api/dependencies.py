@@ -21,14 +21,19 @@ from typing import Annotated, Any, cast
 
 from fastapi import Depends, Request
 
+from adapters.classifier.general_project_type_resolver import GeneralProjectTypeResolver
 from adapters.parser.dependency_analyzer import analyze_dependencies
 from adapters.parser.file_classifier import classify_files
 from adapters.parser.m_parser import MParserImpl
 from adapters.parser.slx_parser import SlxParserImpl
 from adapters.parser.zip_extractor import safe_extract
 from app.config import AppSettings
+from core.interfaces.llm_provider import TextProvider
 from core.interfaces.project_store import ProjectStore
+from core.interfaces.project_type_resolver import ProjectTypeResolver
 from features.ingest.upload_service import ExtractFn, UploadService
+from features.overview import OverviewCache
+from features.overview.overview_service import ProjectOverviewService
 
 
 @lru_cache(maxsize=1)
@@ -61,3 +66,28 @@ def get_upload_service(
         m_parser=MParserImpl(),
         dependency_analyzer=analyze_dependencies,
     )
+
+
+def get_text_provider(request: Request) -> TextProvider:
+    """从 app.state.text_provider 取 TextProvider。"""
+    return cast(TextProvider, request.app.state.text_provider)
+
+
+def get_overview_cache(request: Request) -> OverviewCache:
+    """从 app.state.overview_cache 取 OverviewCache。"""
+    return cast(OverviewCache, request.app.state.overview_cache)
+
+
+def get_project_type_resolver() -> ProjectTypeResolver:
+    """返回 v0.1 project type resolver。"""
+    return GeneralProjectTypeResolver()
+
+
+def get_overview_service(
+    store: Annotated[ProjectStore, Depends(get_project_store)],
+    cache: Annotated[OverviewCache, Depends(get_overview_cache)],
+    resolver: Annotated[ProjectTypeResolver, Depends(get_project_type_resolver)],
+    text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+) -> ProjectOverviewService:
+    """装配 ProjectOverviewService。"""
+    return ProjectOverviewService(store, cache, resolver, text_provider)
