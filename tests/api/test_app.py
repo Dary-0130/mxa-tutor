@@ -75,9 +75,11 @@ def test_lifespan_startup_runs_without_exception() -> None:
 
 def test_lifespan_fails_when_deepseek_api_key_missing(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from api.main import create_app
 
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     get_settings.cache_clear()
 

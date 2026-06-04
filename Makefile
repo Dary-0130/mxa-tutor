@@ -20,7 +20,7 @@ type-check:
 	mypy core/ adapters/ features/ api/
 
 hygiene:
-	bash scripts/check_repo_hygiene.sh
+	python scripts/check_repo_hygiene.py
 
 check: lint type-check test hygiene
 	@echo "All checks passed!"

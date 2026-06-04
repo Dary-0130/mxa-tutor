@@ -9,6 +9,7 @@ from core.domain.exceptions import (
     LLMTimeoutError,
     MParseError,
     MxaError,
+    OverviewGenerationError,
     ParseError,
     ProjectError,
     ProjectNotFoundError,
@@ -58,3 +59,4 @@ def test_upload_errors_inherit_from_upload_error_and_mxa_error() -> None:
 def test_top_level_business_errors_inherit_from_mxa_error() -> None:
     assert isinstance(QuotaExhaustedError("x"), MxaError)
     assert isinstance(EvidenceMissingError("x"), MxaError)
+    assert isinstance(OverviewGenerationError("x"), MxaError)

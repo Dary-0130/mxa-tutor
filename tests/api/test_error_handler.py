@@ -9,10 +9,18 @@ from loguru import logger
 from api.dependencies import get_settings
 from core.domain.exceptions import (
     FileTypeNotAllowedError,
+    LLMAuthError,
+    LLMQuotaError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMTimeoutError,
+    MParseError,
     MxaError,
+    OverviewGenerationError,
     ProjectError,
     ProjectNotFoundError,
     ProjectTooLargeError,
+    SlxParseError,
     UploadError,
     ZipBombError,
     ZipSlipError,
@@ -108,6 +116,20 @@ def test_mxa_error_final_fallback_returns_500() -> None:
     }
 
 
+def test_llm_timeout_returns_504_with_locked_shape() -> None:
+    response = _trigger(LLMTimeoutError, "secret")
+
+    assert response.status_code == 504
+    assert response.json() == {"error": "llm_timeout", "message": "网络较慢,正在重试..."}
+
+
+def test_overview_generation_returns_502_with_locked_shape() -> None:
+    response = _trigger(OverviewGenerationError, "secret")
+
+    assert response.status_code == 502
+    assert response.json() == {"error": "overview_generation", "message": "导览生成失败,请刷新重试"}
+
+
 def test_zip_bomb_leaf_takes_precedence_over_upload_base() -> None:
     response = _trigger(ZipBombError, "secret path")
 
@@ -147,12 +169,20 @@ def test_all_handlers_registered_after_create_app() -> None:
         UploadError,
         ProjectError,
         MxaError,
+        LLMAuthError,
+        LLMQuotaError,
+        LLMRateLimitError,
+        LLMTimeoutError,
+        LLMServerError,
+        SlxParseError,
+        MParseError,
+        OverviewGenerationError,
     }
 
     registered = expected_handlers.intersection(app.exception_handlers)
 
     assert registered == expected_handlers
-    assert len(registered) == 8
+    assert len(registered) == 16
 
 
 def test_handler_response_does_not_leak_str_exc() -> None:

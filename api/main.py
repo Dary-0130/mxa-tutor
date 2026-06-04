@@ -18,12 +18,15 @@ from pathlib import Path
 from fastapi import FastAPI
 from loguru import logger
 
+from adapters.llm import DeepSeekTextProvider
 from adapters.storage.in_memory_project_store import InMemoryProjectStore
 from api.dependencies import get_settings
 from api.middleware.error_handler import register_error_handlers
 from api.routes.health import router as health_router
+from api.routes.overview import router as overview_router
 from api.routes.upload import router as upload_router
 from features.ingest.cleanup_worker import CleanupWorker
+from features.overview import InMemoryOverviewCache
 
 
 @asynccontextmanager
@@ -42,6 +45,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with AsyncExitStack() as stack:
         store = InMemoryProjectStore()
         app.state.project_store = store
+        app.state.overview_cache = InMemoryOverviewCache()
+        app.state.text_provider = DeepSeekTextProvider(
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+        )
 
         worker = CleanupWorker(
             store=store,
@@ -78,6 +86,7 @@ def create_app() -> FastAPI:
     register_error_handlers(app, settings)
     app.include_router(health_router)
     app.include_router(upload_router)
+    app.include_router(overview_router)
     return app
 
 

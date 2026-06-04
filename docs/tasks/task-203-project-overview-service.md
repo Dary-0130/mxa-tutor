@@ -130,7 +130,12 @@ class SlxBlock:
     block_id: str
     name: str
     block_type: str
+    parameters: dict[str, str]                  # 本 Task 不消费
+    position: tuple[int, int, int, int]         # 本 Task 不消费
     parent_subsystem: str | None
+    is_masked: bool = False                     # 本 Task 不消费
+    is_library_link: bool = False               # 本 Task 不消费
+    is_model_reference: bool = False            # 本 Task 不消费
 ```
 
 本 Task prompt 列出每 slx 前 50 个 block 的 `name / block_type / block_id / parent_subsystem`(R1 R-1);service 校验 **四元组** `(model_path, name, type, parent)` ∈ project block 集(R2 R-2 升级)。
