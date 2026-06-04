@@ -112,8 +112,8 @@ P2 v0.1 不承诺:
 
 | 编号 | 名称 | 状态 | 负责 | 依赖 |
 |------|------|------|------|------|
-| TASK-201 | FastAPI 框架搭建 + 健康检查 | 🔍 | Codex | Week 1 |
-| TASK-202 | 上传 + 解析 API(异步,含沙箱) | 🔍 | Codex | 104, 105, 201 |
+| TASK-201 | FastAPI 框架搭建 + 健康检查 | ✅ | Codex | Week 1 |
+| TASK-202 | 上传 + 解析 API(异步,含沙箱) | ✅ | Codex | 104, 105, 201 |
 | TASK-203 | ProjectOverviewService(基于 TeachingUnit 生成导览) | 🔲 | Codex | 106, 107 |
 | TASK-204 | SQLite 存储层(Project + Chat) | 🔲 | Codex | 101 |
 | TASK-205 | **粗 RAG 问答 API(关键词 + metadata 检索)** ⭐ | 🔲 | Codex | 203, 204 |
@@ -335,26 +335,18 @@ P2 v0.1 不承诺:
 ```
 Week 0:  [✅✅✅⬜]              3/4
 Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
-Week 2:  [🔍🔍⬜⬜⬜⬜⬜]         2/7  (含 TASK-207)
+Week 2:  [✅✅⬜⬜⬜⬜⬜]         2/7  (含 TASK-207)
 Week 3:  [⬜⬜⬜⬜⬜⬜⬜]         0/7  (含 TASK-307)
 Week 4:  [⬜⬜⬜⬜⬜⬜]           0/6
 
-总计: 10/31
+总计: 13/32
 ```
 
 ---
 
 ## 下一步
 
-**下一个待启动**:TASK-001 GitHub 私有仓库 + 项目骨架
-
-PM 准备好:
-1. GitHub 账号 + 创建 private repo
-2. 本地开发机 Python 3.11 环境
-3. 准备好 10 个真实 .slx / 工程文件,放在专门文件夹备用
-4. 5 份文档放入仓库 `docs/`
-
-完成后通知 Claude → Claude 写 TASK-001 详细文档 → PM 传给 Codex → 开干。
+**下一个待启动**:TASK-203 ProjectOverviewService(架构师写文档中)。完成后由 PM 派 Codex 实施。
 
 ---
 
