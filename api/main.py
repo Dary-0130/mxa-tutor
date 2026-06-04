@@ -10,28 +10,55 @@ lifespan 设计原则(TASK-201 + 后续 Task 共同约束):
    中途失败时也被清理",不能假设 ``yield`` 后 shutdown block 必然执行
 """
 
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from pathlib import Path
 
 from fastapi import FastAPI
 from loguru import logger
 
+from adapters.storage.in_memory_project_store import InMemoryProjectStore
 from api.dependencies import get_settings
 from api.middleware.error_handler import register_error_handlers
 from api.routes.health import router as health_router
+from api.routes.upload import router as upload_router
+from features.ingest.cleanup_worker import CleanupWorker
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用 lifecycle。"""
-    _ = app
     settings = get_settings()
     logger.info(
-        "Application startup: db_path={}, upload_dir={}",
+        "Application startup: db_path={}, upload_dir={}, ttl_hours={}",
         settings.db_path,
         settings.upload_dir,
+        settings.upload_ttl_hours,
     )
-    yield
+    upload_dir = Path(settings.upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    async with AsyncExitStack() as stack:
+        store = InMemoryProjectStore()
+        app.state.project_store = store
+
+        worker = CleanupWorker(
+            store=store,
+            upload_dir=upload_dir,
+            ttl_hours=settings.upload_ttl_hours,
+        )
+        cleanup_task = asyncio.create_task(worker.run_forever())
+
+        async def _shutdown_cleanup() -> None:
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
+            logger.info("CleanupWorker shutdown complete")
+
+        stack.push_async_callback(_shutdown_cleanup)
+        yield
+
     logger.info("Application shutdown")
 
 
@@ -50,6 +77,7 @@ def create_app() -> FastAPI:
     )
     register_error_handlers(app, settings)
     app.include_router(health_router)
+    app.include_router(upload_router)
     return app
 
 
