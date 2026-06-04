@@ -32,6 +32,7 @@ from core.interfaces.chat_store import ChatStore
 from core.interfaces.llm_provider import TextProvider
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
+from features.chat.chat_service import ChatService
 from features.ingest.upload_service import ExtractFn, UploadService
 from features.overview import OverviewCache
 from features.overview.overview_service import ProjectOverviewService
@@ -100,3 +101,11 @@ def get_overview_service(
 ) -> ProjectOverviewService:
     """装配 ProjectOverviewService。"""
     return ProjectOverviewService(store, cache, resolver, text_provider)
+
+
+def get_chat_service(request: Request) -> ChatService:
+    """从 app.state 取 chat_service(由 lifespan 装配)。"""
+    service = getattr(request.app.state, "chat_service", None)
+    if service is None:
+        raise RuntimeError("ChatService not initialized; lifespan misconfigured")
+    return cast(ChatService, service)
