@@ -1,6 +1,7 @@
 # Runtime dependencies will be added per-task
 pydantic-settings==2.6.1
 loguru==0.7.2
+aiosqlite==0.20.0
 openai==1.55.3
 fastapi==0.115.4
 uvicorn[standard]==0.32.0
