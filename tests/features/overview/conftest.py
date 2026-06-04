@@ -9,7 +9,9 @@ import pytest
 from core.domain.m_file import MFile, MFunction
 from core.domain.mat_metadata import MatMetadata, MatVariable
 from core.domain.project import FileInfo, Project, ProjectType
+from core.domain.project_graph import ProjectGraph
 from core.domain.slx_model import SlxBlock, SlxLine, SlxModel
+from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability
 
 
 @pytest.fixture
@@ -183,3 +185,111 @@ def make_project():
         )
 
     return _make
+
+
+class OverviewStoreFake:
+    def __init__(self, project):
+        self.project = project
+
+    async def get_project(self, project_id: str):
+        return self.project
+
+
+class OverviewResolverFake:
+    def resolve(self, project) -> str:
+        return "general"
+
+
+class OverviewProviderFake:
+    def __init__(self, response: LLMResponse | None = None, exc: Exception | None = None) -> None:
+        self.response = response
+        self.exc = exc
+        self.calls = 0
+        self.kwargs = {}
+
+    def chat(
+        self,
+        messages: list[LLMMessage],
+        json_mode: bool = False,
+        timeout: float = 30.0,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        self.calls += 1
+        self.kwargs = {
+            "messages": messages,
+            "json_mode": json_mode,
+            "timeout": timeout,
+            "max_tokens": max_tokens,
+        }
+        if self.exc is not None:
+            raise self.exc
+        assert self.response is not None
+        return self.response
+
+    def capability(self) -> ModelCapability:
+        return ModelCapability(model_name="fake")
+
+
+class OverviewBuilderFake:
+    def __init__(self, graph: ProjectGraph) -> None:
+        self.graph = graph
+        self.calls = 0
+
+    def build(self, project) -> ProjectGraph:
+        self.calls += 1
+        return self.graph
+
+
+def make_overview_graph(unresolved: list[str] | None = None) -> ProjectGraph:
+    return ProjectGraph(
+        project_id="p1",
+        nodes=[],
+        edges=[],
+        entry_points=["main.m"],
+        execution_flow=["main.m", "model.slx", "helper.m"],
+        data_flow=[],
+        control_flow=[],
+        unresolved_symbols=unresolved or [],
+    )
+
+
+def make_overview_file_entries(*paths: str) -> list[dict[str, str]]:
+    return [{"file_path": path, "why_key": f"{path} 很关键"} for path in paths]
+
+
+def make_overview_evidence(
+    main: str,
+    helper: str,
+    model: str,
+    block_id: str,
+) -> list[dict[str, object]]:
+    first = {"file_path": main, "line_range": [1, 5]}
+    second = {"file_path": helper, "line_range": [1, 3]}
+    third = {"file_path": model, "block_id": block_id}
+    return [first, second, third]
+
+
+def make_overview_payload() -> dict[str, object]:
+    return {
+        "project_title": "Buck 控制",
+        "project_type": "control_system",
+        "one_sentence_summary": "这是一个 Buck 电压闭环控制工程。",
+        "main_entry_files": [{"file_path": "main.m", "role": "运行入口"}],
+        "main_simulink_models": [{"file_path": "model.slx", "summary": "主仿真模型"}],
+        "main_execution_flow": ["打开 main.m", "加载参数", "运行 model.slx"],
+        "key_files": make_overview_file_entries("main.m", "helper.m", "model.slx"),
+        "key_blocks": [
+            {"block_name": "Gain", "block_type": "Gain", "location": "model.slx / <root>", "why_key": "代表控制增益"}
+        ],
+        "knowledge_points": ["闭环控制", "PWM", "采样"],
+        "beginner_reading_order": ["main.m", "helper.m", "model.slx"],
+        "likely_confusing_points": ["未能确定 load_x", "Gain 的单位要结合参数看"],
+        "evidence": make_overview_evidence("main.m", "helper.m", "model.slx", "b1"),
+    }
+
+
+def make_overview_response(payload) -> LLMResponse:
+    import json
+
+    text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
+    return LLMResponse(text=text, prompt_tokens=10, completion_tokens=20, model="fake", latency_ms=1)
