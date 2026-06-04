@@ -84,3 +84,7 @@ class ChatSessionNotFoundError(ProjectError):
 
 class StoreError(MxaError):
     """持久化存储层异常。"""
+
+
+class ChatGenerationError(MxaError):
+    """问答生成失败。"""

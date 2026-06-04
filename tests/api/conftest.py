@@ -1,12 +1,24 @@
 """tests/api 共享 fixture。"""
 
-from collections.abc import Iterator
+import os
 
-import pytest
+# 在 import 任何应用模块前先设 env,避免 collection 阶段 `from api.main import app`
+# 触发 AppSettings.deepseek_api_key 必填校验崩。用 setdefault,本地 .env 真 key 不被覆盖。
+_DID_SET_DEEPSEEK_API_KEY = "DEEPSEEK_API_KEY" not in os.environ
+os.environ.setdefault("DEEPSEEK_API_KEY", "fake-for-test")
 
-from api.dependencies import get_settings
-from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability
-from features.overview import InMemoryOverviewCache
+from collections.abc import Iterator  # noqa: E402
+
+import pytest  # noqa: E402
+
+from api.dependencies import get_settings  # noqa: E402
+from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability  # noqa: E402
+from features.overview import InMemoryOverviewCache  # noqa: E402
+
+
+def pytest_collection_finish() -> None:
+    if _DID_SET_DEEPSEEK_API_KEY and os.environ.get("DEEPSEEK_API_KEY") == "fake-for-test":
+        os.environ.pop("DEEPSEEK_API_KEY", None)
 
 
 class FakeTextProvider:
@@ -26,6 +38,12 @@ class FakeTextProvider:
         return ModelCapability(model_name="fake")
 
 
+class FakeChatService:
+    async def handle_chat(self, project_id: str, question: str, session_id: str | None):
+        _ = project_id, question, session_id
+        raise RuntimeError("FakeChatService should be overridden by chat route tests")
+
+
 @pytest.fixture(autouse=True)
 def _isolate_test_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """测试前后清理 ``get_settings`` 缓存 + ``dependency_overrides``。"""
@@ -37,6 +55,7 @@ def _isolate_test_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     app.dependency_overrides.clear()
     app.state.overview_cache = InMemoryOverviewCache()
     app.state.text_provider = FakeTextProvider()
+    app.state.chat_service = FakeChatService()
 
     yield
 
