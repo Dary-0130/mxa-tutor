@@ -411,8 +411,8 @@ grep -nA3 "class ProjectGraphBuilder" features/overview/project_graph_builder.py
 grep -n "app.state.text_provider" api/main.py
 # 期望:lifespan 内 1 处装配
 
-# 7. ERROR_MAP 当前 16 handler(TASK-201 + 203 已注册)
-grep -nE "ERROR_MAP\[" api/middleware/error_handler.py | wc -l
+# 7. error_handlers tuple 当前 16 个 spec(TASK-201 8 + TASK-203 D3 前移 8)
+python3 -c "import re, pathlib; data = pathlib.Path('api/middleware/error_handler.py').read_text(); print(len(re.findall(r'\(\s*[A-Z]\w+Error,\s*\n\s*_make_\w*handler', data)))"
 # 期望:16(本 Task +3 → 19)
 
 # 8. CleanupWorker 与 chat_store 不耦合(本 Task 验证)
@@ -1341,14 +1341,27 @@ class ChatGenerationError(MxaError):
     """
 ```
 
-### 9.2 ERROR_MAP 追加 3 handler(`api/middleware/error_handler.py` 末尾)
+### 9.2 error_handlers tuple 追加 3 handler(`api/middleware/error_handler.py` 末尾)
 
 ```python
-# R1 D1:ERROR_MAP 前移,TASK-206 接管不返工(沿用 TASK-203 D3 模式)
-ERROR_MAP[ChatSessionNotFoundError] = (404, "chat_session_not_found", "对话不存在")
-ERROR_MAP[StoreError]               = (500, "store_error", "系统暂时不可用,请稍后重试")
-ERROR_MAP[ChatGenerationError]      = (502, "chat_generation", "回答生成失败,请刷新重试")
+# R1 D1:error_handlers tuple 末尾追加 3 spec,TASK-206 接管不返工(沿用 TASK-203 D3 模式)
+# 在 register_error_handlers 函数内 error_handlers tuple 的 OverviewGenerationError 之后追加:
+(
+    ChatSessionNotFoundError,
+    _make_handler(404, "chat_session_not_found", "对话不存在"),
+),
+(
+    StoreError,
+    _make_handler(500, "store_error", "系统暂时不可用,请稍后重试"),
+),
+(
+    ChatGenerationError,
+    _make_handler(502, "chat_generation", "回答生成失败,请刷新重试"),
+),
 ```
+
+核心域 import 也要在 `error_handler.py` 顶部追加 3 个类(从 `core.domain.exceptions` 导入)。
+注意:tuple 顺序对 FastAPI 行为无影响(FastAPI 按 MRO 查找 leaf 优先),所以追加在 OverviewGenerationError 之后即可,无需重排。
 
 **注意 ProjectError 树继承关系**:`ChatSessionNotFoundError(ProjectError)`,leaf 注册在
 `ProjectError(base)` 之前,FastAPI exception handler 走 MRO 查找最具体的 leaf(TASK-201 已建机制)。
@@ -1605,8 +1618,8 @@ git diff origin/main..HEAD -- core/domain/exceptions.py \
   | grep -E '^\+class ' | wc -l
 # 期望:1(本 Task 仅追加 1 个异常类)
 
-# 11. ERROR_MAP 16 → 19
-grep -nE "ERROR_MAP\[" api/middleware/error_handler.py | wc -l
+# 11. error_handlers tuple 16 → 19
+python3 -c "import re, pathlib; data = pathlib.Path('api/middleware/error_handler.py').read_text(); print(len(re.findall(r'\(\s*[A-Z]\w+Error,\s*\n\s*_make_\w*handler', data)))"
 # 期望:19
 
 # 12. project-scoped session API(R1 P0-3 关键防御)

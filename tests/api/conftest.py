@@ -26,6 +26,12 @@ class FakeTextProvider:
         return ModelCapability(model_name="fake")
 
 
+class FakeChatService:
+    async def handle_chat(self, project_id: str, question: str, session_id: str | None):
+        _ = project_id, question, session_id
+        raise RuntimeError("FakeChatService should be overridden by chat route tests")
+
+
 @pytest.fixture(autouse=True)
 def _isolate_test_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """测试前后清理 ``get_settings`` 缓存 + ``dependency_overrides``。"""
@@ -37,6 +43,7 @@ def _isolate_test_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     app.dependency_overrides.clear()
     app.state.overview_cache = InMemoryOverviewCache()
     app.state.text_provider = FakeTextProvider()
+    app.state.chat_service = FakeChatService()
 
     yield
 

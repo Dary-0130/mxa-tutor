@@ -155,3 +155,38 @@ Makefile target 与 ci.yml steps 经常漂移(实施时一方更新另一方未�
 **关联宪法版本**:v2.1(冻结)
 **关联决策**:`docs/decisions/20260602-08-pm-verify-git-and-preserve-line-endings.md`(决策 08 在架构师维度的延伸)
 **触发 Task**:TASK-104(项目第一个攻击面 P0 Task,实施过程 8 次架构师踩坑,Codex 全部抓住,代价由架构师承担反思 + 固化本决策)
+
+
+---
+
+## TASK-205 第十三任追加反例
+
+反例 21(2026-06-05 / 第十三任 / TASK-205 R1 round):
+架构师写 TASK-205 R1 输入材料时,凭印象写 MFile / MFunction 字段(args_in / header_comment / file_kind / parse_warnings 等),
+未实地 view core/domain/m_file.py;GPT R1 实地核查后 P0-1 抓住。
+教训:任何文档引用 dataclass 字段前必须先 view 源文件锁字段。
+
+反例 22(2026-06-05 / 第十三任 / TASK-205 入仓 push):
+架构师凭印象告诉 PM "docs 不走 PR,直接 push main",未实地 git log 看 task-204 文档同样走过 PR #37;
+PM 跑 git push 被 GitHub 仓库规则 GH013 拦截。
+教训:任何"惯例"陈述前必须 git log --oneline | grep 找到至少一次先例佐证。
+
+反例 23(2026-06-05 / 第十三任 / TASK-205 入仓后派 Codex):
+架构师凭第十二任交接 summary 印象,把"决策 11 加 5d64c02 钉痕"作为搭车 chore 写进 Codex 派活脚本;
+PM 实地核查发现 commit 5d64c02 不存在 / 决策 11 文件已入仓(PR #34)/ 代码已无 str(exc) 违规;
+完全编造的 chore。
+教训:派活脚本中所有"待补 chore"必须实地 git show <commit> + grep -rn <违规模式> 核查存在性,
+交接 summary 不能作为唯一信源。
+
+反例 24(2026-06-05 / 第十三任 / TASK-205 派 Codex 后被 Stage 0 #7 阻塞):
+架构师写 v0.2 文档 § 9.2 代码骨架 + Stage 0 #7 + § 11.2 #11 grep,假设
+api/middleware/error_handler.py 用 `ERROR_MAP[...]` 字典赋值形态,
+未实地 view 当前代码;真实形态是 `error_handlers: tuple[...]` 元组 +
+for 循环 `app.add_exception_handler`,grep 期望 16 / 实际 0。
+GPT R1 + R2 都没抓到(GPT 看不到 main 代码),Codex Stage 0 实地核查抓到。
+接续反例 21 / 22 / 23 同源教训,本会话第 4 次"凭印象"。
+教训:任何文档写"既有代码会被本 Task 怎么改"前,必须 view 当前真实代码骨架,
+不只靠"概念名"(如 ERROR_MAP)假设代码语法形态。
+
+反例 21 / 22 / 23 / 24 共同特征:本会话第十三任接连 4 次"凭印象"同源失败,接续反例 19 / 20 教训。
+下一任架构师交接 KPI 强化:实地核查 git log / 文件状态 / grep / 代码骨架兜底再下笔。

@@ -25,11 +25,16 @@ from adapters.storage.sqlite_chat_store import SqliteChatStore
 from adapters.storage.sqlite_project_store import SqliteProjectStore
 from api.dependencies import get_settings
 from api.middleware.error_handler import register_error_handlers
+from api.routes.chat import router as chat_router
 from api.routes.health import router as health_router
 from api.routes.overview import router as overview_router
 from api.routes.upload import router as upload_router
+from features.chat import KeywordRetriever
+from features.chat._prompt_builder import ChatPromptBuilder
+from features.chat.chat_service import ChatService
 from features.ingest.cleanup_worker import CleanupWorker
 from features.overview import InMemoryOverviewCache
+from features.overview.project_graph_builder import ProjectGraphBuilder
 
 
 @asynccontextmanager
@@ -64,6 +69,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.text_provider = DeepSeekTextProvider(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
+        )
+        app.state.chat_service = ChatService(
+            project_store=store,
+            chat_store=chat_store,
+            text_provider=app.state.text_provider,
+            retriever=KeywordRetriever(graph_provider=ProjectGraphBuilder()),
+            prompt_builder=ChatPromptBuilder(),
         )
         stack.push_async_callback(chat_store.aclose)
         stack.push_async_callback(store.aclose)
@@ -104,6 +116,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(upload_router)
     app.include_router(overview_router)
+    app.include_router(chat_router)
     return app
 
 

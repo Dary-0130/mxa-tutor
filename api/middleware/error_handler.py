@@ -31,6 +31,8 @@ from loguru import logger
 
 from app.config import AppSettings
 from core.domain.exceptions import (
+    ChatGenerationError,
+    ChatSessionNotFoundError,
     FileTypeNotAllowedError,
     LLMAuthError,
     LLMQuotaError,
@@ -44,6 +46,7 @@ from core.domain.exceptions import (
     ProjectNotFoundError,
     ProjectTooLargeError,
     SlxParseError,
+    StoreError,
     UploadError,
     ZipBombError,
     ZipSlipError,
@@ -179,6 +182,18 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         (
             OverviewGenerationError,
             _make_handler(502, "overview_generation", "导览生成失败,请刷新重试"),
+        ),
+        (
+            ChatSessionNotFoundError,
+            _make_handler(404, "chat_session_not_found", "对话不存在"),
+        ),
+        (
+            StoreError,
+            _make_handler(500, "store_error", "系统暂时不可用,请稍后重试"),
+        ),
+        (
+            ChatGenerationError,
+            _make_handler(502, "chat_generation", "回答生成失败,请刷新重试"),
         ),
     )
     for exc_type, handler in error_handlers:
