@@ -62,7 +62,7 @@ def parse_blocks(
             block = _parse_block(block_elem, parent_subsystem, warnings)
         except Exception as exc:  # noqa: BLE001 - 单 block 必须失败隔离
             sid = block_elem.get("SID") or "<unknown>"
-            warnings.append(f"block 解析失败,已跳过:SID={sid}, 原因={exc}")
+            warnings.append(f"block 解析失败,已跳过:SID={sid}, 原因={type(exc).__name__}")
             continue
         blocks.append(block)
     return blocks

@@ -12,8 +12,8 @@ Task 锁定。TASK-206 接管后只追加剩余 9 项 handler(``LLMError`` 5 子
    5 个 leaf handler 优先匹配,2 个 base fallback 兜底子类漏注册,
    ``MxaError`` final fallback 兜未知业务异常。
 2. 日志隐私(02 § 12):
-   只记录异常类名 / HTTP code / request path / method,不记录
-   ``str(exc)``(异常 message 可能含用户文件名 / 路径 / 工程片段)。
+   只记录异常类名 / HTTP code / request path / method,不记录异常 message
+   (可能含用户文件名 / 路径 / 工程片段)。
 3. ``ProjectTooLargeError`` 文案动态化:从 ``AppSettings`` 读
    ``max_upload_size_mb`` / ``max_files_per_project``,避免文案与配置漂移。
 4. ``FileTypeNotAllowedError`` 文案不列扩展名:02 § 9 旧文案列了 6 个扩展名,

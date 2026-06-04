@@ -46,7 +46,7 @@ def read_m_file(m_file_path: str) -> str:
     try:
         raw_bytes = path.read_bytes()
     except OSError as exc:
-        raise MParseError(f".m 文件读取失败:{m_file_path}({exc})") from exc
+        raise MParseError(f".m 文件读取失败:{m_file_path}") from exc
 
     if b"\x00" in raw_bytes[:8192]:
         raise MParseError(f".m 文件解析失败:不是有效的文本文件({m_file_path})")

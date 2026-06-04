@@ -34,7 +34,7 @@ def read_xml(slx_zip: ZipFile, inner_path: str) -> ET.Element:
         with slx_zip.open(inner_path) as stream:
             return ET.parse(stream).getroot()
     except ET.ParseError as exc:
-        raise SlxParseError(f"Simulink 模型 XML 损坏,无法解析:{exc}") from exc
+        raise SlxParseError("Simulink 模型 XML 损坏,无法解析") from exc
     except KeyError as exc:
         raise SlxParseError(f".slx 内部结构异常:未找到 {inner_path}") from exc
 
@@ -53,5 +53,5 @@ def read_optional_xml(
     try:
         return read_xml(slx_zip, inner_path)
     except SlxParseError as exc:
-        warnings.append(f"可选 XML 解析失败,已跳过:{inner_path}, 原因={exc}")
+        warnings.append(f"可选 XML 解析失败,已跳过:{inner_path}, 原因={type(exc).__name__}")
         return None
