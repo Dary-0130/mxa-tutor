@@ -153,9 +153,7 @@ def _validate_block_entries(blocks: list[BlockEntry], project: Project) -> None:
 
 
 def _validate_evidence(overview: ProjectOverview, project: Project) -> None:
-    known_block_ids = {
-        block.block_id for model in project.slx_models for block in model.blocks
-    }
+    known_block_ids = {block.block_id for model in project.slx_models for block in model.blocks}
     for ref in overview.evidence:
         if ref.block_id is not None and ref.block_id not in known_block_ids:
             raise OverviewGenerationError("AI 输出包含不存在的 block_id 引用,请刷新重试")

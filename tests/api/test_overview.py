@@ -50,7 +50,9 @@ class _Provider:
         if self.exc is not None:
             raise self.exc
         text = self.payload if isinstance(self.payload, str) else json.dumps(self.payload)
-        return LLMResponse(text=text, prompt_tokens=1, completion_tokens=1, model="fake", latency_ms=1)
+        return LLMResponse(
+            text=text, prompt_tokens=1, completion_tokens=1, model="fake", latency_ms=1
+        )
 
     def capability(self) -> ModelCapability:
         return ModelCapability(model_name="fake")

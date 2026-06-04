@@ -18,7 +18,9 @@ class FakeTextProvider:
         max_tokens: int | None = None,
     ) -> LLMResponse:
         _ = messages, json_mode, timeout, max_tokens
-        return LLMResponse(text="{}", prompt_tokens=0, completion_tokens=0, model="fake", latency_ms=0)
+        return LLMResponse(
+            text="{}", prompt_tokens=0, completion_tokens=0, model="fake", latency_ms=0
+        )
 
     def capability(self) -> ModelCapability:
         return ModelCapability(model_name="fake")

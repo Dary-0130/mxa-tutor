@@ -187,14 +187,6 @@ def make_project():
     return _make
 
 
-class OverviewStoreFake:
-    def __init__(self, project):
-        self.project = project
-
-    async def get_project(self, project_id: str):
-        return self.project
-
-
 class OverviewResolverFake:
     def resolve(self, project) -> str:
         return "general"
@@ -279,7 +271,12 @@ def make_overview_payload() -> dict[str, object]:
         "main_execution_flow": ["打开 main.m", "加载参数", "运行 model.slx"],
         "key_files": make_overview_file_entries("main.m", "helper.m", "model.slx"),
         "key_blocks": [
-            {"block_name": "Gain", "block_type": "Gain", "location": "model.slx / <root>", "why_key": "代表控制增益"}
+            {
+                "block_name": "Gain",
+                "block_type": "Gain",
+                "location": "model.slx / <root>",
+                "why_key": "代表控制增益",
+            }
         ],
         "knowledge_points": ["闭环控制", "PWM", "采样"],
         "beginner_reading_order": ["main.m", "helper.m", "model.slx"],
@@ -292,4 +289,6 @@ def make_overview_response(payload) -> LLMResponse:
     import json
 
     text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
-    return LLMResponse(text=text, prompt_tokens=10, completion_tokens=20, model="fake", latency_ms=1)
+    return LLMResponse(
+        text=text, prompt_tokens=10, completion_tokens=20, model="fake", latency_ms=1
+    )

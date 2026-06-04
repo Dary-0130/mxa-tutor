@@ -97,9 +97,7 @@ def test_project_overview_forbids_extra_fields() -> None:
 
 def test_nested_entries_forbid_extra_fields() -> None:
     payload = _payload()
-    payload["main_entry_files"] = [
-        {"file_path": "main.m", "role": "运行入口", "summary": "extra"}
-    ]
+    payload["main_entry_files"] = [{"file_path": "main.m", "role": "运行入口", "summary": "extra"}]
 
     with pytest.raises(ValidationError):
         ProjectOverview.model_validate(payload)

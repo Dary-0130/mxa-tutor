@@ -22,13 +22,20 @@ from tests.features.overview.conftest import (
     OverviewBuilderFake,
     OverviewProviderFake,
     OverviewResolverFake,
-    OverviewStoreFake,
     make_overview_evidence,
     make_overview_file_entries,
     make_overview_graph,
     make_overview_payload,
     make_overview_response,
 )
+
+
+class OverviewStoreFake:
+    def __init__(self, project: Any) -> None:
+        self.project = project
+
+    async def get_project(self, project_id: str) -> Any:
+        return self.project
 
 
 def _service(project: Any, response: Any) -> ProjectOverviewService:
@@ -118,7 +125,9 @@ async def test_get_or_generate_cache_hit_skips_graph_and_llm(project: Any) -> No
     [LLMAuthError, LLMQuotaError, LLMRateLimitError, LLMServerError, LLMTimeoutError],
 )
 @pytest.mark.asyncio
-async def test_get_or_generate_passes_llm_errors_through(error_type: type[Exception], project: Any) -> None:
+async def test_get_or_generate_passes_llm_errors_through(
+    error_type: type[Exception], project: Any
+) -> None:
     provider = OverviewProviderFake(exc=error_type("x"))
     service = ProjectOverviewService(
         OverviewStoreFake(project),
@@ -167,7 +176,10 @@ def test_parse_and_validate_rejects_duplicate_block_name_wrong_location(
     block_b = make_slx_block("b1", name="Gain", parent_subsystem="CurrentLoop")
     project = make_project(
         files=[make_file_info("model_a.slx", ".slx"), make_file_info("model_b.slx", ".slx")],
-        slx_models=[make_slx_model("model_a.slx", blocks=[block_a]), make_slx_model("model_b.slx", blocks=[block_b])],
+        slx_models=[
+            make_slx_model("model_a.slx", blocks=[block_a]),
+            make_slx_model("model_b.slx", blocks=[block_b]),
+        ],
     )
     payload = make_overview_payload()
     payload["main_entry_files"] = [{"file_path": "model_a.slx", "role": "入口"}]
