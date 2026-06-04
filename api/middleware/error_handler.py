@@ -32,10 +32,18 @@ from loguru import logger
 from app.config import AppSettings
 from core.domain.exceptions import (
     FileTypeNotAllowedError,
+    LLMAuthError,
+    LLMQuotaError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMTimeoutError,
+    MParseError,
     MxaError,
+    OverviewGenerationError,
     ProjectError,
     ProjectNotFoundError,
     ProjectTooLargeError,
+    SlxParseError,
     UploadError,
     ZipBombError,
     ZipSlipError,
@@ -139,6 +147,38 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         (
             MxaError,
             _make_handler(500, "internal_error", "出了点问题,我们已经记录,稍后再试"),
+        ),
+        (
+            LLMAuthError,
+            _make_handler(503, "llm_auth", "服务暂时不可用,请稍后重试"),
+        ),
+        (
+            LLMQuotaError,
+            _make_handler(503, "llm_quota", "服务繁忙,请稍后"),
+        ),
+        (
+            LLMRateLimitError,
+            _make_handler(429, "llm_rate_limit", "请求太频繁,稍等一下"),
+        ),
+        (
+            LLMTimeoutError,
+            _make_handler(504, "llm_timeout", "网络较慢,正在重试..."),
+        ),
+        (
+            LLMServerError,
+            _make_handler(502, "llm_server", "AI 服务暂不稳定,请刷新重试"),
+        ),
+        (
+            SlxParseError,
+            _make_handler(400, "slx_parse", "Simulink 模型解析失败,可能版本过老或损坏"),
+        ),
+        (
+            MParseError,
+            _make_handler(400, "m_parse", ".m 文件解析失败,请检查文件编码"),
+        ),
+        (
+            OverviewGenerationError,
+            _make_handler(502, "overview_generation", "导览生成失败,请刷新重试"),
         ),
     )
     for exc_type, handler in error_handlers:
