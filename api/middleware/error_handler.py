@@ -12,8 +12,8 @@ Task 锁定。TASK-206 接管后只追加剩余 9 项 handler(``LLMError`` 5 子
    5 个 leaf handler 优先匹配,2 个 base fallback 兜底子类漏注册,
    ``MxaError`` final fallback 兜未知业务异常。
 2. 日志隐私(02 § 12):
-   只记录异常类名 / HTTP code / request path / method,不记录
-   ``str(exc)``(异常 message 可能含用户文件名 / 路径 / 工程片段)。
+   只记录异常类名 / HTTP code / request path / method,不记录异常 message
+   (可能含用户文件名 / 路径 / 工程片段)。
 3. ``ProjectTooLargeError`` 文案动态化:从 ``AppSettings`` 读
    ``max_upload_size_mb`` / ``max_files_per_project``,避免文案与配置漂移。
 4. ``FileTypeNotAllowedError`` 文案不列扩展名:02 § 9 旧文案列了 6 个扩展名,
@@ -32,10 +32,18 @@ from loguru import logger
 from app.config import AppSettings
 from core.domain.exceptions import (
     FileTypeNotAllowedError,
+    LLMAuthError,
+    LLMQuotaError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMTimeoutError,
+    MParseError,
     MxaError,
+    OverviewGenerationError,
     ProjectError,
     ProjectNotFoundError,
     ProjectTooLargeError,
+    SlxParseError,
     UploadError,
     ZipBombError,
     ZipSlipError,
@@ -139,6 +147,38 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         (
             MxaError,
             _make_handler(500, "internal_error", "出了点问题,我们已经记录,稍后再试"),
+        ),
+        (
+            LLMAuthError,
+            _make_handler(503, "llm_auth", "服务暂时不可用,请稍后重试"),
+        ),
+        (
+            LLMQuotaError,
+            _make_handler(503, "llm_quota", "服务繁忙,请稍后"),
+        ),
+        (
+            LLMRateLimitError,
+            _make_handler(429, "llm_rate_limit", "请求太频繁,稍等一下"),
+        ),
+        (
+            LLMTimeoutError,
+            _make_handler(504, "llm_timeout", "网络较慢,正在重试..."),
+        ),
+        (
+            LLMServerError,
+            _make_handler(502, "llm_server", "AI 服务暂不稳定,请刷新重试"),
+        ),
+        (
+            SlxParseError,
+            _make_handler(400, "slx_parse", "Simulink 模型解析失败,可能版本过老或损坏"),
+        ),
+        (
+            MParseError,
+            _make_handler(400, "m_parse", ".m 文件解析失败,请检查文件编码"),
+        ),
+        (
+            OverviewGenerationError,
+            _make_handler(502, "overview_generation", "导览生成失败,请刷新重试"),
         ),
     )
     for exc_type, handler in error_handlers:

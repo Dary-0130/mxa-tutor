@@ -72,3 +72,7 @@ class QuotaExhaustedError(MxaError):
 
 class EvidenceMissingError(MxaError):
     """LLM 回答缺少证据引用(被 CitationEnforcer 拦截)。"""
+
+
+class OverviewGenerationError(MxaError):
+    """项目导览生成失败。"""
