@@ -8,9 +8,7 @@ from core.domain.exceptions import StoreError
 async def test_init_schema_creates_tables_and_version(db_path: str) -> None:
     async with open_connection(db_path) as conn:
         await init_schema(conn)
-        cur = await conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        )
+        cur = await conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         tables = {row["name"] for row in await cur.fetchall()}
         version_cur = await conn.execute("SELECT id, version FROM schema_version")
         version = await version_cur.fetchone()

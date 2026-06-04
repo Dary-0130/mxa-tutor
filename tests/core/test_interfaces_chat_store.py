@@ -54,14 +54,10 @@ class _StubChatStore(ChatStore):
             if message.session_id == session_id
         ]
 
-    async def list_recent_sessions(
-        self, project_id: str, limit: int = 20
-    ) -> list[ChatSession]:
-        return [
-            session
-            for session in self.sessions.values()
-            if session.project_id == project_id
-        ][:limit]
+    async def list_recent_sessions(self, project_id: str, limit: int = 20) -> list[ChatSession]:
+        return [session for session in self.sessions.values() if session.project_id == project_id][
+            :limit
+        ]
 
 
 async def test_chat_store_stub_implements_five_methods() -> None:

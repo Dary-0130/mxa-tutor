@@ -71,7 +71,5 @@ def test_lifespan_wires_sqlite_stores_and_status_route(
 
 def _table_names(db_path: Path) -> set[str]:
     with sqlite3.connect(db_path) as conn:
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     return {row[0] for row in rows}

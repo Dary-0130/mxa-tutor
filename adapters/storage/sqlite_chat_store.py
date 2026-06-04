@@ -157,9 +157,7 @@ class SqliteChatStore(ChatStore):
                 raise StoreError("sqlite_operation_failed") from None
         return [_message_from_row(row) for row in rows]
 
-    async def list_recent_sessions(
-        self, project_id: str, limit: int = 20
-    ) -> list[ChatSession]:
+    async def list_recent_sessions(self, project_id: str, limit: int = 20) -> list[ChatSession]:
         if limit > 100 or limit < 0:
             raise ValueError("invalid limit")
 

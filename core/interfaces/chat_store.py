@@ -43,9 +43,7 @@ class ChatStore(ABC):
         ...
 
     @abstractmethod
-    async def list_recent_sessions(
-        self, project_id: str, limit: int = 20
-    ) -> list[ChatSession]:
+    async def list_recent_sessions(self, project_id: str, limit: int = 20) -> list[ChatSession]:
         """按 updated_at DESC 列会话。
 
         - limit <= 100
