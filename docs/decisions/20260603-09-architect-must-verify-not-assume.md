@@ -95,7 +95,7 @@ Makefile target 与 ci.yml steps 经常漂移(实施时一方更新另一方未�
 
 ---
 
-## 反例集 — 18 次踩坑账本(项目累积记录)
+## 反例集 — 19 次踩坑账本(项目累积记录)
 
 | # | 触发位置 | 踩坑 | 根因纪律 | Codex/PM/CI 抓住方式 |
 |---|---|---|---|---|
@@ -117,6 +117,7 @@ Makefile target 与 ci.yml steps 经常漂移(实施时一方更新另一方未�
 | 16 | task-107.md § 输出 line 138 | 凭直觉列 `tests/features/__init__.py` 为必须文件,实际 pytest 默认 `--import-mode=prepend` 不需要 namespace package 显式 init。Codex 实施时漏建反而是更简洁的实现,但报告 17 个文件不含此项让 Step B 核查触发疑问 | 纪律 4 | Step B PM 核查发现(`git diff main --stat` 比对 task 文档预期清单) |
 | 17 | 第八任 chore-pr-execution-plan.md § 2 / § 3 / commit 5 | 凭印象写"反例 12-18"假设编号,同时方案另处给了"按 last_n+1 灵活编号"规则,两套指令矛盾;且 `openai==1.54.0` 实际 10 处误数为 9 处 | 纪律 5 / 纪律 4 同源 | Codex 实地 grep 抓住停手抛冲突 |
 | 18 | task-201 v1 元数据 "无 GPT 一审/二审" 与派活提议 | 凭"基建 Task 类比 task-108"判断审批级别。task-108 是单点决策(BaseSettings 填字段),TASK-201 是 API 层首次定型 + 8 个 multiple-choice 决策点 + 5 下游 Task 直接抄此模式,复杂度不可类比;PM 两次升级才到二审 | 纪律 1 新维度("审批级别"也属于"凭印象 vs 实地核查"范畴,需评估"决策密度 × 下游扩散面") | PM 两轮提问"不需要给 codex 审核就写么" + "等二审完后再重写" 抓住 |
+| 19 | task-202 v0.1 初稿 `process` 异步同步混用 + `logger.exception` 用法 | 凭印象认为 (a) FastAPI / Starlette 在 `async def` BackgroundTask 内自动把阻塞同步代码放线程池,实际只对*同步* endpoint / background task 自动放;async 内同步阻塞 event loop,uvicorn 解析期间全站无响应。(b) `logger.exception(...)` 是 loguru 标准异常日志方式,实际自动落 traceback ≈ 落 `str(exc)`,违反 02 § 12 + 04 § 9 + 01 § 9 三处隐私硬约束。两条均未实地查 Starlette 异步语义 + loguru 文档 | 纪律 1 新维度("框架默认行为"也属于"凭印象 vs 实地核查"范畴,需查框架源 / 文档而非凭"看似合理") | GPT 二审 P0-2 + P0-3 同时抓住;两条均固化为决策 11(20260604-11) |
 
 **共同特征**:每次架构师**有机会**实地核查(view / cat / grep / git ls-files / 看 ci.yml)就能避免,**但没做**。这 8 次踩坑没有任何一次是"知识缺失",全部是"流程缺失"。
 
