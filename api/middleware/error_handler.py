@@ -1,19 +1,19 @@
 """API 层异常 handler 挂载点(不是 ASGI middleware,命名沿用历史目录结构)。
 
-本模块实现 minimal ERROR_MAP:8 个 handler,覆盖 ``UploadError`` /
-``ProjectError`` 异常树 + ``MxaError`` final fallback。
+本模块实现 21 个业务 handler,覆盖上传 / 工程 / LLM / 解析 / 导览 /
+问答异常树 + ``MxaError`` final fallback,并补 2 个 FastAPI 默认 handler 兜底。
 
 响应体 shape ``{"error": "<machine_code>", "message": "<中文文案>"}`` 由本
-Task 锁定。TASK-206 接管后只追加剩余 9 项 handler(``LLMError`` 5 子类 +
-``ParseError`` 2 + ``Quota`` + ``Evidence``)及 404/422 中文化,不改 shape。
+Task 锁定。TASK-206 只追加 ``QuotaExhaustedError`` /
+``EvidenceMissingError`` 两个 leaf handler 及 404/422 中文化,不改 shape。
 
 设计要点:
 1. handler precedence:FastAPI 按 exception class MRO 查找最具体 handler。
-   5 个 leaf handler 优先匹配,2 个 base fallback 兜底子类漏注册,
-   ``MxaError`` final fallback 兜未知业务异常。
+   leaf handler 优先匹配,base fallback 兜底子类漏注册,``MxaError`` final
+   fallback 兜未知业务异常。
 2. 日志隐私(02 § 12):
    只记录异常类名 / HTTP code / request path / method,不记录异常 message
-   (可能含用户文件名 / 路径 / 工程片段)。
+   (可能含用户文件名 / 路径 / 工程片段),也不记录 422 errors() / detail。
 3. ``ProjectTooLargeError`` 文案动态化:从 ``AppSettings`` 读
    ``max_upload_size_mb`` / ``max_files_per_project``,避免文案与配置漂移。
 4. ``FileTypeNotAllowedError`` 文案不列扩展名:02 § 9 旧文案列了 6 个扩展名,
@@ -26,13 +26,16 @@ Task 锁定。TASK-206 接管后只追加剩余 9 项 handler(``LLMError`` 5 子
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from loguru import logger
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import AppSettings
 from core.domain.exceptions import (
     ChatGenerationError,
     ChatSessionNotFoundError,
+    EvidenceMissingError,
     FileTypeNotAllowedError,
     LLMAuthError,
     LLMQuotaError,
@@ -45,6 +48,7 @@ from core.domain.exceptions import (
     ProjectError,
     ProjectNotFoundError,
     ProjectTooLargeError,
+    QuotaExhaustedError,
     SlxParseError,
     StoreError,
     UploadError,
@@ -102,14 +106,40 @@ def _make_project_too_large_handler(settings: AppSettings) -> ExceptionHandler:
 
 
 def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
-    """注册 8 个 exception handler。
+    """注册 21 个业务 handler + 2 个 FastAPI 默认 handler 兜底。
 
     注册顺序不影响 FastAPI 行为(FastAPI 按 MRO 查找最具体 handler),
-    但注册表按 "leaf -> base fallback -> final fallback" 组织,便于 review。
+    现有 tuple 顺序保持不重组,仅在末尾追加 2 个 leaf handler。
 
-    Placeholder: TASK-206 接管后,在本函数末尾追加剩余 9 项 handler 注册,
-    不改前 8 个。
+    业务 handler 覆盖 Upload / Project / LLM / Parse / Overview / Chat /
+    Quota / Evidence 子树;HTTP 404 / 405 / 其他 HTTPException 与 422
+    RequestValidationError 在本函数内统一中文化并脱敏。
     """
+
+    async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        status_code = exc.status_code if isinstance(exc, StarletteHTTPException) else 500
+        if status_code == 404:
+            machine_code = "not_found"
+            message = "请求的资源不存在"
+        elif status_code == 405:
+            machine_code = "method_not_allowed"
+            message = "请求方式不正确"
+        else:
+            machine_code = "http_error"
+            message = "请求处理失败,请稍后重试"
+        _log_error(request, exc, status_code)
+        return JSONResponse(
+            status_code=status_code,
+            content={"error": machine_code, "message": message},
+        )
+
+    async def validation_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        _log_error(request, exc, 422)
+        return JSONResponse(
+            status_code=422,
+            content={"error": "validation_error", "message": "请求参数有问题,请检查后重试"},
+        )
+
     error_handlers: tuple[ErrorHandlerSpec, ...] = (
         (
             ZipBombError,
@@ -195,6 +225,16 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
             ChatGenerationError,
             _make_handler(502, "chat_generation", "回答生成失败,请刷新重试"),
         ),
+        (
+            QuotaExhaustedError,
+            _make_handler(402, "quota_exhausted", "已达到合理使用上限,可联系加量"),
+        ),
+        (
+            EvidenceMissingError,
+            _make_handler(500, "evidence_missing", "出了点问题,我们已经记录,稍后再试"),
+        ),
     )
     for exc_type, handler in error_handlers:
         app.add_exception_handler(exc_type, handler)
+    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
