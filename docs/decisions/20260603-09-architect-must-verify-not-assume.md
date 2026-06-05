@@ -190,3 +190,15 @@ GPT R1 + R2 都没抓到(GPT 看不到 main 代码),Codex Stage 0 实地核查�
 
 反例 21 / 22 / 23 / 24 共同特征:本会话第十三任接连 4 次"凭印象"同源失败,接续反例 19 / 20 教训。
 下一任架构师交接 KPI 强化:实地核查 git log / 文件状态 / grep / 代码骨架兜底再下笔。
+
+
+反例 25(2026-06-05 / 第十四任 / TASK-206 review 阶段兜底命令):
+架构师在写给 PM 跑的 grep 兜底命令时,没本地实测 `^\s+\(\s*[A-Z]\w+Error,` 这种 ERE 正则在 Windows Git Bash GNU grep 下是否解析 `\s`,结果 PM 跑出 0 命中,差点被误读为"tuple entry 不存在"。
+实际原因:`\s` 在 Git Bash GNU grep ERE 下可能不解析为 [[:space:]] 字符类(POSIX BRE/ERE 标准不要求支持)。
+教训接续反例 14(bash 中文括号坑)/ 反例 24(grep POSIX vs Perl):任何给 PM 的 grep 命令,架构师必须用 `[[:space:]]` / `[ ]` / `' '` 等 POSIX 兼容字符类,禁用 `\s` / `\d` / `\w`(`\w` 在 GNU ERE 支持但 BSD 不支持,跨平台风险)。
+幸好本次有 2 条兜底命令冗余(`_make_handler\(|_make_project_too_large_handler\(`)+ sed 视觉确认,review 决策正确。但单条 grep 失败 = 应触发架构师重测,而不是直接接受 0 命中。
+
+第十五任 KPI 升级(本决策末尾追加):
+- 任何写给 PM 的 grep / sed / awk 命令,架构师本地实测一次确认输出形态再下笔(反例 24 / 25 同源)
+- 跨平台 grep 用 POSIX 字符类 `[[:space:]]` / `[[:upper:]]` / `[[:alpha:]]`,禁用 `\s` / `\d` / `\w` / `\b` 等 Perl 风格
+- 任何 grep 输出 0 时,架构师默认假设"我的 grep 写错"而不是"代码不存在",再用 2-3 种不同 grep / sed 兜底交叉确认
