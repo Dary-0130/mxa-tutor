@@ -57,4 +57,5 @@ def test_404_for_unknown_path() -> None:
         response = client.get("/nonexistent")
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "Not Found"}
+    assert response.json() == {"error": "not_found", "message": "请求的资源不存在"}
+    assert "detail" not in response.text
