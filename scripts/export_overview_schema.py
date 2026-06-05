@@ -38,7 +38,6 @@ def main() -> int:
     OUTPUT_PATH.write_bytes(
         (json.dumps(schema, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     )
-    print(f"Exported schema to {OUTPUT_PATH}")
     return 0
 
 
