@@ -1,4 +1,4 @@
-.PHONY: install dev test lint format type-check hygiene check clean
+.PHONY: install dev test lint format type-check hygiene check clean export-schema verify-schema
 
 install:
 	pip install -r requirements-dev.txt
@@ -28,3 +28,10 @@ check: lint type-check test hygiene
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	rm -rf .pytest_cache .mypy_cache .ruff_cache
+
+export-schema:
+	python -m scripts.export_overview_schema
+
+verify-schema: export-schema
+	@git diff --exit-code schemas/project_overview.schema.json \
+		|| (echo "schemas/project_overview.schema.json drifted. Regenerate with 'make export-schema' and commit." && exit 1)
