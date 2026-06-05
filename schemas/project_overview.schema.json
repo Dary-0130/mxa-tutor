@@ -1,0 +1,275 @@
+{
+  "$defs": {
+    "BlockEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "block_name": {
+          "minLength": 1,
+          "title": "Block Name",
+          "type": "string"
+        },
+        "block_type": {
+          "minLength": 1,
+          "title": "Block Type",
+          "type": "string"
+        },
+        "location": {
+          "minLength": 1,
+          "title": "Location",
+          "type": "string"
+        },
+        "why_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Why Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "block_name",
+        "block_type",
+        "location",
+        "why_key"
+      ],
+      "title": "BlockEntry",
+      "type": "object"
+    },
+    "EntryFileEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "file_path": {
+          "minLength": 1,
+          "title": "File Path",
+          "type": "string"
+        },
+        "role": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "role"
+      ],
+      "title": "EntryFileEntry",
+      "type": "object"
+    },
+    "KeyFileEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "file_path": {
+          "minLength": 1,
+          "title": "File Path",
+          "type": "string"
+        },
+        "why_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Why Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "why_key"
+      ],
+      "title": "KeyFileEntry",
+      "type": "object"
+    },
+    "SimulinkModelEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "file_path": {
+          "minLength": 1,
+          "title": "File Path",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path",
+        "summary"
+      ],
+      "title": "SimulinkModelEntry",
+      "type": "object"
+    },
+    "SourceRefEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "file_path": {
+          "minLength": 1,
+          "title": "File Path",
+          "type": "string"
+        },
+        "line_range": {
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Range"
+        },
+        "block_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Id"
+        }
+      },
+      "required": [
+        "file_path"
+      ],
+      "title": "SourceRefEntry",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "project_title": {
+      "maxLength": 30,
+      "minLength": 1,
+      "title": "Project Title",
+      "type": "string"
+    },
+    "project_type": {
+      "enum": [
+        "control_system",
+        "signal_processing",
+        "power_electronics",
+        "communication",
+        "motor_control",
+        "new_energy",
+        "general"
+      ],
+      "title": "Project Type",
+      "type": "string"
+    },
+    "one_sentence_summary": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "One Sentence Summary",
+      "type": "string"
+    },
+    "main_entry_files": {
+      "items": {
+        "$ref": "#/$defs/EntryFileEntry"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Main Entry Files",
+      "type": "array"
+    },
+    "main_simulink_models": {
+      "items": {
+        "$ref": "#/$defs/SimulinkModelEntry"
+      },
+      "maxItems": 5,
+      "title": "Main Simulink Models",
+      "type": "array"
+    },
+    "main_execution_flow": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 7,
+      "minItems": 3,
+      "title": "Main Execution Flow",
+      "type": "array"
+    },
+    "key_files": {
+      "items": {
+        "$ref": "#/$defs/KeyFileEntry"
+      },
+      "maxItems": 8,
+      "minItems": 3,
+      "title": "Key Files",
+      "type": "array"
+    },
+    "key_blocks": {
+      "items": {
+        "$ref": "#/$defs/BlockEntry"
+      },
+      "maxItems": 10,
+      "title": "Key Blocks",
+      "type": "array"
+    },
+    "knowledge_points": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 6,
+      "minItems": 3,
+      "title": "Knowledge Points",
+      "type": "array"
+    },
+    "beginner_reading_order": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 6,
+      "minItems": 3,
+      "title": "Beginner Reading Order",
+      "type": "array"
+    },
+    "likely_confusing_points": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 5,
+      "minItems": 2,
+      "title": "Likely Confusing Points",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/SourceRefEntry"
+      },
+      "minItems": 3,
+      "title": "Evidence",
+      "type": "array"
+    }
+  },
+  "required": [
+    "project_title",
+    "project_type",
+    "one_sentence_summary",
+    "main_entry_files",
+    "main_simulink_models",
+    "main_execution_flow",
+    "key_files",
+    "key_blocks",
+    "knowledge_points",
+    "beginner_reading_order",
+    "likely_confusing_points",
+    "evidence"
+  ],
+  "title": "ProjectOverview",
+  "type": "object"
+}
