@@ -117,8 +117,8 @@ P2 v0.1 不承诺:
 | TASK-203 | ProjectOverviewService(基于 ProjectGraph,TeachingUnit 接口预留) | ✅ | Codex | 106, 107 |
 | TASK-204 | SQLite 存储层(Project + Chat) | ✅ | Codex | 101 |
 | TASK-205 | **粗 RAG 问答 API(关键词 + metadata 检索)** ⭐ | ✅ | Codex | 203, 204 |
-| TASK-206 | 错误处理 + 中文化 | 🔍 | Codex | 201-205 |
-| TASK-207 | **ProjectOverview Schema + 教学输出契约** ⭐ | 🔲 | Codex | 203 |
+| TASK-206 | 错误处理 + 中文化 | ✅ | Codex | 201-205 |
+| TASK-207 | **ProjectOverview Schema + 教学输出契约** ⭐ | 🔍 | Codex | 203 |
 
 ### Week 2 验收
 
@@ -335,11 +335,11 @@ P2 v0.1 不承诺:
 ```
 Week 0:  [✅✅✅⬜]              3/4
 Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
-Week 2:  [✅✅✅✅✅🔍⬜]         5/7  (含 TASK-207)
+Week 2:  [✅✅✅✅✅✅🔍]         6/7  (含 TASK-207)
 Week 3:  [⬜⬜⬜⬜⬜⬜⬜]         0/7  (含 TASK-307)
 Week 4:  [⬜⬜⬜⬜⬜⬜]           0/6
 
-总计: 16/32
+总计: 17/32
 ```
 
 ---
