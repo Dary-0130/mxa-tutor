@@ -16,6 +16,7 @@ from core.domain.project_graph import ProjectGraph
 from core.interfaces.llm_provider import LLMResponse, TextProvider
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
+from features.chunking import ChunkingService
 
 from ._overview_cache import OverviewCache
 from ._prompt_builder import build_messages
@@ -42,6 +43,7 @@ class ProjectOverviewService:
         cache: OverviewCache,
         project_type_resolver: ProjectTypeResolver,
         text_provider: TextProvider,
+        chunking_service: ChunkingService,
         graph_builder_factory: Callable[[], ProjectGraphBuilderLike] | None = None,
         timeout: float = DEFAULT_OVERVIEW_TIMEOUT_SECONDS,
         max_tokens: int = DEFAULT_OVERVIEW_MAX_TOKENS,
@@ -50,6 +52,7 @@ class ProjectOverviewService:
         self._cache = cache
         self._project_type_resolver = project_type_resolver
         self._text_provider = text_provider
+        self._chunking_service = chunking_service
         self._graph_builder_factory = graph_builder_factory or ProjectGraphBuilder
         self._timeout = timeout
         self._max_tokens = max_tokens
@@ -60,6 +63,14 @@ class ProjectOverviewService:
         cached = await self._cache.get(project_id)
         if cached is not None:
             logger.info("Overview cache hit: project_id={}", project_id)
+            try:
+                await self._chunking_service.build_embed_store_overview_chunk(cached, project_id)
+            except Exception as exc:
+                logger.error(
+                    "overview_chunking_failed_on_cache_hit: project_id={} exception={}",
+                    project_id,
+                    type(exc).__name__,
+                )
             return cached
 
         graph = await asyncio.to_thread(self._build_graph_sync, project)
@@ -80,6 +91,14 @@ class ProjectOverviewService:
         )
         overview = self._parse_and_validate(response, project)
         await self._cache.put(project_id, overview)
+        try:
+            await self._chunking_service.build_embed_store_overview_chunk(overview, project_id)
+        except Exception as exc:
+            logger.error(
+                "overview_chunking_failed: project_id={} exception={}",
+                project_id,
+                type(exc).__name__,
+            )
         return overview
 
     def _build_graph_sync(self, project: Project) -> ProjectGraph:

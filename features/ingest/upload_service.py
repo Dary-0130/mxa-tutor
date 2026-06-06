@@ -28,6 +28,7 @@ from core.domain.project import FileInfo, Project, ProjectType
 from core.domain.project_status import ProjectStatusErrorCode
 from core.interfaces.parser import MParser, SlxParser
 from core.interfaces.project_store import ProjectStore
+from features.chunking import ChunkingService
 
 ExtractFn: TypeAlias = Callable[[bytes, Path], Path]
 ClassifyFn: TypeAlias = Callable[[Path, Path], list[FileInfo]]
@@ -81,6 +82,7 @@ class UploadService:
         slx_parser: SlxParser,
         m_parser: MParser,
         dependency_analyzer: DependencyAnalyzeFn,
+        chunking_service: ChunkingService,
     ) -> None:
         self._store = store
         self._upload_dir = upload_dir
@@ -90,6 +92,7 @@ class UploadService:
         self._slx_parser = slx_parser
         self._m_parser = m_parser
         self._dependency_analyzer = dependency_analyzer
+        self._chunking_service = chunking_service
 
     def check_declared_size(self, declared_size: int | None) -> None:
         """第一道防线:HTTP 表头 size 校验,不读 body 即拒。"""
@@ -133,6 +136,14 @@ class UploadService:
                 len(project.slx_models),
                 len(project.m_files),
             )
+            try:
+                await self._chunking_service.build_embed_store_project_chunks(project)
+            except Exception as exc:
+                logger.error(
+                    "project_chunking_failed: project_id={} exception={}",
+                    project_id,
+                    type(exc).__name__,
+                )
         except MxaError as exc:
             error_code = _classify_error(exc)
             logger.error(

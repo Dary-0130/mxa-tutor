@@ -56,6 +56,18 @@ class FakeMParser(MParser):
         )
 
 
+class NoopChunkingService:
+    def __init__(self, exc: Exception | None = None) -> None:
+        self.exc = exc
+        self.calls = []
+
+    async def build_embed_store_project_chunks(self, project) -> int:
+        self.calls.append(project)
+        if self.exc is not None:
+            raise self.exc
+        return 0
+
+
 def _service(
     tmp_path: Path,
     *,
@@ -65,6 +77,7 @@ def _service(
     classifier_exc: Exception | None = None,
     slx_exc: Exception | None = None,
     m_exc: Exception | None = None,
+    chunking_exc: Exception | None = None,
     max_upload_bytes: int = 10,
 ) -> tuple[UploadService, InMemoryProjectStore]:
     actual_store = store or InMemoryProjectStore()
@@ -99,6 +112,7 @@ def _service(
             slx_parser=FakeSlxParser(slx_exc),
             m_parser=FakeMParser(m_exc),
             dependency_analyzer=dependency_analyzer,
+            chunking_service=NoopChunkingService(chunking_exc),
         ),
         actual_store,
     )
@@ -199,6 +213,16 @@ async def test_process_happy_path_marks_ready_with_project(tmp_path: Path) -> No
     assert project.id == "p1"
     assert len(project.slx_models) == 1
     assert len(project.m_files) == 1
+
+
+async def test_process_chunking_failure_keeps_ready_status(tmp_path: Path) -> None:
+    service, store = _service(tmp_path, chunking_exc=RuntimeError("boom"))
+    await store.create_pending("p1", "demo.zip")
+
+    await service.process("p1", b"zip", "demo.zip")
+
+    view = await store.get_status_view("p1")
+    assert view.status == "ready"
 
 
 async def test_process_uses_to_thread_for_sync_parsers(tmp_path: Path, mocker) -> None:
