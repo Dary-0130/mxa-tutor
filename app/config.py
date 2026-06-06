@@ -24,6 +24,14 @@ class AppSettings(BaseSettings):
     vector_top_k: int = Field(default=8, ge=1, le=50)
     vector_min_score: float = Field(default=0.3, ge=-1.0, le=1.0)
 
+    # Chunking(TASK-303 新增)
+    chunking_max_source_text_chars: int = Field(default=1024, ge=64, le=4096)
+    chunking_docstring_max_chars: int = Field(default=300, ge=0, le=1000)
+    chunking_param_value_max_chars: int = Field(default=80, ge=0, le=500)
+    chunking_max_params_per_block: int = Field(default=12, ge=0, le=50)
+    chunking_max_subsystem_child_block_names: int = Field(default=20, ge=0, le=100)
+    chunking_description_max_chars: int = Field(default=300, ge=0, le=1000)
+
     # Storage
     db_path: str = "./data/mxa.db"
     upload_dir: str = "./data/uploads"

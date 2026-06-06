@@ -35,6 +35,7 @@ from core.domain.exceptions import EmbeddingModelLoadError
 from features.chat import KeywordRetriever
 from features.chat._prompt_builder import ChatPromptBuilder
 from features.chat.chat_service import ChatService
+from features.chunking import ChunkingService
 from features.ingest.cleanup_worker import CleanupWorker
 from features.overview import InMemoryOverviewCache
 from features.overview.project_graph_builder import ProjectGraphBuilder
@@ -85,7 +86,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             raise EmbeddingModelLoadError("model_load_failed") from None
 
         app.state.embedder = embedder
-        app.state.vector_store = SqliteVectorStore(settings.db_path)
+        vector_store = SqliteVectorStore(settings.db_path)
+        app.state.vector_store = vector_store
+        app.state.chunking_service = ChunkingService(
+            embedder=embedder,
+            vector_store=vector_store,
+            graph_provider=ProjectGraphBuilder(),
+            settings=settings,
+        )
         app.state.overview_cache = InMemoryOverviewCache()
         app.state.text_provider = DeepSeekTextProvider(
             api_key=settings.deepseek_api_key,
@@ -98,7 +106,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             retriever=KeywordRetriever(graph_provider=ProjectGraphBuilder()),
             prompt_builder=ChatPromptBuilder(),
         )
-        stack.push_async_callback(app.state.vector_store.aclose)
+        stack.push_async_callback(app.state.chunking_service.aclose)
+        stack.push_async_callback(vector_store.aclose)
         stack.push_async_callback(chat_store.aclose)
         stack.push_async_callback(store.aclose)
 

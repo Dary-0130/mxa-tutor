@@ -38,6 +38,22 @@ class OverviewStoreFake:
         return self.project
 
 
+class NoopChunkingService:
+    def __init__(self, exc: Exception | None = None) -> None:
+        self.exc = exc
+        self.calls: list[tuple[ProjectOverview, str]] = []
+
+    async def build_embed_store_overview_chunk(
+        self,
+        overview: ProjectOverview,
+        project_id: str,
+    ) -> int:
+        self.calls.append((overview, project_id))
+        if self.exc is not None:
+            raise self.exc
+        return 0
+
+
 def _service(project: Any, response: Any) -> ProjectOverviewService:
     builder = OverviewBuilderFake(make_overview_graph())
     return ProjectOverviewService(
@@ -45,6 +61,7 @@ def _service(project: Any, response: Any) -> ProjectOverviewService:
         InMemoryOverviewCache(),
         OverviewResolverFake(),
         OverviewProviderFake(response=response),
+        chunking_service=NoopChunkingService(),
         graph_builder_factory=lambda: builder,
     )
 
@@ -88,6 +105,7 @@ async def test_get_or_generate_miss_uses_to_thread_twice(
         InMemoryOverviewCache(),
         OverviewResolverFake(),
         provider,
+        chunking_service=NoopChunkingService(),
         graph_builder_factory=lambda: builder,
     )
 
@@ -112,6 +130,7 @@ async def test_get_or_generate_cache_hit_skips_graph_and_llm(project: Any) -> No
         cache,
         OverviewResolverFake(),
         provider,
+        chunking_service=NoopChunkingService(),
         graph_builder_factory=lambda: builder,
     )
 
@@ -134,6 +153,7 @@ async def test_get_or_generate_passes_llm_errors_through(
         InMemoryOverviewCache(),
         OverviewResolverFake(),
         provider,
+        chunking_service=NoopChunkingService(),
         graph_builder_factory=lambda: OverviewBuilderFake(make_overview_graph()),
     )
 
