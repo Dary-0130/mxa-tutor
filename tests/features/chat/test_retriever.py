@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import get_args
 
 import pytest
 
@@ -8,7 +9,7 @@ from core.domain.m_file import MFile, MFunction
 from core.domain.project import FileInfo, Project, ProjectType
 from core.domain.project_graph import ProjectGraph
 from core.domain.slx_model import SlxBlock, SlxModel
-from features.chat._retriever import KeywordRetriever, _tokenize
+from features.chat._retriever import KeywordRetriever, SourceType, _tokenize
 
 
 class GraphProvider:
@@ -87,6 +88,19 @@ def test_tokenizer_splits_camel_snake_slash_and_alias() -> None:
 
     assert {"speed", "speedloop"} & tokens
     assert {"speed", "controller", "current", "loop", "pid", "kp"} <= tokens
+
+
+def test_source_type_literal_includes_eight_values() -> None:
+    assert set(get_args(SourceType)) == {
+        "file",
+        "function",
+        "block",
+        "subsystem",
+        "param",
+        "overview",
+        "graph_entry",
+        "unresolved",
+    }
 
 
 @pytest.mark.asyncio
