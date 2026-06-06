@@ -202,3 +202,36 @@ GPT R1 + R2 都没抓到(GPT 看不到 main 代码),Codex Stage 0 实地核查�
 - 任何写给 PM 的 grep / sed / awk 命令,架构师本地实测一次确认输出形态再下笔(反例 24 / 25 同源)
 - 跨平台 grep 用 POSIX 字符类 `[[:space:]]` / `[[:upper:]]` / `[[:alpha:]]`,禁用 `\s` / `\d` / `\w` / `\b` 等 Perl 风格
 - 任何 grep 输出 0 时,架构师默认假设"我的 grep 写错"而不是"代码不存在",再用 2-3 种不同 grep / sed 兜底交叉确认
+
+
+反例 26(2026-06-05 / 第十五任 / TASK-207 实施 CI hygiene fail):
+架构师在 task-207 v0.2 § 6.2 / § 7.2 写 `scripts/export_overview_schema.py` 含 `print(f"Exported schema to {out_path}")`,未实地核查 `scripts/check_repo_hygiene.sh` + `scripts/check_repo_hygiene.py` 对 "no print in non-test .py" 的禁令;且 § 11.2 #4 验收清单只列 `make lint && make type-check && python -m ruff format --check`,漏 `make hygiene` / `make check`。
+GPT R1 没抓(GPT 看不到 hygiene 脚本)。Codex 严格 follow 文档跑了三条,没跑 hygiene 也没跑 `make check`,所以本地全绿。CI 跑 `bash scripts/check_repo_hygiene.sh`,FAIL。
+接续反例 8(make check vs CI 实际命令漂移)/ 反例 24 / 25 同源:凭印象写代码 + 凭印象写验收清单。
+
+第十六任 KPI 升级(本决策末尾追加):
+- 架构师写任何 `scripts/*.py` 前必须 `cat scripts/check_repo_hygiene.sh` + `cat scripts/check_repo_hygiene.py` 实地核查所有 6 条规则(.gitignore / .env.example 字段 / 无 sk-real 字面 / 无 TODO/FIXME/XXX / 无 print 非测试 / 无裸 except)
+- 验收清单 #4 必须用 `make check` 全管道,禁拆条核查 lint / type-check / format / test / hygiene;若必须拆条,**先 view `.github/workflows/ci.yml` 全 step 逐条对齐**(决策 09 纪律 7 hard enforce 升级)
+
+
+反例 27(2026-06-05 / 第十六任 / TASK-301 v0.1 R1 P0-1):
+架构师在 TASK-301 v0.1 § 11.2 #5/#6 + D7 中假设 `@pytest.mark.integration` 标记的测试在 CI 默认 `pytest -v --tb=short` 命令下"默认跳过",**未实地核查 `pyproject.toml` 是否含 `[tool.pytest.ini_options].addopts = "-m 'not integration'"`**;PM 实地 `cat pyproject.toml` 确认 addopts 不存在 + markers 也未注册,意味着 integration test 会在 CI 真实跑,触发 sentence-transformers 100MB 模型下载,直接违背 D7 的 "CI 快速 + 无网络" 假设。
+GPT R1 P0-1 抓住;v0.2 改用 `RUN_EMBEDDING_INTEGRATION=1` env var skipif 显式 opt-in,不动全局 addopts(避免扩散到其他 Task)。
+接续反例 19(框架默认行为假设 / Starlette async 自动线程池)/ 反例 26(scripts/* hygiene 默认行为)同源:"工具默认行为"陈述前必须 cat 工具配置文件实地核查。
+
+第十七任 KPI 升级(本决策末尾追加,叠在第十六任 KPI 之上):
+- 任何文档引用"pytest mark X 默认跳过 / skipif / parametrize / asyncio_mode / strict-markers"等行为前,必须 `cat pyproject.toml` + 必要时 `cat tests/conftest.py` 实地核查 `[tool.pytest.ini_options]` 段
+- 任何文档引用"mypy 会 / 不会检查 X 模块"前,必须 `cat pyproject.toml` 实地核查 `[tool.mypy]` + 所有 `[[tool.mypy.overrides]]` 条目
+- 任何文档引用"ruff 会 / 不会检查 X 规则 / 路径"前,必须 `cat pyproject.toml` 实地核查 `[tool.ruff]` + `[tool.ruff.lint]` 段
+- 接续反例 19 / 反例 26:**所有"工具默认行为"陈述前必须 cat 工具配置文件实地核查**,不能凭"标准用法应该是这样"印象写
+
+
+反例 28(2026-06-05 / 第十六任 / TASK-301 v0.2 实施 Stage 0 #2 阻塞):
+架构师在 task-301 v0.2 § Stage 0 #2 写 `head -30 adapters/llm/deepseek.py` 期望 "`__init__(api_key, base_url, model, retry_count)` 模式 + 模块级 DEFAULT_* 常量",**未实地数 deepseek.py 前 30 行包含什么**;实际前 30 行只到 CAPABILITY 字典开头(line 28-30),`__init__` 在 line 60+。Codex 严格 follow Stage 0 跑 head -30 后,前 30 行不含 `__init__`,触发停手(决策 09 纪律 1 正确生效)。
+GPT R1 没抓(GPT 不跑 head -30)。
+接续反例 24 / 25 / 26 / 27 同源:"凭印象写预期 X" vs "实地实测预期 X"。本会话第十六任 R1 P0 后第 4 次同源踩坑。
+
+第十八任 KPI 升级(本决策末尾追加,叠在第十六任 + 第十七任 KPI 之上):
+- 任何 Stage 0 / 验收清单 grep / head / sed / cat 命令的"预期输出"前,架构师必须**本地真实跑一遍这条命令**(在自己工作区或基于 PM 提供的真实文件输出),把实际输出复制粘贴作为预期。禁"凭命令名应该输出 X"印象写。
+- 优先用 `grep -nE '<锚点>'` 命中验证(锚点存在即过),次选 `sed -n '<line>,<line>p'` 输出特定行范围;**避免** `head -N` / `tail -N` 这种依赖"前 N 行包含某内容"的命令(行数 N 凭印象选,极易踩坑)
+- 接续反例 19 / 26 / 27 同源:**所有"X 命令输出 Y 内容"陈述前必须本地实测一次**,这是架构师工作流硬约束

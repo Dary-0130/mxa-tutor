@@ -51,7 +51,7 @@
 - 任何文档引用"mypy 会/不会检查 X 模块"前,必须 `cat pyproject.toml` 实地核查 `[tool.mypy]` + `[[tool.mypy.overrides]]` 全部条目
 - 接续反例 19(Starlette async 默认行为)/ 反例 26(scripts/* hygiene 默认行为):**所有"工具默认行为"陈述前必须 cat 工具配置文件实地核查**
 
-D8 搭车 chore 由 v0.1 的 3 项扩成 v0.2 的 **4 项**(反例 26 + **反例 27** + 03 索引 + 04 § 10)。
+D8 搭车 chore 由 v0.1 的 3 项扩成 v0.2 erratum 后的 **6 项**(反例 26 + **反例 27** + **反例 28** + 03 索引 + 04 § 10 + TASK-301 Stage 0 #2 文档自修)。
 
 ### 升级触发条件提醒(R1 重申)
 
@@ -178,9 +178,9 @@ deepseek_base_url: str = "https://api.deepseek.com"
 - `docs/decisions/20260601-06`(Codex 可读仓库,设计文档引用而非内联)
 - `docs/decisions/20260601-07`(03 索引更新边界,本 Task 搭车 chore + **04 修订需 PM 例外授权**,见 D8)
 - `docs/decisions/20260602-08`(PM 验 git + 字节级 Python 改 docs)
-- `docs/decisions/20260603-09`(架构师必须实地核查,反例 26 + 反例 27 本 Task D8 入仓)
+- `docs/decisions/20260603-09`(架构师必须实地核查,反例 26 + 反例 27 + 反例 28 本 Task D8 入仓)
 - `docs/decisions/20260604-11`(async + to_thread / logger.error metadata-only)
-- 反例 21-25(已入仓)+ **反例 26 + 反例 27 候选(本 Task D8 入仓)**
+- 反例 21-25(已入仓)+ **反例 26 + 反例 27 + 反例 28 候选(本 Task D8 入仓)**
 
 ---
 
@@ -198,7 +198,7 @@ deepseek_base_url: str = "https://api.deepseek.com"
 | `tests/adapters/embedding/test_sentence_transformer_unit.py` | mock `SentenceTransformer` 类的 unit test(含 P2-1 strip 单测)| 90-130 |
 | `tests/adapters/embedding/test_sentence_transformer_integration.py` | **P0-1**:用 `RUN_EMBEDDING_INTEGRATION=1` skipif env + `@pytest.mark.integration / slow`,默认跳过 | 40-60 |
 
-### 修改文件(5 个 + 4 个搭车 chore)
+### 修改文件(5 个 + 6 个搭车 chore)
 
 | 文件 | 修改 | 工艺 |
 |---|---|---|
@@ -207,8 +207,9 @@ deepseek_base_url: str = "https://api.deepseek.com"
 | `requirements.txt` | 末尾追加 `sentence-transformers==3.3.0`(**P1-1**:尾换行检测)| 字节级 Python |
 | `pyproject.toml` | **P1-3 + P2-3 + P0-1 新增**:加 `[[tool.mypy.overrides]] module = "sentence_transformers.*"` + `[tool.pytest.ini_options] markers = [...]` 注册 | 字节级 Python |
 | `docs/04_ENGINEERING_STANDARDS.md` | **搭车 chore + D8 PM 例外授权**:§ 10 line 552-566 修订 `ERROR_MAP` dict 字面 → `error_handlers: tuple[...]`(**P0-3** fence 边界替换 + **P0-4** 例外授权明示)| 字节级 Python |
-| `docs/decisions/20260603-09-architect-must-verify-not-assume.md` | **搭车 chore**:末尾追加 **反例 26 + 反例 27**(D8 升级)+ 第十六任 + 第十七任 KPI 升级 | 字节级 Python |
+| `docs/decisions/20260603-09-architect-must-verify-not-assume.md` | **搭车 chore**:末尾追加 **反例 26 + 反例 27 + 反例 28**(D8 升级)+ 第十六任 + 第十七任 + 第十八任 KPI 升级 | 字节级 Python |
 | `docs/03_TASK_INDEX.md` | **搭车 chore**:**7 行字面修订**(P0-2 升级,见 § 9.5.2) | 字节级 Python |
+| `docs/tasks/task-301-embedding-adapter.md` | **搭车 chore 5**:§ Stage 0 #2 erratum(把 head -30 错误预期改为 grep -nE,反例 28 修订) | 字节级 Python |
 
 ### 不动文件(明示)
 
@@ -241,7 +242,7 @@ deepseek_base_url: str = "https://api.deepseek.com"
 - [ ] unit test 通过 `mocker.patch("adapters.embedding.sentence_transformer.SentenceTransformer")` mock 模型加载,**不真实下载**;覆盖:正常初始化 / 默认值 / embed 返回正确 shape / dimension 调用 / normalize 行为 / **P2-1 strip 单测**
 - [ ] **P0-1**:integration test 用 `RUN_EMBEDDING_INTEGRATION=1` env var skipif,**默认跳过**;**P1-5**:`dimension == 512` 钉死契约(理由见 § 9.8 docstring)
 - [ ] **make check 全管道 0 errors**(反例 26 KPI 第一次硬执行)
-- [ ] 搭车 chore 4 项(详见 § 9.5)
+- [ ] 搭车 chore 6 项(详见 § 9.5)
 
 ### 不做(明确排除)
 
@@ -515,7 +516,7 @@ data += b"sentence-transformers==3.3.0\n"
 p.write_bytes(data)
 ```
 
-### 9.5 搭车 chore 4 项
+### 9.5 搭车 chore 6 项
 
 #### 9.5.1 反例 26 + 反例 27 + KPI 入仓决策 09(**D8 升级,沿用反例 21-25 同款 patch**)
 
@@ -1132,13 +1133,15 @@ except Exception as exc:
 - C. CI 跑 integration 强制真实加载。**为何不选**:CI +5-10min + HuggingFace flaky 风险
 - D. 不写 integration test。**为何不选**:无 integration 测试无法证明实地可用
 
-### D8 — 搭车 chore 4 项(**P0-4 PM 决策 07 一次性显式例外授权**)
+### D8 — 搭车 chore 6 项(**P0-4 PM 决策 07 一次性显式例外授权**)
 
-**搭车范围**(v0.1 → v0.2 由 3 项升 4 项):
+**搭车范围**(v0.1 → v0.2 erratum 后由 3 项升 6 项):
 1. **反例 26** + 第十六任 KPI 入仓决策 09(第十五任 TASK-207 治理候选)
 2. **反例 27** + 第十七任 KPI 入仓决策 09(**v0.2 新增**:第十六任 TASK-301 v0.1 R1 P0-1 治理候选)
 3. **03 索引 7 行修订**(P0-2 升级:TASK-207 ✅ + TASK-301 🔍 + Week 2 7/7 + Week 3 [🔍...] + 18/32 + line 349 + 日期)
 4. **04 § 10 ERROR_MAP dict → tuple 字面修订**(P0-3 fence 边界替换 + P0-4 PM 例外授权)
+5. **TASK-301 Stage 0 #2 erratum**(head -30 错误预期 → grep -nE 三锚点)
+6. **反例 28** + 第十八任 KPI 入仓决策 09(Stage 0 预期输出未实测治理候选)
 
 **P0-4 决策 07 一次性显式例外授权声明**:
 
@@ -1152,12 +1155,12 @@ except Exception as exc:
 >
 > **PM 授权确认**(本会话 R1 后拍板):"04 § 10 ERROR_MAP dict 漂移修怎么走? → 搭车 TASK-301 PR 一起修"。
 
-**模式可扩展性**:4 项 chore 全部沿用 `read_bytes / 字面匹配(或 fence 边界查找)/ assert "锚点" in data / write_bytes` 字节级 Python 模板。反例 21-25 + 26 + 27 + 未来 28/29 是同款 patch 模板(决策 08 字节级 Python 改 docs 固化为项目纪律)。
+**模式可扩展性**:6 项 chore 全部沿用 `read_bytes / 字面匹配(或 fence 边界查找)/ assert "锚点" in data / write_bytes` 字节级 Python 模板。反例 21-25 + 26 + 27 + 28 + 未来 29 是同款 patch 模板(决策 08 字节级 Python 改 docs 固化为项目纪律)。
 
 **字节级 Python 完整 patch**:见 § 9.5。
 
 **替代方案**:
-- A(本 Task 选):搭车 4 项。**为何选**:✅ Week 3 起步搭车成本接近 0;治理 + 项目级遗留一次性收口;反例 26 + 27 同源教训("工具默认行为假设")一并入仓对第十七任更友好
+- A(本 Task 选):搭车 6 项。**为何选**:✅ Week 3 起步搭车成本接近 0;治理 + 项目级遗留一次性收口;反例 26 + 27 + 28 同源教训一并入仓对第十八任更友好
 - B. 仅搭车反例 26 + 03 索引(04 § 10 + 反例 27 单开 chore PR)。**为何不选**:① 反例 27 是本 Task v0.1 → R1 之间产出,搭车时机最佳;② 04 § 10 单 chore PR 多一次 review + merge 循环
 - C. 全部推到 chore PR 单走。**为何不选**:03 索引补账是本 Task 必然产出,不搭不行
 
@@ -1237,9 +1240,9 @@ grep -rnE "from app|import app\.config|AppSettings" adapters/embedding/ || true
 grep -nE 'sentence_transformers|markers = \[' pyproject.toml
 # 期望:含 `module = "sentence_transformers.*"` + `markers = [`
 
-# 10. 反例 26 + 27 + KPI 已入仓决策 09(D8 搭车 chore)
-grep -nE "反例 ?26|反例 ?27|第十六任 KPI|第十七任 KPI|cat scripts/check_repo_hygiene|cat pyproject\.toml" docs/decisions/20260603-09-architect-must-verify-not-assume.md
-# 期望:多行命中(反例 26 / 27 / 第十六 + 十七任 KPI / cat hygiene / cat pyproject 锚点)
+# 10. 反例 26 + 27 + 28 + KPI 已入仓决策 09(D8 搭车 chore)
+grep -nE "反例 ?26|反例 ?27|反例 ?28|第十六任 KPI|第十七任 KPI|第十八任 KPI" docs/decisions/20260603-09-architect-must-verify-not-assume.md
+# 期望:更多行命中(反例 26 / 27 / 28 + 第十六/十七/十八任 KPI 6 个锚点)
 
 # 11. 03 索引 7 行修订(P0-2 升级)
 grep -nE "TASK-207 \| \*\*ProjectOverview.+✅" docs/03_TASK_INDEX.md  # 修订 1
@@ -1325,7 +1328,7 @@ torch + transformers + tokenizers + sentence-transformers 合计 ~1GB(含 CUDA �
 | D5 | 不引入 EmbeddingError | 无 lifespan / 无消费场景,TASK-302/304 引入 |
 | D6 | AppSettings 3 字段 | KISS;不暴露 cache_dir |
 | D7 | **P0-1 修订**:unit mock + integration **RUN_EMBEDDING_INTEGRATION=1 env skipif** | 本 Task 范围 opt-in,不动全局 addopts |
-| D8 | **P0-4 PM 例外授权**:搭车 4 项(反例 26 + **27** + 03 索引 + 04 § 10) | 沿用字节级 Python 模板;PM 一次性显式授权 docs/04 修订 |
+| D8 | **P0-4 PM 例外授权**:搭车 6 项(反例 26 + **27** + **28** + 03 索引 + 04 § 10 + TASK-301 erratum) | 沿用字节级 Python 模板;PM 一次性显式授权 docs/04 修订 |
 
 ### 12.3 后续 Task 接力点
 
@@ -1357,9 +1360,13 @@ torch + transformers + tokenizers + sentence-transformers 合计 ~1GB(含 CUDA �
 cat core/interfaces/embedder.py
 # 期望:含 `embed(self, texts: list[str]) -> list[list[float]]` + `dimension(self) -> int` 两个 abstractmethod
 
-# 2. DeepSeek adapter 类比 anchor(本 Task 实现模式照抄)
-head -30 adapters/llm/deepseek.py
-# 期望:`__init__(api_key, base_url, model, retry_count)` 模式 + 模块级 DEFAULT_* 常量
+# 2. DeepSeek adapter 类比 anchor(本 Task 实现模式照抄)(v0.2 原命令 head -30 预期错,反例 28 修订)
+grep -nE 'DEFAULT_MODEL_NAME|class DeepSeekTextProvider|def __init__' adapters/llm/deepseek.py | head -10
+# 期望:多行命中:
+#   - `DEFAULT_MODEL_NAME = ...` 模块级常量(line ≈ 19)
+#   - `class DeepSeekTextProvider(TextProvider):` 类定义(line ≈ 55)
+#   - `def __init__(self, api_key: str, base_url: str = ..., model: str = ..., retry_count: int = ...) -> None:` 签名(line ≈ 60)
+# 核心类比锚点:__init__ 接收所有运行时值 + 模块级 DEFAULT_* 常量 + class 实现 ABC 签名
 
 # 3. app/config.py AppSettings 字段分组
 cat app/config.py
@@ -1435,7 +1442,7 @@ head -2 requirements-dev.txt
 
 ## Checklist(精简)
 
-**实施前**:已读 5 核心文档 + 决策 04/05/06/07/08/09/11 + 反例 1-25(反例 26 + 27 本 Task D8 入仓);实地核查 `core/interfaces/embedder.py` + `adapters/llm/deepseek.py` + `app/config.py` + `.env.example` + `requirements.txt` + `pyproject.toml`(**反例 27 KPI**)+ `api/main.py` + `api/dependencies.py` + `scripts/check_repo_hygiene.{sh,py}`(**反例 26 KPI**)+ `.github/workflows/ci.yml` + `Makefile`(**反例 26 KPI**)+ 03 索引 line 119-121/177/338-339/342/349/354 + 04 § 10 line 552-566;理解 D2 范围窄 + D3 不读 AppSettings + D4 同步加载 + D5 不引入异常 + D7 skipif env + D8 PM 例外授权 + 搭车 chore 4 项。
+**实施前**:已读 5 核心文档 + 决策 04/05/06/07/08/09/11 + 反例 1-25(反例 26 + 27 本 Task D8 入仓);实地核查 `core/interfaces/embedder.py` + `adapters/llm/deepseek.py` + `app/config.py` + `.env.example` + `requirements.txt` + `pyproject.toml`(**反例 27 KPI**)+ `api/main.py` + `api/dependencies.py` + `scripts/check_repo_hygiene.{sh,py}`(**反例 26 KPI**)+ `.github/workflows/ci.yml` + `Makefile`(**反例 26 KPI**)+ 03 索引 line 119-121/177/338-339/342/349/354 + 04 § 10 line 552-566;理解 D2 范围窄 + D3 不读 AppSettings + D4 同步加载 + D5 不引入异常 + D7 skipif env + D8 PM 例外授权 + 搭车 chore 6 项。
 
 **完工前**:§ 11.2 验收 1-14 全过(**特别注意 #4 make check 全管道,反例 26 KPI**;**#5 unit + integration skip 验证,反例 27 KPI**);commit subject 单行无 body(反例 17);完工三件套(决策 08);反例 26 + 27 入仓决策 09 + 03 索引 7 行 + 04 § 10 + pyproject.toml 修订五项字节级 Python;PR(Codex 给 PM 标题 + 正文)。
 
@@ -1446,7 +1453,7 @@ head -2 requirements-dev.txt
 **作者**:Claude(架构师,第十六任)
 **关联宪法版本**:v2.1(冻结,不修改)
 **关联决策**:`docs/decisions/20260601-04` / `20260601-05` / `20260601-06` / `20260601-07` / `20260602-08` / `20260603-09` / `20260604-11`
-**关联反例**:**反例 26 + 反例 27**(本 Task D8 治理 chore 入仓决策 09)+ 反例 24 同源(04 § 10 ERROR_MAP dict 字面 → tuple 历史漂移,本 Task D8 搭车修)
+**关联反例**:**反例 26 + 反例 27 + 反例 28**(本 Task D8 治理 chore 入仓决策 09)+ 反例 24 同源(04 § 10 ERROR_MAP dict 字面 → tuple 历史漂移,本 Task D8 搭车修)
 **审批历史**:R1 conditional pass(20260605,3 P0 + 5 P1 + 4 P2 全采纳)→ 直接进 Codex
 **审批**:**一审 1 轮**(若实施期出现"改 schema / 推翻 D2 范围 / lifespan 装配 / 引入新依赖外 deps / EmbeddingError 异常类 / GPU 默认配置 / 推翻 P0-1 skipif env / 推翻 P0-3 fence 边界替换 / 推翻 P0-4 PM 例外授权"等任一,**必须自动升 R2**)
 **前置 commit**:main HEAD `b5b2271`(TASK-207 merge)

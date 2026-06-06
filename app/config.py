@@ -14,6 +14,11 @@ class AppSettings(BaseSettings):
     deepseek_api_key: str
     deepseek_base_url: str = "https://api.deepseek.com"
 
+    # Embedding(TASK-301 新增)
+    embedding_model_name: str = "BAAI/bge-small-zh-v1.5"
+    embedding_device: str = "cpu"
+    embedding_normalize: bool = True
+
     # Storage
     db_path: str = "./data/mxa.db"
     upload_dir: str = "./data/uploads"
