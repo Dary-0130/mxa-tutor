@@ -8,3 +8,4 @@ uvicorn[standard]==0.32.0
 python-multipart==0.0.17
 pyyaml==6.0.2
 sentence-transformers==3.3.0
+numpy>=1.26.0,<2.0

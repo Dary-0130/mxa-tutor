@@ -1,11 +1,12 @@
 """API 层异常 handler 挂载点(不是 ASGI middleware,命名沿用历史目录结构)。
 
-本模块实现 21 个业务 handler,覆盖上传 / 工程 / LLM / 解析 / 导览 /
+本模块实现 22 个业务 handler,覆盖上传 / 工程 / LLM / 解析 / 导览 /
 问答异常树 + ``MxaError`` final fallback,并补 2 个 FastAPI 默认 handler 兜底。
 
 响应体 shape ``{"error": "<machine_code>", "message": "<中文文案>"}`` 由本
-Task 锁定。TASK-206 只追加 ``QuotaExhaustedError`` /
-``EvidenceMissingError`` 两个 leaf handler 及 404/422 中文化,不改 shape。
+Task 锁定。TASK-206 追加 ``QuotaExhaustedError`` /
+``EvidenceMissingError`` 两个 leaf handler;TASK-302 追加
+``EmbeddingModelLoadError`` handler,不改 shape。
 
 设计要点:
 1. handler precedence:FastAPI 按 exception class MRO 查找最具体 handler。
@@ -35,6 +36,7 @@ from app.config import AppSettings
 from core.domain.exceptions import (
     ChatGenerationError,
     ChatSessionNotFoundError,
+    EmbeddingModelLoadError,
     EvidenceMissingError,
     FileTypeNotAllowedError,
     LLMAuthError,
@@ -106,10 +108,10 @@ def _make_project_too_large_handler(settings: AppSettings) -> ExceptionHandler:
 
 
 def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
-    """注册 21 个业务 handler + 2 个 FastAPI 默认 handler 兜底。
+    """注册 22 个业务 handler + 2 个 FastAPI 默认 handler 兜底。
 
     注册顺序不影响 FastAPI 行为(FastAPI 按 MRO 查找最具体 handler),
-    现有 tuple 顺序保持不重组,仅在末尾追加 2 个 leaf handler。
+    现有 tuple 顺序保持不重组,仅在末尾追加 3 个 leaf handler。
 
     业务 handler 覆盖 Upload / Project / LLM / Parse / Overview / Chat /
     Quota / Evidence 子树;HTTP 404 / 405 / 其他 HTTPException 与 422
@@ -232,6 +234,10 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         (
             EvidenceMissingError,
             _make_handler(500, "evidence_missing", "出了点问题,我们已经记录,稍后再试"),
+        ),
+        (
+            EmbeddingModelLoadError,
+            _make_handler(503, "embedding_model_load", "服务暂时不可用,请稍后重试"),
         ),
     )
     for exc_type, handler in error_handlers:
