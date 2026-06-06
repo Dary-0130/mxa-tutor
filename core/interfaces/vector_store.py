@@ -5,6 +5,18 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Final, Literal
+
+SourceType = Literal[
+    "m_file",
+    "m_function",
+    "slx_block",
+    "slx_subsystem",
+    "mat_variable",
+    "project_overview",
+    "teaching_unit",
+]
+RESERVED_SOURCE_TYPES: Final[frozenset[str]] = frozenset({"teaching_unit"})
 
 
 @dataclass(frozen=True)
@@ -13,7 +25,7 @@ class ChunkRecord:
 
     chunk_id: str
     project_id: str
-    source_type: str
+    source_type: SourceType
     file_path: str
     symbol_name: str | None
     line_range: tuple[int, int] | None

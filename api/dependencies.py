@@ -35,6 +35,7 @@ from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
 from core.interfaces.vector_store import VectorStore
 from features.chat.chat_service import ChatService
+from features.chunking import ChunkingService
 from features.ingest.upload_service import ExtractFn, UploadService
 from features.overview import OverviewCache
 from features.overview.overview_service import ProjectOverviewService
@@ -76,9 +77,18 @@ def get_vector_store(request: Request) -> VectorStore:
     return cast(VectorStore, store)
 
 
+def get_chunking_service(request: Request) -> ChunkingService:
+    """从 app.state.chunking_service 取 ChunkingService。"""
+    service = getattr(request.app.state, "chunking_service", None)
+    if service is None:
+        raise RuntimeError("chunking_service not configured")
+    return cast(ChunkingService, service)
+
+
 def get_upload_service(
     settings: Annotated[AppSettings, Depends(get_settings)],
     store: Annotated[ProjectStore, Depends(get_project_store)],
+    chunking_service: ChunkingService = Depends(get_chunking_service),  # noqa: B008
 ) -> UploadService:
     """每次请求构造新 UploadService;store 由 lifespan 装配。"""
     upload_dir = Path(settings.upload_dir)
@@ -93,6 +103,7 @@ def get_upload_service(
         slx_parser=SlxParserImpl(),
         m_parser=MParserImpl(),
         dependency_analyzer=analyze_dependencies,
+        chunking_service=chunking_service,
     )
 
 
@@ -116,9 +127,12 @@ def get_overview_service(
     cache: Annotated[OverviewCache, Depends(get_overview_cache)],
     resolver: Annotated[ProjectTypeResolver, Depends(get_project_type_resolver)],
     text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+    chunking_service: ChunkingService = Depends(get_chunking_service),  # noqa: B008
 ) -> ProjectOverviewService:
     """装配 ProjectOverviewService。"""
-    return ProjectOverviewService(store, cache, resolver, text_provider)
+    return ProjectOverviewService(
+        store, cache, resolver, text_provider, chunking_service=chunking_service
+    )
 
 
 def get_chat_service(request: Request) -> ChatService:
