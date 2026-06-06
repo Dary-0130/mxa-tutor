@@ -19,6 +19,11 @@ ENV_KEYS = [
     "MAX_EXTRACTION_SECONDS",
     "MAX_TOTAL_UNCOMPRESSED_MB",
     "MAX_ENTRIES_PER_PROJECT",
+    "EMBEDDING_MODEL_NAME",
+    "EMBEDDING_DEVICE",
+    "EMBEDDING_NORMALIZE",
+    "VECTOR_TOP_K",
+    "VECTOR_MIN_SCORE",
     "LOG_LEVEL",
 ]
 
@@ -39,6 +44,11 @@ def test_default_values(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
 
     assert cfg.deepseek_api_key == "sk-test"
     assert cfg.deepseek_base_url == "https://api.deepseek.com"
+    assert cfg.embedding_model_name == "BAAI/bge-small-zh-v1.5"
+    assert cfg.embedding_device == "cpu"
+    assert cfg.embedding_normalize is True
+    assert cfg.vector_top_k == 8
+    assert cfg.vector_min_score == 0.3
     assert cfg.db_path == "./data/mxa.db"
     assert cfg.upload_dir == "./data/uploads"
     assert cfg.upload_ttl_hours == 24
@@ -60,17 +70,45 @@ def test_env_override_and_type_conversion(monkeypatch: pytest.MonkeyPatch, tmp_p
     _clean_env(monkeypatch)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
     monkeypatch.setenv("MAX_UPLOAD_SIZE_MB", "100")
+    monkeypatch.setenv("VECTOR_TOP_K", "12")
+    monkeypatch.setenv("VECTOR_MIN_SCORE", "0.5")
     monkeypatch.chdir(tmp_path)
 
     cfg = AppSettings()
 
     assert cfg.max_upload_size_mb == 100
     assert isinstance(cfg.max_upload_size_mb, int)
+    assert cfg.vector_top_k == 12
+    assert cfg.vector_min_score == 0.5
 
 
 def test_missing_required_raises(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """缺少 DEEPSEEK_API_KEY 时抛 ValidationError。"""
     _clean_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValidationError):
+        AppSettings()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("VECTOR_TOP_K", "0"),
+        ("VECTOR_TOP_K", "51"),
+        ("VECTOR_MIN_SCORE", "-1.1"),
+        ("VECTOR_MIN_SCORE", "1.1"),
+    ],
+)
+def test_vector_bounds_raise(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    key: str,
+    value: str,
+) -> None:
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv(key, value)
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(ValidationError):

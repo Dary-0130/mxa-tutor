@@ -18,17 +18,20 @@ from pathlib import Path
 from fastapi import FastAPI
 from loguru import logger
 
+from adapters.embedding.sentence_transformer import SentenceTransformerEmbedder
 from adapters.llm import DeepSeekTextProvider
 from adapters.storage._connection import open_connection
 from adapters.storage.schema import init_schema
 from adapters.storage.sqlite_chat_store import SqliteChatStore
 from adapters.storage.sqlite_project_store import SqliteProjectStore
+from adapters.storage.sqlite_vector_store import SqliteVectorStore
 from api.dependencies import get_settings
 from api.middleware.error_handler import register_error_handlers
 from api.routes.chat import router as chat_router
 from api.routes.health import router as health_router
 from api.routes.overview import router as overview_router
 from api.routes.upload import router as upload_router
+from core.domain.exceptions import EmbeddingModelLoadError
 from features.chat import KeywordRetriever
 from features.chat._prompt_builder import ChatPromptBuilder
 from features.chat.chat_service import ChatService
@@ -65,6 +68,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         chat_store = SqliteChatStore(settings.db_path)
         app.state.project_store = store
         app.state.chat_store = chat_store
+        try:
+            embedder = await asyncio.to_thread(
+                SentenceTransformerEmbedder,
+                settings.embedding_model_name,
+                settings.embedding_device,
+                settings.embedding_normalize,
+            )
+        except Exception as exc:
+            logger.error(
+                "Embedding model load failed: model_name={} device={} exception={}",
+                settings.embedding_model_name,
+                settings.embedding_device,
+                type(exc).__name__,
+            )
+            raise EmbeddingModelLoadError("model_load_failed") from None
+
+        app.state.embedder = embedder
+        app.state.vector_store = SqliteVectorStore(settings.db_path)
         app.state.overview_cache = InMemoryOverviewCache()
         app.state.text_provider = DeepSeekTextProvider(
             api_key=settings.deepseek_api_key,
@@ -77,6 +98,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             retriever=KeywordRetriever(graph_provider=ProjectGraphBuilder()),
             prompt_builder=ChatPromptBuilder(),
         )
+        stack.push_async_callback(app.state.vector_store.aclose)
         stack.push_async_callback(chat_store.aclose)
         stack.push_async_callback(store.aclose)
 

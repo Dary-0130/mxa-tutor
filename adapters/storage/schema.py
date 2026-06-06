@@ -6,9 +6,34 @@ import aiosqlite
 
 from core.domain.exceptions import StoreError
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
-_DDL = """
+_CHUNKS_DDL = """
+CREATE TABLE IF NOT EXISTS chunks (
+    chunk_id          TEXT PRIMARY KEY,
+    project_id        TEXT NOT NULL,
+    source_type       TEXT NOT NULL,
+    file_path         TEXT NOT NULL,
+    symbol_name       TEXT,
+    line_start        INTEGER,
+    line_end          INTEGER,
+    block_id          TEXT,
+    block_name        TEXT,
+    block_type        TEXT,
+    parent_subsystem  TEXT,
+    source_text       TEXT NOT NULL,
+    embedding         BLOB NOT NULL,
+    embedding_dim     INTEGER NOT NULL,
+    model_name        TEXT NOT NULL,
+    created_at        TEXT NOT NULL,
+    FOREIGN KEY (project_id)
+        REFERENCES project_status_record(project_id)
+        ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_project ON chunks(project_id);
+"""
+
+_DDL = f"""
 CREATE TABLE IF NOT EXISTS schema_version (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     version INTEGER NOT NULL,
@@ -53,7 +78,18 @@ CREATE TABLE IF NOT EXISTS chat_message (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_message_session
     ON chat_message(session_id, created_at ASC);
+{_CHUNKS_DDL}
 """
+
+
+async def _migrate_v1_to_v2(conn: aiosqlite.Connection) -> None:
+    """Add chunks table and bump schema_version from v1 to v2."""
+
+    await conn.executescript(_CHUNKS_DDL)
+    await conn.execute(
+        "UPDATE schema_version SET version=?, applied_at=? WHERE id=1",
+        (2, datetime.utcnow().isoformat()),
+    )
 
 
 async def init_schema(conn: aiosqlite.Connection) -> None:
@@ -74,6 +110,8 @@ async def init_schema(conn: aiosqlite.Connection) -> None:
     if version > CURRENT_SCHEMA_VERSION:
         raise StoreError("unsupported_schema_version")
     if version < CURRENT_SCHEMA_VERSION:
-        raise StoreError("schema_migration_required")
+        if version != 1:
+            raise StoreError("schema_migration_required")
+        await _migrate_v1_to_v2(conn)
 
     await conn.commit()

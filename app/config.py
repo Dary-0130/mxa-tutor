@@ -1,5 +1,6 @@
 """项目全局配置(pydantic-settings 加载自 .env 或环境变量)。"""
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +19,10 @@ class AppSettings(BaseSettings):
     embedding_model_name: str = "BAAI/bge-small-zh-v1.5"
     embedding_device: str = "cpu"
     embedding_normalize: bool = True
+
+    # Vector(TASK-302 新增)
+    vector_top_k: int = Field(default=8, ge=1, le=50)
+    vector_min_score: float = Field(default=0.3, ge=-1.0, le=1.0)
 
     # Storage
     db_path: str = "./data/mxa.db"

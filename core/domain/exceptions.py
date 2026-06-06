@@ -26,6 +26,14 @@ class LLMTimeoutError(LLMError):
     """LLM 调用超时。"""
 
 
+class EmbeddingError(MxaError):
+    """嵌入模型相关异常的基类。"""
+
+
+class EmbeddingModelLoadError(EmbeddingError):
+    """嵌入模型加载失败。"""
+
+
 class ParseError(MxaError):
     """文件解析异常的基类。"""
 
@@ -84,6 +92,10 @@ class ChatSessionNotFoundError(ProjectError):
 
 class StoreError(MxaError):
     """持久化存储层异常。"""
+
+
+class VectorStoreError(StoreError):
+    """向量存储层异常。"""
 
 
 class ChatGenerationError(MxaError):

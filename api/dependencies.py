@@ -29,9 +29,11 @@ from adapters.parser.slx_parser import SlxParserImpl
 from adapters.parser.zip_extractor import safe_extract
 from app.config import AppSettings
 from core.interfaces.chat_store import ChatStore
+from core.interfaces.embedder import EmbeddingProvider
 from core.interfaces.llm_provider import TextProvider
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
+from core.interfaces.vector_store import VectorStore
 from features.chat.chat_service import ChatService
 from features.ingest.upload_service import ExtractFn, UploadService
 from features.overview import OverviewCache
@@ -56,6 +58,22 @@ def get_chat_store(request: Request) -> ChatStore:
     if store is None:
         raise RuntimeError("ChatStore not initialized; lifespan misconfigured")
     return cast(ChatStore, store)
+
+
+def get_embedder(request: Request) -> EmbeddingProvider:
+    """从 app.state.embedder 取 EmbeddingProvider。"""
+    embedder = getattr(request.app.state, "embedder", None)
+    if embedder is None:
+        raise RuntimeError("EmbeddingProvider not initialized; lifespan misconfigured")
+    return cast(EmbeddingProvider, embedder)
+
+
+def get_vector_store(request: Request) -> VectorStore:
+    """从 app.state.vector_store 取 VectorStore。"""
+    store = getattr(request.app.state, "vector_store", None)
+    if store is None:
+        raise RuntimeError("VectorStore not initialized; lifespan misconfigured")
+    return cast(VectorStore, store)
 
 
 def get_upload_service(

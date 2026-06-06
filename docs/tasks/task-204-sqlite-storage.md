@@ -742,7 +742,7 @@ async def open_connection(db_path: str) -> AsyncIterator[aiosqlite.Connection]:
 
 CURRENT_SCHEMA_VERSION 每次 schema 变更时由对应 Task bump:
     1 = TASK-204 初版(3 业务表 + 1 schema_version 表)
-    2 = TASK-302 加 chat_message.embedding BLOB(预留)
+    2 = TASK-302 加 chunks 表(向量存储,本 TASK 实施)
     3 = TASK-404 加 activation_codes 表(预留)
 """
 CURRENT_SCHEMA_VERSION = 1
