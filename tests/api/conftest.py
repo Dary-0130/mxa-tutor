@@ -12,6 +12,7 @@ from collections.abc import Iterator  # noqa: E402
 import pytest  # noqa: E402
 
 from api.dependencies import get_settings  # noqa: E402
+from core.interfaces.embedder import EmbeddingProvider  # noqa: E402
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability  # noqa: E402
 from features.overview import InMemoryOverviewCache  # noqa: E402
 
@@ -44,13 +45,32 @@ class FakeChatService:
         raise RuntimeError("FakeChatService should be overridden by chat route tests")
 
 
+class FakeEmbedder(EmbeddingProvider):
+    def __init__(
+        self,
+        model_name: str = "fake-model",
+        device: str = "cpu",
+        normalize: bool = True,
+    ) -> None:
+        _ = model_name, device, normalize
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0] for _ in texts]
+
+    def dimension(self) -> int:
+        return 2
+
+
 @pytest.fixture(autouse=True)
 def _isolate_test_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """测试前后清理 ``get_settings`` 缓存 + ``dependency_overrides``。"""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-for-test")
     get_settings.cache_clear()
 
-    from api.main import app
+    import api.main as api_main
+
+    app = api_main.app
+    monkeypatch.setattr(api_main, "SentenceTransformerEmbedder", FakeEmbedder)
 
     app.dependency_overrides.clear()
     app.state.overview_cache = InMemoryOverviewCache()

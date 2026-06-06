@@ -18,6 +18,7 @@ from app.config import AppSettings
 from core.domain.exceptions import (
     ChatGenerationError,
     ChatSessionNotFoundError,
+    EmbeddingModelLoadError,
     EvidenceMissingError,
     FileTypeNotAllowedError,
     LLMAuthError,
@@ -77,6 +78,7 @@ HANDLER_CASES: list[HandlerCase] = [
     (ChatGenerationError, 502, "chat_generation", "回答生成失败,请刷新重试"),
     (QuotaExhaustedError, 402, "quota_exhausted", "已达到合理使用上限,可联系加量"),
     (EvidenceMissingError, 500, "evidence_missing", "出了点问题,我们已经记录,稍后再试"),
+    (EmbeddingModelLoadError, 503, "embedding_model_load", "服务暂时不可用,请稍后重试"),
 ]
 
 EXCEPTION_BY_NAME: dict[str, type[Exception]] = {
@@ -161,6 +163,15 @@ class TestNewLeafHandlers:
             "message": "出了点问题,我们已经记录,稍后再试",
         }
 
+    def test_embedding_model_load_returns_503(self, test_client: TestClient) -> None:
+        response = test_client.get("/_test/raise/EmbeddingModelLoadError")
+
+        assert response.status_code == 503
+        assert response.json() == {
+            "error": "embedding_model_load",
+            "message": "服务暂时不可用,请稍后重试",
+        }
+
 
 class TestDefaultHandlers:
     def test_404_not_found_is_chinese_and_redacted(self, test_client: TestClient) -> None:
@@ -234,7 +245,7 @@ class TestDocstring:
         source = Path("api/middleware/error_handler.py").read_text(encoding="utf-8")
 
         assert re.search(r"minimal ERROR_MAP[^\d]*\b8\b|注册\s*\b8\s*个", source) is None
-        assert "21 个业务 handler" in source
+        assert "22 个业务 handler" in source
         assert "2 个 FastAPI 默认 handler 兜底" in source
 
 

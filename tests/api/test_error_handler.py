@@ -8,6 +8,7 @@ from loguru import logger
 
 from api.dependencies import get_settings
 from core.domain.exceptions import (
+    EmbeddingModelLoadError,
     FileTypeNotAllowedError,
     LLMAuthError,
     LLMQuotaError,
@@ -174,6 +175,7 @@ def test_all_handlers_registered_after_create_app() -> None:
         LLMRateLimitError,
         LLMTimeoutError,
         LLMServerError,
+        EmbeddingModelLoadError,
         SlxParseError,
         MParseError,
         OverviewGenerationError,
@@ -182,7 +184,7 @@ def test_all_handlers_registered_after_create_app() -> None:
     registered = expected_handlers.intersection(app.exception_handlers)
 
     assert registered == expected_handlers
-    assert len(registered) == 16
+    assert len(registered) == 17
 
 
 def test_handler_response_does_not_leak_str_exc() -> None:

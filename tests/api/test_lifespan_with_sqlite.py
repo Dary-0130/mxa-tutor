@@ -21,14 +21,19 @@ def test_lifespan_wires_sqlite_stores_and_status_route(
 
     from adapters.storage.sqlite_chat_store import SqliteChatStore
     from adapters.storage.sqlite_project_store import SqliteProjectStore
+    from adapters.storage.sqlite_vector_store import SqliteVectorStore
     from api.main import create_app
+    from core.interfaces.embedder import EmbeddingProvider
 
     app = create_app()
     with TestClient(app) as client:
         assert db_path.exists()
         assert isinstance(app.state.project_store, SqliteProjectStore)
         assert isinstance(app.state.chat_store, SqliteChatStore)
+        assert isinstance(app.state.embedder, EmbeddingProvider)
+        assert isinstance(app.state.vector_store, SqliteVectorStore)
         assert _table_names(db_path) >= {
+            "chunks",
             "chat_message",
             "chat_session",
             "project_status_record",
