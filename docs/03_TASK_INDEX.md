@@ -118,7 +118,7 @@ P2 v0.1 不承诺:
 | TASK-204 | SQLite 存储层(Project + Chat) | ✅ | Codex | 101 |
 | TASK-205 | **粗 RAG 问答 API(关键词 + metadata 检索)** ⭐ | ✅ | Codex | 203, 204 |
 | TASK-206 | 错误处理 + 中文化 | ✅ | Codex | 201-205 |
-| TASK-207 | **ProjectOverview Schema + 教学输出契约** ⭐ | 🔍 | Codex | 203 |
+| TASK-207 | **ProjectOverview Schema + 教学输出契约** ⭐ | ✅ | Codex | 203 |
 
 ### Week 2 验收
 
@@ -174,7 +174,7 @@ P2 v0.1 不承诺:
 
 | 编号 | 名称 | 状态 | 负责 | 依赖 |
 |------|------|------|------|------|
-| TASK-301 | sentence-transformers 嵌入适配器 | 🔲 | Codex | 101 |
+| TASK-301 | sentence-transformers 嵌入适配器 | 🔍 | Codex | 101 |
 | TASK-302 | SQLite 向量存储 + 检索 | 🔲 | Codex | 204, 301 |
 | TASK-303 | 工程分块策略(chunk + metadata) | 🔲 | Codex | 102, 103, 107 |
 | TASK-304 | 向量 RAG 整合到 ChatService | 🔲 | Codex | 205, 302, 303 |
@@ -335,20 +335,20 @@ P2 v0.1 不承诺:
 ```
 Week 0:  [✅✅✅⬜]              3/4
 Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
-Week 2:  [✅✅✅✅✅✅🔍]         6/7  (含 TASK-207)
-Week 3:  [⬜⬜⬜⬜⬜⬜⬜]         0/7  (含 TASK-307)
+Week 2:  [✅✅✅✅✅✅✅]         7/7  (含 TASK-207)
+Week 3:  [🔍⬜⬜⬜⬜⬜⬜]         0/7  (含 TASK-307)
 Week 4:  [⬜⬜⬜⬜⬜⬜]           0/6
 
-总计: 17/32
+总计: 18/32
 ```
 
 ---
 
 ## 下一步
 
-**下一个待启动**:TASK-203 ProjectOverviewService(架构师写文档中)。完成后由 PM 派 Codex 实施。
+**当前状态**:TASK-301 等待验收;通过后启动 TASK-302 SQLite 向量存储 + 检索。
 
 ---
 
 **版本**:v2.1(冻结)
-**最后更新**:2026-06-01
+**最后更新**:2026-06-05

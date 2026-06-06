@@ -551,18 +551,21 @@ class EvidenceMissingError(MxaError): pass  # ⭐ v2.1 新增
 
 ```python
 # api/middleware/error_handler.py
-ERROR_MAP = {
-    LLMAuthError: (503, "服务暂时不可用,请稍后重试"),
-    LLMRateLimitError: (429, "请求太频繁,稍等一下"),
-    LLMTimeoutError: (504, "网络较慢,正在重试..."),
-    QuotaExhaustedError: (402, "已达到合理使用上限,可联系加量"),
-    SlxParseError: (400, "Simulink 模型解析失败,可能版本过老或损坏"),
-    ZipBombError: (400, "压缩文件异常,请检查后重新上传"),
-    ZipSlipError: (400, "压缩包内含非法路径,请重新打包后上传"),
-    FileTypeNotAllowedError: (400, "包含不支持的文件类型"),
-    ProjectTooLargeError: (413, "工程过大,请压缩到 50MB 以内"),
-    # ...
-}
+# 实际形态（TASK-206 实施）是 tuple of (Exception, status, machine_code, message)，
+# 由 register_error_handlers() 循环 app.add_exception_handler 注册。
+# 此处仅列高频示例；完整 21 handler 表见 docs/tasks/task-206-error-handling-and-i18n.md。
+error_handlers: tuple[tuple[type[Exception], int, str, str], ...] = (
+    (ZipBombError, 400, "zip_bomb", "压缩文件异常，请检查后重新上传"),
+    (ZipSlipError, 400, "zip_slip", "压缩包内含非法路径，请重新打包后上传"),
+    (FileTypeNotAllowedError, 400, "file_type_not_allowed", "包含不支持的文件类型"),
+    (ProjectTooLargeError, 413, "project_too_large", "工程过大，请压缩到 50MB 以内"),
+    (LLMAuthError, 503, "llm_auth", "服务暂时不可用，请稍后重试"),
+    (LLMRateLimitError, 429, "llm_rate_limit", "请求太频繁，稍等一下"),
+    (LLMTimeoutError, 504, "llm_timeout", "网络较慢，正在重试..."),
+    (SlxParseError, 400, "slx_parse", "Simulink 模型解析失败，可能版本过老或损坏"),
+    (QuotaExhaustedError, 402, "quota_exhausted", "已达到合理使用上限，可联系加量"),
+    # ... 共 21 条，详见 TASK-206 实施文档
+)
 ```
 
 ---
