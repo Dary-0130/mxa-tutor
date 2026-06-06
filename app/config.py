@@ -24,6 +24,17 @@ class AppSettings(BaseSettings):
     vector_top_k: int = Field(default=8, ge=1, le=50)
     vector_min_score: float = Field(default=0.3, ge=-1.0, le=1.0)
 
+    # RAG retrieval(TASK-304 新增)
+    rag_min_chunk_count: int = Field(
+        default=1,
+        ge=0,
+        le=100,
+        description=(
+            "HybridRetriever 触发 keyword fallback 的 chunk 数阈值;"
+            "vector_store.get_chunk_count(project_id) < rag_min_chunk_count 时降级"
+        ),
+    )
+
     # Chunking(TASK-303 新增)
     chunking_max_source_text_chars: int = Field(default=1024, ge=64, le=4096)
     chunking_docstring_max_chars: int = Field(default=300, ge=0, le=1000)
