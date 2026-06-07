@@ -37,6 +37,12 @@ Windows 用户请在 Git Bash 或 WSL 内执行 `make` 命令。
 本仓库使用 GitHub Actions 在每个 PR 上运行 lint、format check、type-check、
 test 和仓库卫生检查。所有 PR 必须 CI 全绿后才能合并。
 
+## Chat RAG
+
+问答链路默认走 `HybridRetriever`:优先用本地 embedding + SQLite chunks 做向量召回,
+当 chunks 未就绪或向量链路失败时自动降级到关键词检索。阈值可通过
+`RAG_MIN_CHUNK_COUNT` 配置,默认 `1`。
+
 ## 文档导航
 
 - [项目宪法](docs/01_PROJECT_CONSTITUTION.md)

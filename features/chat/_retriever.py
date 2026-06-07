@@ -12,7 +12,16 @@ from core.domain.project import Project
 from core.domain.project_graph import ProjectGraph
 from core.domain.source_ref import SourceRef
 
-SourceType = Literal["file", "block", "function", "param", "graph_entry", "unresolved"]
+SourceType = Literal[
+    "file",
+    "function",
+    "block",
+    "subsystem",
+    "param",
+    "overview",
+    "graph_entry",
+    "unresolved",
+]
 
 
 class ProjectGraphProvider(Protocol):
