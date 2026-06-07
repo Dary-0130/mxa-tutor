@@ -1,0 +1,31 @@
+{
+  "selected_project_aliases": [
+    "pmsm_foc_c2000",
+    "buck_voltage_control",
+    "pid_antiwindup",
+    "lms_noise_cancel"
+  ],
+  "coverage_evaluation": "partial",
+  "projects": {
+    "pmsm_foc_c2000": {
+      "source_case_dir": "eval/cases/pmsm_foc_c2000",
+      "domain": "motor_control",
+      "fixture_class": "repo-owned"
+    },
+    "buck_voltage_control": {
+      "source_case_dir": "eval/cases/buck_voltage_control",
+      "domain": "power_electronics",
+      "fixture_class": "repo-owned"
+    },
+    "pid_antiwindup": {
+      "source_case_dir": "eval/cases/pid_antiwindup",
+      "domain": "control",
+      "fixture_class": "repo-owned"
+    },
+    "lms_noise_cancel": {
+      "source_case_dir": "eval/cases/lms_noise_cancel",
+      "domain": "signal_processing",
+      "fixture_class": "repo-owned"
+    }
+  }
+}
