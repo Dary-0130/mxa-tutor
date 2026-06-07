@@ -11,8 +11,10 @@ from core.domain.exceptions import ChatGenerationError, ChatSessionNotFoundError
 from core.domain.project import FileInfo, Project, ProjectType
 from core.domain.source_ref import SourceRef
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability
+from core.interfaces.vector_store import ChunkRecord, QueryHit
 from features.chat._chat_persist import enhance_query, normalize_title
 from features.chat._retriever import RetrievalHit
+from features.chat._vector_retriever import VectorRetriever
 from features.chat.chat_service import ChatService
 
 
@@ -101,6 +103,58 @@ class ProviderFake:
         return ModelCapability(model_name="fake")
 
 
+class EmbedderFake:
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        assert texts
+        return [[1.0, 0.0]]
+
+    def dimension(self) -> int:
+        return 2
+
+
+class VectorStoreFake:
+    async def add_chunks(self, chunks: list[ChunkRecord]) -> None:
+        raise NotImplementedError
+
+    async def query(
+        self,
+        query_embedding: list[float],
+        project_id: str,
+        top_k: int = 8,
+        min_score: float = 0.3,
+    ) -> list[QueryHit]:
+        _ = query_embedding, top_k, min_score
+        return [
+            QueryHit(
+                ChunkRecord(
+                    chunk_id=f"{project_id}::project-overview",
+                    project_id=project_id,
+                    source_type="project_overview",
+                    file_path="__project_overview__",
+                    symbol_name="Demo Project",
+                    line_range=None,
+                    block_id=None,
+                    block_name=None,
+                    block_type=None,
+                    parent_subsystem=None,
+                    source_text="项目总览: speed loop demo",
+                    embedding=[1.0, 0.0],
+                    model_name="fake",
+                ),
+                0.99,
+            )
+        ]
+
+    async def delete_by_project_id(self, project_id: str) -> int:
+        raise NotImplementedError
+
+    async def get_chunk_count(self, project_id: str) -> int:
+        return 1
+
+    async def aclose(self) -> None:
+        return None
+
+
 def _project() -> Project:
     return Project(
         id="p1",
@@ -174,6 +228,36 @@ async def test_handle_chat_no_retrieval_hits_persists_fallback() -> None:
     assert chat_store.created
     assert [message.role for message in chat_store.appended] == ["user", "assistant"]
     assert chat_store.appended[-1].citations_json == "[]"
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_replaces_overview_sentinel_in_invalid_citation_fallback() -> None:
+    chat_store = ChatStoreFake()
+    provider = ProviderFake(
+        json.dumps(
+            {
+                "answer": "fake provider intentionally omits citations",
+                "confidence": "medium",
+                "citation_ids": [],
+                "follow_up_suggestions": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    service = ChatService(
+        ProjectStoreFake(_project()),
+        chat_store,
+        provider,
+        VectorRetriever(EmbedderFake(), VectorStoreFake(), min_score=-1.0),
+    )
+
+    response = await service.handle_chat("p1", "这个项目总体做什么?", None)
+
+    assert response.is_fallback is True
+    assert response.fallback_reason == "invalid_or_missing_citations"
+    assert "__project_overview__" not in response.answer
+    assert "项目总览" in response.answer
+    assert [message.role for message in chat_store.appended] == ["user", "assistant"]
 
 
 @pytest.mark.asyncio

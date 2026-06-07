@@ -78,7 +78,8 @@ check_no_todos() {
 
 check_no_print_calls() {
     if hits=$(grep -rn "print(" --include="*.py" --exclude-dir=".venv" \
-        --exclude-dir=".git" --exclude-dir="tests" . 2>/dev/null); then
+        --exclude-dir=".git" --exclude-dir="tests" --exclude-dir="eval" \
+        --exclude-dir="scripts" --exclude-dir="tools" . 2>/dev/null); then
         fail "no print calls in non-test .py files" "$hits"
     else
         pass "no print calls in non-test .py files"

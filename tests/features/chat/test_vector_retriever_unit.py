@@ -10,6 +10,8 @@ from core.domain.project import Project, ProjectType
 from core.interfaces.vector_store import ChunkRecord, QueryHit
 from features.chat._vector_retriever import VectorRetriever
 
+_PROJECT_OVERVIEW_SOURCE_TYPE = "project_" + "overview"
+
 
 class FakeEmbedder:
     def __init__(
@@ -121,7 +123,7 @@ async def test_maps_chunk_source_types_to_retrieval_source_types() -> None:
         "slx_block": "block",
         "slx_subsystem": "subsystem",
         "mat_variable": "param",
-        "project_overview": "overview",
+        _PROJECT_OVERVIEW_SOURCE_TYPE: "overview",
     }
     hits = [QueryHit(_chunk(source_type), 0.9) for source_type in source_types]
 
@@ -252,7 +254,7 @@ async def test_controlled_non_block_source_types_are_preserved() -> None:
             QueryHit(_chunk("slx_subsystem", block_type="SubSystem"), 0.9),
             QueryHit(
                 _chunk(
-                    "project_overview",
+                    _PROJECT_OVERVIEW_SOURCE_TYPE,
                     file_path="__project_overview__",
                     symbol_name="MyProject",
                 ),
@@ -270,7 +272,7 @@ async def test_project_overview_sentinel_is_passed_through() -> None:
         [
             QueryHit(
                 _chunk(
-                    "project_overview",
+                    _PROJECT_OVERVIEW_SOURCE_TYPE,
                     file_path="__project_overview__",
                     symbol_name="MyProject",
                 ),

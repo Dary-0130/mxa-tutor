@@ -6,7 +6,6 @@ import argparse
 import csv
 import json
 import statistics
-import sys
 from pathlib import Path
 
 from loguru import logger
@@ -372,8 +371,7 @@ def _print_stats(
         "overall_success_rate": _success_rate(raw_rows),
         "citation_type_available_rate": _citation_type_available_rate(raw_rows),
     }
-    sys.stdout.write(json.dumps(stats, ensure_ascii=False, sort_keys=True) + "\n")
-    sys.stdout.flush()
+    print(json.dumps(stats, ensure_ascii=False, sort_keys=True), flush=True)
 
 
 def _success_rate(rows: list[dict[str, str]], eval_set: str | None = None) -> str:
