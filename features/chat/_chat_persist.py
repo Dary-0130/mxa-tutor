@@ -105,6 +105,8 @@ def _citation_labels(citations_json: str) -> list[str]:
 
 def _short_hit_label(hit: RetrievalHit) -> str:
     ref = hit.source_ref
+    if hit.source_type == "overview" and ref.file_path == "__project_overview__":
+        return "项目总览"
     if ref.block_name:
         parent = ref.parent_subsystem or "<root>"
         return f"{ref.file_path} / {parent} / {ref.block_name}"[:50]

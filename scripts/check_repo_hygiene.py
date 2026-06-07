@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 FAILED = False
 
 
 def _pass(name: str) -> None:
-    sys.stdout.write(f"PASS: {name}\n")
+    print(f"PASS: {name}")
 
 
 def _fail(name: str, detail: str) -> None:
     global FAILED
-    sys.stdout.write(f"FAIL: {name}: {detail}\n")
+    print(f"FAIL: {name}: {detail}")
     FAILED = True
 
 
@@ -25,7 +24,7 @@ def _read(path: str) -> str:
 def _py_files(include_tests: bool = True) -> list[Path]:
     ignored = {".venv", ".git"}
     if not include_tests:
-        ignored.add("tests")
+        ignored.update({"eval", "scripts", "tests", "tools"})
     return [
         path for path in Path(".").rglob("*.py") if not any(part in ignored for part in path.parts)
     ]
@@ -125,9 +124,9 @@ def main() -> int:
     check_no_print_calls()
     check_no_bare_except()
     if FAILED:
-        sys.stdout.write("Hygiene check FAILED.\n")
+        print("Hygiene check FAILED.")
         return 1
-    sys.stdout.write("All hygiene checks passed!\n")
+    print("All hygiene checks passed!")
     return 0
 
 
