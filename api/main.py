@@ -32,7 +32,7 @@ from api.routes.health import router as health_router
 from api.routes.overview import router as overview_router
 from api.routes.upload import router as upload_router
 from core.domain.exceptions import EmbeddingModelLoadError
-from features.chat import KeywordRetriever
+from features.chat import HybridRetriever, KeywordRetriever, VectorRetriever
 from features.chat._prompt_builder import ChatPromptBuilder
 from features.chat.chat_service import ChatService
 from features.chunking import ChunkingService
@@ -88,10 +88,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.embedder = embedder
         vector_store = SqliteVectorStore(settings.db_path)
         app.state.vector_store = vector_store
+        app.state.graph_provider = ProjectGraphBuilder()
         app.state.chunking_service = ChunkingService(
             embedder=embedder,
             vector_store=vector_store,
-            graph_provider=ProjectGraphBuilder(),
+            graph_provider=app.state.graph_provider,
             settings=settings,
         )
         app.state.overview_cache = InMemoryOverviewCache()
@@ -99,11 +100,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
         )
+        app.state.keyword_retriever = KeywordRetriever(graph_provider=app.state.graph_provider)
+        app.state.vector_retriever = VectorRetriever(
+            embedder=app.state.embedder,
+            vector_store=app.state.vector_store,
+            min_score=settings.vector_min_score,
+        )
+        app.state.hybrid_retriever = HybridRetriever(
+            vector=app.state.vector_retriever,
+            keyword=app.state.keyword_retriever,
+            vector_store=app.state.vector_store,
+            min_chunk_count=settings.rag_min_chunk_count,
+        )
         app.state.chat_service = ChatService(
             project_store=store,
             chat_store=chat_store,
             text_provider=app.state.text_provider,
-            retriever=KeywordRetriever(graph_provider=ProjectGraphBuilder()),
+            retriever=app.state.hybrid_retriever,
             prompt_builder=ChatPromptBuilder(),
         )
         stack.push_async_callback(app.state.chunking_service.aclose)

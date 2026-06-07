@@ -177,7 +177,7 @@ P2 v0.1 不承诺:
 | TASK-301 | sentence-transformers 嵌入适配器 | ✅ | Codex | 101 |
 | TASK-302 | SQLite 向量存储 + 检索 | ✅ | Codex | 204, 301 |
 | TASK-303 | 工程分块策略(chunk + metadata) | ✅ | Codex | 102, 103, 107 |
-| TASK-304 | 向量 RAG 整合到 ChatService | 🔲 | Codex | 205, 302, 303 |
+| TASK-304 | 向量 RAG 整合到 ChatService | 🔍 | Codex | 205, 302, 303 |
 | TASK-305 | 教学 Prompt 优化(电气教材语境) | 🔲 | Codex + PM | 304 |
 | TASK-306 | 评测脚本 + 评测集运行 | 🔲 | Codex + PM | 304 |
 | TASK-307 | **Evidence Citation Enforcer(证据引用强制器)** ⭐ | 🔲 | Codex | 304 |
@@ -353,4 +353,4 @@ Week 4:  [⬜⬜⬜⬜⬜⬜]           0/6
 ---
 
 **版本**:v2.1(冻结)
-**最后更新**:2026-06-06
+**最后更新**:2026-06-07
