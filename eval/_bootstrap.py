@@ -85,7 +85,9 @@ class RecordingTextProvider(TextProvider):
 class RecordingPromptBuilder(ChatPromptBuilder):
     """Capture the exact source_entries received by ChatPromptBuilder."""
 
-    def __init__(self, inner: ChatPromptBuilder, prompt_path: Path, template: PromptTemplate) -> None:
+    def __init__(
+        self, inner: ChatPromptBuilder, prompt_path: Path, template: PromptTemplate
+    ) -> None:
         self.inner = inner
         self.prompt_path = prompt_path
         self.template = template
@@ -136,7 +138,9 @@ class EvalAuditContext:
     def collect_per_case_audit(self, response: ChatResponse | None = None) -> dict[str, Any]:
         source_table = list(self.recording_prompt_builder.last_source_table)
         capture_mode = (
-            SOURCE_TABLE_CAPTURE_PROMPT_BUILDER if source_table else SOURCE_TABLE_CAPTURE_UNAVAILABLE
+            SOURCE_TABLE_CAPTURE_PROMPT_BUILDER
+            if source_table
+            else SOURCE_TABLE_CAPTURE_UNAVAILABLE
         )
         raw_ids, raw_ids_available = _extract_raw_citation_ids(
             self.recording_text_provider.last_raw_response_text
@@ -157,7 +161,9 @@ class EvalAuditContext:
             "source_table_capture_mode": capture_mode,
             "raw_citation_id_type_map_json": _json(raw_id_type_map),
             "returned_citation_refs_json": _json(returned_refs),
-            "returned_citation_types_json_or_blank": _json(returned_types) if returned_types else "",
+            "returned_citation_types_json_or_blank": _json(returned_types)
+            if returned_types
+            else "",
             "returned_citation_count": len(returned_refs),
             "retrieval_hit_types_json": _json(
                 [str(getattr(hit, "source_type", "")) for hit in self.recording_retriever.last_hits]
@@ -344,11 +350,7 @@ def _response_citation_refs(response: ChatResponse | None) -> list[dict[str, Any
     if response is None:
         return []
     return [
-        {
-            key: value
-            for key, value in citation.model_dump().items()
-            if value not in (None, "", [])
-        }
+        {key: value for key, value in citation.model_dump().items() if value not in (None, "", [])}
         for citation in response.citations
     ]
 

@@ -131,7 +131,9 @@ def main() -> int:
     final_rows = _apply_final_totals(merged, resolved)
     raw_fieldnames = list(raw_rows[0].keys()) if raw_rows else []
     _write_unblind_outputs(out_dir, final_rows, raw_rows, raw_fieldnames)
-    _write_csv(out_dir / "qa_final_scored_merged.csv", raw_fieldnames + FINAL_EXTRA_COLUMNS, final_rows)
+    _write_csv(
+        out_dir / "qa_final_scored_merged.csv", raw_fieldnames + FINAL_EXTRA_COLUMNS, final_rows
+    )
     adjudicated_count = sum(1 for row in final_rows if row["adjudicated_total"] != "")
     _print_stats(final_rows, raw_rows, adjudicated_count=adjudicated_count)
     return 0
@@ -205,9 +207,7 @@ def _merge_queue_scores(
     reviewer_scores: dict[str, dict[str, str]],
 ) -> list[dict[str, str]]:
     key_by_blind = {row["blind_id"]: row for row in key}
-    raw_by_case_version = {
-        (row["case_id"], row["prompt_version"]): row for row in raw_rows
-    }
+    raw_by_case_version = {(row["case_id"], row["prompt_version"]): row for row in raw_rows}
     merged: list[dict[str, str]] = []
     for queue_row in queue:
         blind_id = queue_row["blind_id"]
