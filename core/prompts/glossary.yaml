@@ -1,0 +1,62 @@
+# 国内电气 / 自动化 / 控制 / 通信专业核心术语对照表
+# 用途:reference;主要消费方式是 qa_with_context.yaml v0.2-rc 内嵌快照(D3 c 方案)
+# 维护:扩词条时必须通过 PR review 同步 qa_with_context.yaml 快照
+#
+# 双维护风险声明:
+# 本文件与 qa_with_context.yaml system 段 "## 国内教材术语对齐" 内嵌快照 两份。
+# 修改本文件后必须同步 qa_with_context.yaml 快照;否则 LLM 实际看到的是旧术语,本文件 reference 失效。
+# 同步检查:每次本文件 PR 必须含 qa_with_context.yaml 对应改动;反之亦然。
+# Phase 2 候选:_prompt_builder.py 动态注入(消除双维护);MCS 阶段不做。
+
+version: "v0.1"
+description: "国内工科教材术语对照,MCS v0.1 = 40 条核心词(5 大方向);Phase 2 可扩"
+
+control_theory:
+  state_space: 状态空间
+  feedback_loop: 反馈回路
+  closed_loop: 闭环
+  open_loop: 开环
+  bode_plot: 伯德图
+  root_locus: 根轨迹
+  nyquist_plot: 奈奎斯特图
+  gain_margin: 增益裕度
+  phase_margin: 相位裕度
+  transfer_function: 传递函数
+  pole: 极点
+  zero: 零点
+
+motor_control:
+  park_transform: Park 变换
+  clarke_transform: Clarke 变换
+  foc: 矢量控制(FOC)
+  dtc: 直接转矩控制(DTC)
+  pmsm: 永磁同步电机(PMSM)
+  bldc: 无刷直流电机(BLDC)
+  rotor_flux_orientation: 转子磁链定向
+  field_weakening: 弱磁控制
+
+power_electronics:
+  pwm: 脉宽调制(PWM)
+  svpwm: 空间矢量脉宽调制(SVPWM)
+  spwm: 正弦波脉宽调制(SPWM)
+  rectifier: 整流器
+  inverter: 逆变器
+  buck: 降压斩波(Buck)
+  boost: 升压斩波(Boost)
+
+signal_processing:
+  fourier_transform: 傅里叶变换
+  dft: 离散傅里叶变换(DFT)
+  fft: 快速傅里叶变换(FFT)
+  convolution: 卷积
+  z_transform: Z 变换
+  laplace_transform: 拉普拉斯变换
+
+communication:
+  modulation: 调制
+  demodulation: 解调
+  carrier: 载波
+  bandwidth: 带宽
+  snr: 信噪比
+  bit_error_rate: 误码率
+  qam: 正交幅度调制(QAM)
