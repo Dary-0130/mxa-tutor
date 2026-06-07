@@ -1,0 +1,29 @@
+{
+  "run_id": "20260607_205221_fixture_bootstrap",
+  "db_path": "eval/results/20260607_205221_fixture_bootstrap/eval.sqlite",
+  "db_hash_or_blank": "bbbbbee19e2c149652ff3b89f338143035ee23563a4a8a2ef755c4b1eaa6643b",
+  "resolved_at": "2026-06-07T12:53:18.425309",
+  "coverage_evaluation": "partial",
+  "projects": {
+    "pmsm_foc_c2000": {
+      "runtime_project_id": "585c1b82-d566-423b-861f-5b797fdc740f",
+      "chunk_count": 1831,
+      "ingest_status": "ready"
+    },
+    "buck_voltage_control": {
+      "runtime_project_id": "a8570ab0-0561-413c-9e9a-a3bd82fb63b5",
+      "chunk_count": 66,
+      "ingest_status": "ready"
+    },
+    "pid_antiwindup": {
+      "runtime_project_id": "7e9df5a5-789c-4739-98cf-4a849e470553",
+      "chunk_count": 33,
+      "ingest_status": "ready"
+    },
+    "lms_noise_cancel": {
+      "runtime_project_id": "0875c393-6ea5-4321-bcde-1fac38b37f11",
+      "chunk_count": 61,
+      "ingest_status": "ready"
+    }
+  }
+}
