@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import yaml
+from loguru import logger
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -431,10 +432,11 @@ def _smoke_loaded_audit(args: argparse.Namespace) -> int:
         raise AssertionError("rc_loaded_prompt_version_not_v0.2-rc")
     if chat_prompt_builder_module.load_prompt_template is not original_loader:
         raise AssertionError("prompt_loader_monkeypatch_not_restored")
-    print(
-        "loaded audit PASS: "
-        f"baseline={baseline.loaded_prompt_version} rc={rc.loaded_prompt_version} "
-        f"mode={rc.prompt_loader_mode}"
+    logger.info(
+        "loaded audit PASS: baseline={} rc={} mode={}",
+        baseline.loaded_prompt_version,
+        rc.loaded_prompt_version,
+        rc.prompt_loader_mode,
     )
     return 0
 
@@ -447,6 +449,12 @@ def main() -> int:
     parser.add_argument("--eval-db-path", type=Path)
     args = parser.parse_args()
     if args.smoke_loaded_audit:
+        args.baseline_prompt = args.baseline_prompt or ROOT / "eval" / "baselines" / "qa_v0.1.yaml"
+        args.rc_prompt = args.rc_prompt or ROOT / "core" / "prompts" / "qa_with_context.yaml"
+        args.eval_db_path = (
+            args.eval_db_path
+            or ROOT / "eval" / "results" / "20260607_205221_fixture_bootstrap" / "eval.sqlite"
+        )
         missing = [
             name
             for name in ("baseline_prompt", "rc_prompt", "eval_db_path")

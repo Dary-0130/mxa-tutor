@@ -9,6 +9,8 @@ import random
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 QUEUE_FIELDNAMES = [
     "blind_id",
     "project_alias",
@@ -118,9 +120,11 @@ def main() -> int:
     _write_csv(args.queue, QUEUE_FIELDNAMES, queue_rows)
     _write_csv(args.key, KEY_FIELDNAMES, key_rows)
     _write_csv(args.project_key, PROJECT_KEY_FIELDNAMES, _project_key_rows(template))
-    print(
-        f"wrote queue={len(queue_rows)} key={len(key_rows)} "
-        f"project_key={len(_project_key_rows(template))}"
+    logger.info(
+        "wrote queue={} key={} project_key={}",
+        len(queue_rows),
+        len(key_rows),
+        len(_project_key_rows(template)),
     )
     return 0
 

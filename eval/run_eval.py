@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -151,7 +153,7 @@ async def main() -> int:
         await audit.aclose()
 
     _write_csv(raw_path, RAW_FIELDNAMES, rows)
-    print(f"wrote {len(rows)} rows to {raw_path}")
+    logger.info("wrote {} rows to {}", len(rows), raw_path)
     return 0
 
 

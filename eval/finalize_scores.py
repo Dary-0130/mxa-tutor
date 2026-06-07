@@ -6,7 +6,10 @@ import argparse
 import csv
 import json
 import statistics
+import sys
 from pathlib import Path
+
+from loguru import logger
 
 SCORE_COLUMNS = [
     "factual",
@@ -107,10 +110,10 @@ def main() -> int:
 
     if args.adjudication_resolved is None and required:
         _write_csv(out_dir / "adjudication_queue.csv", ADJUDICATION_FIELDNAMES, required)
-        print(
-            "ADJUDICATION REQUIRED: "
-            f"{len(required)} cases pending. Fill adjudication_resolved.csv and rerun "
-            "with --adjudication-resolved"
+        logger.info(
+            "ADJUDICATION REQUIRED: {} cases pending. Fill adjudication_resolved.csv "
+            "and rerun with --adjudication-resolved",
+            len(required),
         )
         return 2
 
@@ -125,7 +128,7 @@ def main() -> int:
         if row["blind_id"] not in resolved or resolved[row["blind_id"]]["adjudicated_total"] == ""
     ]
     if unresolved:
-        print("UNRESOLVED ADJUDICATION: " + ",".join(unresolved))
+        logger.error("UNRESOLVED ADJUDICATION: {}", ",".join(unresolved))
         return 2
 
     final_rows = _apply_final_totals(merged, resolved)
@@ -369,7 +372,8 @@ def _print_stats(
         "overall_success_rate": _success_rate(raw_rows),
         "citation_type_available_rate": _citation_type_available_rate(raw_rows),
     }
-    print(json.dumps(stats, ensure_ascii=False, sort_keys=True))
+    sys.stdout.write(json.dumps(stats, ensure_ascii=False, sort_keys=True) + "\n")
+    sys.stdout.flush()
 
 
 def _success_rate(rows: list[dict[str, str]], eval_set: str | None = None) -> str:
