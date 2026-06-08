@@ -12,6 +12,22 @@ from ._explanation_service import ClaimType, ExplanationClaim, ExplanationPack
 TOPOLOGY_KINDS = {"slx_line", "signal_path", "goto_from_tag", "bus_signal"}
 RUNTIME_ASSERTION_WORDS = tuple("运行结果 波形 稳定性已验证 仿真已证明 仿真证明 已验证稳定".split())
 STRONG_INFERENCE_WORDS = ("必然", "一定", "证明", "最优")
+VALID_EVIDENCE_KINDS: tuple[EvidenceKind, ...] = (
+    "project_overview_field",
+    "slx_block",
+    "slx_line",
+    "signal_path",
+    "subsystem",
+    "parameter",
+    "goto_from_tag",
+    "bus_signal",
+    "measurement",
+    "scope",
+    "m_file",
+    "m_function",
+    "mat_variable",
+    "simulink_caveat",
+)
 
 
 class ClaimValidationFatalError(Exception):
@@ -273,8 +289,15 @@ def _evidence_kind_map(evidence_pack: dict[str, Any]) -> dict[str, EvidenceKind]
         evidence_id = item.get("evidence_id")
         kind = item.get("kind")
         if isinstance(evidence_id, str) and isinstance(kind, str):
-            result[evidence_id] = kind
+            result[evidence_id] = _parse_evidence_kind(kind)
     return result
+
+
+def _parse_evidence_kind(value: str) -> EvidenceKind:
+    for kind in VALID_EVIDENCE_KINDS:
+        if value == kind:
+            return kind
+    raise ClaimValidationFatalError(f"unknown EvidenceKind in EvidencePack: {value}")
 
 
 def _raise_on_duplicate_claim_ids(claims: list[ExplanationClaim]) -> None:

@@ -88,7 +88,7 @@ def _build_records(
 
 def _records_from_blocks(
     project: Project,
-    node_by_block: dict[tuple[str, str | None], str],
+    node_by_block: dict[tuple[str, str], str],
     indegree: Counter[str],
     outdegree: Counter[str],
     type_counts: Counter[str],

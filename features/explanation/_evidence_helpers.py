@@ -10,7 +10,14 @@ from core.domain.slx_model import SlxBlock, SlxLine, SlxModel
 from core.domain.source_ref import SourceRef
 from features.overview.overview_schemas import ProjectOverview
 
-from ._evidence_pack import EndpointRef, JsonValue, ParameterRoleGuess, _jsonify
+from ._evidence_pack import (
+    EndpointRef,
+    JsonValue,
+    ParameterContextPayload,
+    ParameterRoleGuess,
+    SignalPathPayload,
+    _jsonify_dict,
+)
 from ._score import classify_block_type, normalize_block_type
 from ._score_types import ScoredBlock
 
@@ -158,6 +165,7 @@ def clean_text(text: str, max_chars: int) -> str:
     return sanitized[: max(0, max_chars - 3)].rstrip() + "..."
 
 
-def payload_dict(value: object) -> dict[str, JsonValue]:
-    payload = _jsonify(asdict(value))
-    return payload if isinstance(payload, dict) else {"value": payload}
+def payload_dict(
+    value: EndpointRef | SignalPathPayload | ParameterContextPayload,
+) -> dict[str, JsonValue]:
+    return _jsonify_dict(asdict(value))

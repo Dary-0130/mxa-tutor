@@ -201,7 +201,7 @@ def _complete_sections(sections: list[ExplanationSection]) -> list[ExplanationSe
 
 def _load_prompt_yaml(raw: str) -> dict[str, Any]:
     try:
-        import yaml  # type: ignore[import-untyped]
+        import yaml
 
         data = yaml.safe_load(raw)
         return data if isinstance(data, dict) else {}

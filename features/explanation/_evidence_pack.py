@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, is_dataclass
-from typing import Literal
+from dataclasses import asdict, dataclass
+from typing import Any, Literal
 
 from core.domain.source_ref import SourceRef
 
 from ._score_types import SelectionDiagnostics
 
 JsonScalar = str | int | float | bool | None
-JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+JsonValue = (
+    JsonScalar
+    | list[str]
+    | list[int]
+    | list[float]
+    | list[bool]
+    | list["JsonValue"]
+    | dict[str, "JsonValue"]
+)
 
 EvidenceKind = Literal[
     "project_overview_field",
@@ -85,7 +93,7 @@ class EvidenceItem:
     payload: dict[str, JsonValue]
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return _jsonify(asdict(self))
+        return _jsonify_dict(asdict(self))
 
 
 @dataclass(frozen=True)
@@ -98,7 +106,7 @@ class EvidencePack:
     builder_notes: list[str]
 
     def to_dict(self) -> dict[str, JsonValue]:
-        return _jsonify(asdict(self))
+        return _jsonify_dict(asdict(self))
 
 
 def _jsonify(value: object) -> JsonValue:
@@ -107,9 +115,11 @@ def _jsonify(value: object) -> JsonValue:
     if isinstance(value, tuple | list):
         return [_jsonify(item) for item in value]
     if isinstance(value, dict):
-        return {str(key): _jsonify(item) for key, item in value.items()}
+        return _jsonify_dict(value)
     if hasattr(value, "model_dump"):
         return _jsonify(value.model_dump())
-    if is_dataclass(value):
-        return _jsonify(asdict(value))
     return str(value)
+
+
+def _jsonify_dict(value: dict[Any, Any]) -> dict[str, JsonValue]:
+    return {str(key): _jsonify(item) for key, item in value.items()}
