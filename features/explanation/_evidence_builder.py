@@ -114,7 +114,13 @@ class EvidenceBuilder:
     def _add_block_items(self, items: list[EvidenceItem], selected: list[ScoredBlock]) -> None:
         for scored in selected:
             payload = self._block_payload(scored)
-            self._append(items, "slx_block", block_source_ref(scored.file_path, scored.block), block_summary(scored), payload)
+            self._append(
+                items,
+                "slx_block",
+                block_source_ref(scored.file_path, scored.block),
+                block_summary(scored),
+                payload,
+            )
             if normalize_block_type(scored.block.block_type) == "Scope":
                 self._append(
                     items,
@@ -169,33 +175,66 @@ class EvidenceBuilder:
             self._append(
                 items,
                 "parameter",
-                SourceRef(scored.file_path, block_id=scored.block.block_id, block_name=scored.block.name, parent_subsystem=scored.block.parent_subsystem, parameter_name=name),
+                SourceRef(
+                    scored.file_path,
+                    block_id=scored.block.block_id,
+                    block_name=scored.block.name,
+                    parent_subsystem=scored.block.parent_subsystem,
+                    parameter_name=name,
+                ),
                 f"参数 {name} 位于 {scored.block.name}({normalize_block_type(scored.block.block_type)}),可作为静态解释依据。",
                 payload_dict(payload),
             )
 
     def _add_connector_item(self, items: list[EvidenceItem], scored: ScoredBlock) -> None:
         block_type = normalize_block_type(scored.block.block_type)
-        if block_type not in {"Bus Creator", "Bus Selector", "Goto", "From", "Mux", "Demux", "Selector"}:
+        if block_type not in {
+            "Bus Creator",
+            "Bus Selector",
+            "Goto",
+            "From",
+            "Mux",
+            "Demux",
+            "Selector",
+        }:
             return
         kind: EvidenceKind = "bus_signal" if "Bus" in block_type else "goto_from_tag"
-        payload = SignalPathPayload(None, [endpoint(scored.block)], None, 0, connector_tags(scored.block))
-        self._append(items, kind, block_source_ref(scored.file_path, scored.block), f"{block_type} {scored.block.name} 是信号路由节点。", payload_dict(payload))
+        payload = SignalPathPayload(
+            None, [endpoint(scored.block)], None, 0, connector_tags(scored.block)
+        )
+        self._append(
+            items,
+            kind,
+            block_source_ref(scored.file_path, scored.block),
+            f"{block_type} {scored.block.name} 是信号路由节点。",
+            payload_dict(payload),
+        )
 
     def _add_subsystem_items(self, items: list[EvidenceItem], models: list[SlxModel]) -> None:
         for model in models:
-            subsystem_blocks = {block.name: block for block in model.blocks if block.block_type == "SubSystem"}
-            for subsystem, child_ids in sorted(model.subsystems.items(), key=lambda item: (-len(item[1]), item[0]))[:12]:
+            subsystem_blocks = {
+                block.name: block for block in model.blocks if block.block_type == "SubSystem"
+            }
+            for subsystem, child_ids in sorted(
+                model.subsystems.items(), key=lambda item: (-len(item[1]), item[0])
+            )[:12]:
                 block = subsystem_blocks.get(subsystem)
                 self._append(
                     items,
                     "subsystem",
-                    SourceRef(model.file_path, block_id=block.block_id if block else None, block_name=subsystem, parent_subsystem=block.parent_subsystem if block else None),
+                    SourceRef(
+                        model.file_path,
+                        block_id=block.block_id if block else None,
+                        block_name=subsystem,
+                        parent_subsystem=block.parent_subsystem if block else None,
+                    ),
                     f"子系统 {subsystem} 包含 {len(child_ids)} 个解析到的 block。",
                     {"subsystem": subsystem, "child_block_count": len(child_ids)},
                 )
 
-    def _add_line_items(self, items: list[EvidenceItem], models: list[SlxModel], selected: list[ScoredBlock]) -> None:
+    def _add_line_items(
+        self, items: list[EvidenceItem], models: list[SlxModel], selected: list[ScoredBlock]
+    ) -> None:
         blocks = block_index(models)
         selected_keys = {(item.file_path, item.block.block_id) for item in selected}
         added = 0
@@ -214,7 +253,17 @@ class EvidenceBuilder:
                     1,
                     [],
                 )
-                self._append(items, "slx_line", SourceRef(model.file_path, block_id=line.from_block, block_name=source.name if source else line.from_block), line_summary(line, source, target), payload_dict(payload))
+                self._append(
+                    items,
+                    "slx_line",
+                    SourceRef(
+                        model.file_path,
+                        block_id=line.from_block,
+                        block_name=source.name if source else line.from_block,
+                    ),
+                    line_summary(line, source, target),
+                    payload_dict(payload),
+                )
                 added += 1
 
     def _add_m_file_items(self, items: list[EvidenceItem], m_files: list[MFile]) -> None:
@@ -224,10 +273,25 @@ class EvidenceBuilder:
                 "m_file",
                 SourceRef(file_path=m_file.file_path),
                 f"MATLAB 文件 {m_file.file_path} 的角色为 {m_file.file_role},包含 {len(m_file.functions)} 个函数。",
-                {"file_role": m_file.file_role, "function_names": [func.name for func in m_file.functions[:10]], "imports": m_file.imports[:10], "uses_toolbox": m_file.uses_toolbox[:10]},
+                {
+                    "file_role": m_file.file_role,
+                    "function_names": [func.name for func in m_file.functions[:10]],
+                    "imports": m_file.imports[:10],
+                    "uses_toolbox": m_file.uses_toolbox[:10],
+                },
             )
             for func in m_file.functions[:10]:
-                self._append(items, "m_function", SourceRef(file_path=m_file.file_path, line_range=func.line_range), f"函数 {func.name} 定义在 {m_file.file_path}:{func.line_range[0]}-{func.line_range[1]}。", {"function_name": func.name, "inputs_count": len(func.inputs), "outputs_count": len(func.outputs)})
+                self._append(
+                    items,
+                    "m_function",
+                    SourceRef(file_path=m_file.file_path, line_range=func.line_range),
+                    f"函数 {func.name} 定义在 {m_file.file_path}:{func.line_range[0]}-{func.line_range[1]}。",
+                    {
+                        "function_name": func.name,
+                        "inputs_count": len(func.inputs),
+                        "outputs_count": len(func.outputs),
+                    },
+                )
 
     def _add_mat_items(self, items: list[EvidenceItem], mat_files: list[MatMetadata]) -> None:
         for mat_file in mat_files[:10]:
@@ -237,26 +301,64 @@ class EvidenceBuilder:
                     "mat_variable",
                     SourceRef(file_path=mat_file.file_path),
                     f"MAT 文件变量 {variable.name} 类型为 {variable.var_type},shape={variable.shape}。",
-                    {"variable_name": variable.name, "var_type": variable.var_type, "shape": list(variable.shape), "likely_role": variable.likely_role, "first_field_names": variable.first_field_names[:10]},
+                    {
+                        "variable_name": variable.name,
+                        "var_type": variable.var_type,
+                        "shape": list(variable.shape),
+                        "likely_role": variable.likely_role,
+                        "first_field_names": variable.first_field_names[:10],
+                    },
                 )
 
-    def _add_caveats(self, items: list[EvidenceItem], models: list[SlxModel], selected: list[ScoredBlock]) -> None:
+    def _add_caveats(
+        self, items: list[EvidenceItem], models: list[SlxModel], selected: list[ScoredBlock]
+    ) -> None:
         for model in models:
             for warning in model.parse_warnings[:8]:
-                self._append(items, "simulink_caveat", SourceRef(file_path=model.file_path), f"解析提示:{clean_text(warning, 160)}。", {"warning": clean_text(warning, 180), "scope": "parser_static_warning"})
-        flagged = [item.block for item in selected if item.block.is_masked or item.block.is_library_link or item.block.is_model_reference]
+                self._append(
+                    items,
+                    "simulink_caveat",
+                    SourceRef(file_path=model.file_path),
+                    f"解析提示:{clean_text(warning, 160)}。",
+                    {"warning": clean_text(warning, 180), "scope": "parser_static_warning"},
+                )
+        flagged = [
+            item.block
+            for item in selected
+            if item.block.is_masked or item.block.is_library_link or item.block.is_model_reference
+        ]
         if flagged:
             self._append(
                 items,
                 "simulink_caveat",
                 SourceRef(file_path=selected[0].file_path),
                 f"候选 block 中有 {len(flagged)} 个 masked/library/model-reference 标记,解释时应提示静态解析边界。",
-                {"masked_count": sum(1 for b in flagged if b.is_masked), "library_link_count": sum(1 for b in flagged if b.is_library_link), "model_reference_count": sum(1 for b in flagged if b.is_model_reference)},
+                {
+                    "masked_count": sum(1 for b in flagged if b.is_masked),
+                    "library_link_count": sum(1 for b in flagged if b.is_library_link),
+                    "model_reference_count": sum(1 for b in flagged if b.is_model_reference),
+                },
             )
 
-    def _append(self, items: list[EvidenceItem], kind: EvidenceKind, source_ref: SourceRef, summary: str, payload: dict[str, JsonValue]) -> None:
-        items.append(EvidenceItem(f"E{len(items) + 1:03d}", kind, source_ref, clean_text(summary, 200), payload))
+    def _append(
+        self,
+        items: list[EvidenceItem],
+        kind: EvidenceKind,
+        source_ref: SourceRef,
+        summary: str,
+        payload: dict[str, JsonValue],
+    ) -> None:
+        items.append(
+            EvidenceItem(
+                f"E{len(items) + 1:03d}", kind, source_ref, clean_text(summary, 200), payload
+            )
+        )
 
 
-def _line_touches_selected(file_path: str, line: SlxLine, selected_keys: set[tuple[str, str]]) -> bool:
-    return (file_path, line.from_block) in selected_keys or (file_path, line.to_block) in selected_keys
+def _line_touches_selected(
+    file_path: str, line: SlxLine, selected_keys: set[tuple[str, str]]
+) -> bool:
+    return (file_path, line.from_block) in selected_keys or (
+        file_path,
+        line.to_block,
+    ) in selected_keys

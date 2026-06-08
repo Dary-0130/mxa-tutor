@@ -1,0 +1,120 @@
+{
+  "claims": [
+    {
+      "claim_id": "C001",
+      "section": "project_purpose",
+      "claim_type": "project_purpose",
+      "text": "该模型是一个基于双馈异步发电机（DFIG）的风力发电系统仿真模型，包含电网侧和转子侧变换器及其控制系统。",
+      "evidence_ids": [
+        "E001",
+        "E006",
+        "E129",
+        "E132"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C002",
+      "section": "reading_order",
+      "claim_type": "reading_order",
+      "text": "建议从根级模块开始，识别电源、测量、控制和功率级模块，然后打开最大子系统以跟踪信号流。",
+      "evidence_ids": [
+        "E002",
+        "E004"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C003",
+      "section": "key_subsystems",
+      "claim_type": "project_purpose",
+      "text": "模型包含多个关键子系统：转子侧变换器控制系统（116个模块）、数据采集系统（104个模块）、电网侧变换器控制系统（84个模块）等。",
+      "evidence_ids": [
+        "E129",
+        "E130",
+        "E132"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C004",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "DFIG的定子端通过B_Stator测量模块连接到Filter和choke；转子端通过B_rotor测量模块连接到通用桥和变压器。",
+      "evidence_ids": [
+        "E145",
+        "E146",
+        "E147",
+        "E150",
+        "E151",
+        "E152",
+        "E162",
+        "E163",
+        "E164"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C005",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "Grid-side converter Control system中的Discrete SV PWM Generator的Fc参数设置为'PWM_freq'，表示载波频率由工作区变量定义。",
+      "evidence_ids": [
+        "E044",
+        "E046"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C006",
+      "section": "modification_advice",
+      "claim_type": "modification_advice",
+      "text": "若需调整电流环动态，应优先修改Rotor-side converter Control system中的PI控制器参数（AncestorBlock指向Discrete PI Controller），并通过B_rotor测量模块观察转子电流响应。",
+      "evidence_ids": [
+        "E092",
+        "E093",
+        "E022"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C007",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "建议观察B_Stator、B_Grid、B_rotor等三相VI测量模块，它们分别提供定子、电网和转子侧的电压电流数据。",
+      "evidence_ids": [
+        "E010",
+        "E018",
+        "E022"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C008",
+      "section": "uncertainty_boundary",
+      "claim_type": "uncertainty_boundary",
+      "text": "模型引用了多个工作区变量（如PWM_freq、Ts_Power、p等），这些变量未在模型中定义，需在仿真前设置。此外，有13个掩码/库链接块，其内部结构未展开，可能隐藏细节。",
+      "evidence_ids": [
+        "E201",
+        "E202",
+        "E203",
+        "E204",
+        "E205",
+        "E206",
+        "E207",
+        "E208",
+        "E209"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    }
+  ],
+  "rejected_claims": []
+}

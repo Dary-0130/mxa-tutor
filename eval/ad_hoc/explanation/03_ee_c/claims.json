@@ -1,0 +1,168 @@
+{
+  "claims": [
+    {
+      "claim_id": "C001",
+      "section": "project_purpose",
+      "claim_type": "project_purpose",
+      "text": "03_ee_c 是一个 Simulink 纯电气工程模型，包含 789 个模块和 916 条连接，用于模拟风力发电系统（含永磁同步发电机和网侧变换器控制）。",
+      "evidence_ids": [
+        "E001"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C002",
+      "section": "reading_order",
+      "claim_type": "reading_order",
+      "text": "建议先打开 03_ee_c.slx，观察根级信号路径；然后识别电源、测量、控制和功率模块；接着打开子系统跟踪信号分组和转换；最后比较关键模块参数与求解器设置。",
+      "evidence_ids": [
+        "E004"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C003",
+      "section": "key_subsystems",
+      "claim_type": "reading_order",
+      "text": "模型主要子系统包括：Wind Turbine（含 PMSG 和变换器，760 个模块）、Control（含 Grid-side 和 PMSG-side 控制，692 个模块）、Measurement and Transformation（260 个模块）、Grid-side converter Control system（95 个模块）和 PMSG-side converter Control system（51 个模块）。",
+      "evidence_ids": [
+        "E124",
+        "E125",
+        "E126",
+        "E130",
+        "E133"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C004",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "B_grid (Three-Phase VI Measurement) 的三相输出直接连接到 Choke (Three-Phase Series RLC Branch) 的三相输入端。",
+      "evidence_ids": [
+        "E136",
+        "E137",
+        "E138"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C005",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "Universal Bridge1 的交流侧三相输出连接到 B_grid1 (Three-Phase VI Measurement) 的三相输入端。",
+      "evidence_ids": [
+        "E142",
+        "E143",
+        "E144"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C006",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "Deg->Rad 模块的增益设为 pi/180，用于将角度从度转换为弧度，以便后续三角函数计算。",
+      "evidence_ids": [
+        "E017",
+        "E018"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C007",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "->pu1 模块的增益设为 Pnom/Vnom_gen/Vnom_gen，用于将实际值转换为标幺值 (pu)，便于控制算法处理。",
+      "evidence_ids": [
+        "E023",
+        "E024"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C008",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "->pu2 模块的增益设为 Pnom/Vnom_gen/Vnom_gen，用于将实际值转换为标幺值 (pu)。",
+      "evidence_ids": [
+        "E026",
+        "E027"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C009",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "->pu3 模块的增益设为 Pnom/Vnom_gen/Vnom_gen*2*3.14*10.58，用于将速度信号转换为标幺值并包含常数转换。",
+      "evidence_ids": [
+        "E029",
+        "E030"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C010",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "B_grid1 (Three-Phase VI Measurement) 位于 Wind Turbine 子系统，可观测电网侧的三相电压和电流。当前设置为仅测量电压（CurrentMeasurement=no）。",
+      "evidence_ids": [
+        "E009",
+        "E010"
+      ],
+      "is_inference": false,
+      "confidence": "medium"
+    },
+    {
+      "claim_id": "C011",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "Scope (4输入) 位于 PMSG-side converter Control system 子系统，用于观测控制信号如 Iq_ref、Id_ref、Vdc 等。",
+      "evidence_ids": [
+        "E116",
+        "E117"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C012",
+      "section": "modification_advice",
+      "claim_type": "modification_advice",
+      "text": "如需修改直流电压控制回路，可调整 Grid-side converter Control system 中 Discrete PI Controller 的 Ki_dc 和 Kp_dc 参数（当前为工作区变量），然后通过 PMSG-side converter Control system 中的 Scope 观察响应。",
+      "evidence_ids": [
+        "E066",
+        "E067",
+        "E117"
+      ],
+      "is_inference": false,
+      "confidence": "medium"
+    },
+    {
+      "claim_id": "C013",
+      "section": "uncertainty_boundary",
+      "claim_type": "uncertainty_boundary",
+      "text": "模型中存在工作区变量引用（如 Ts, Nb_wt, ModulatorType, Fc 等），这些变量未在模型内部定义，实际值需要从 MATLAB 工作空间获取。此外，有10个块为库链接块，其内部可能包含未解析的细节，静态分析无法完全确定其行为。",
+      "evidence_ids": [
+        "E196",
+        "E197",
+        "E202",
+        "E203",
+        "E204"
+      ],
+      "is_inference": true,
+      "confidence": "medium"
+    }
+  ],
+  "rejected_claims": []
+}

@@ -78,7 +78,9 @@ def downstream_endpoints(scored: ScoredBlock, *, limit: int) -> list[EndpointRef
     for line in scored.model.lines:
         if line.from_block != scored.block.block_id:
             continue
-        target = next((block for block in scored.model.blocks if block.block_id == line.to_block), None)
+        target = next(
+            (block for block in scored.model.blocks if block.block_id == line.to_block), None
+        )
         if target is not None:
             downstream.append(endpoint(target, str(line.to_port)))
         if len(downstream) >= limit:

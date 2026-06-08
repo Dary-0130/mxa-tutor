@@ -223,7 +223,16 @@ AMBIGUOUS_TYPE_WORDS = (
     "inport",
     "outport",
 )
-AMBIGUOUS_GENERIC_WORDS = ("block", "subsystem", "model", "chart", "signal", "input", "output", "data")
+AMBIGUOUS_GENERIC_WORDS = (
+    "block",
+    "subsystem",
+    "model",
+    "chart",
+    "signal",
+    "input",
+    "output",
+    "data",
+)
 
 
 def normalize_block_type(block_type: str) -> str:

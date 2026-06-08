@@ -1,0 +1,70 @@
+{
+  "run_id": "ad_hoc_20260608",
+  "eval_db_path": "eval/ad_hoc/eval.sqlite",
+  "db_hash_or_blank": "22c46c4dc64e3ad94c99455feb8f6dc2480494b2547fa54fd7be64ff9627b3e5",
+  "source_project_aliases": [
+    "01_ee_a",
+    "02_ee_b",
+    "03_ee_c",
+    "04_ee_d"
+  ],
+  "coverage_evaluation": "ad_hoc",
+  "build_mode": "existing_parser_chunking_pipeline_with_relative_slx_paths",
+  "built_at": "2026-06-07T18:17:47.802668",
+  "project_count": 4,
+  "all_ready": true,
+  "projects": {
+    "01_ee_a": {
+      "source_zip": "eval/ad_hoc/inputs/01_ee_a.zip",
+      "source_zip_sha256": "3e96a7a16051f5069a1729cb1de8b57c6b59c4070aa9411c3d1ebb288aac7f63",
+      "runtime_project_id": "e445ffac-1d8e-4f44-bf3a-b4b91257b2c6",
+      "status": "ready",
+      "error_code": null,
+      "chunk_count": 491,
+      "ingest_status": "ready",
+      "file_count": 1,
+      "slx_count": 1,
+      "m_count": 0,
+      "overview_mode": "deterministic_local_fallback"
+    },
+    "02_ee_b": {
+      "source_zip": "eval/ad_hoc/inputs/02_ee_b.zip",
+      "source_zip_sha256": "8f44a47fa9e53ecd42d2b73cff03c787e13d80f713077a3394b2d87689f8f287",
+      "runtime_project_id": "e5aff045-3343-47a7-847a-aa2a55f9f3e3",
+      "status": "ready",
+      "error_code": null,
+      "chunk_count": 399,
+      "ingest_status": "ready",
+      "file_count": 1,
+      "slx_count": 1,
+      "m_count": 0,
+      "overview_mode": "deterministic_local_fallback"
+    },
+    "03_ee_c": {
+      "source_zip": "eval/ad_hoc/inputs/03_ee_c.zip",
+      "source_zip_sha256": "c1d03e06205f0670d6eecb36ed73c7241ace2af31c13a054bb3791d3665b2637",
+      "runtime_project_id": "6970ae78-0034-4714-9960-e5cad01977a1",
+      "status": "ready",
+      "error_code": null,
+      "chunk_count": 816,
+      "ingest_status": "ready",
+      "file_count": 1,
+      "slx_count": 1,
+      "m_count": 0,
+      "overview_mode": "deterministic_local_fallback"
+    },
+    "04_ee_d": {
+      "source_zip": "eval/ad_hoc/inputs/04_ee_d.zip",
+      "source_zip_sha256": "0d78f596f538ebd381836be55788420fde9e8de7a1488498f75bc38ad9bdf965",
+      "runtime_project_id": "b118b63f-a4f7-42f5-a21c-f3d0f8676b18",
+      "status": "ready",
+      "error_code": null,
+      "chunk_count": 134,
+      "ingest_status": "ready",
+      "file_count": 1,
+      "slx_count": 1,
+      "m_count": 0,
+      "overview_mode": "deterministic_local_fallback"
+    }
+  }
+}

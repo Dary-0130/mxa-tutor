@@ -81,7 +81,9 @@ def _build_records(
         (indegree[node] + outdegree[node] for node in set(indegree) | set(outdegree)),
         default=1,
     )
-    return _records_from_blocks(project, node_by_block, indegree, outdegree, type_counts, max_degree), upstream
+    return _records_from_blocks(
+        project, node_by_block, indegree, outdegree, type_counts, max_degree
+    ), upstream
 
 
 def _records_from_blocks(
@@ -100,7 +102,9 @@ def _records_from_blocks(
                 (model.file_path, block.block_id),
                 f"slx:{model.file_path}::block:{block.block_id}",
             )
-            score = _score_block(block, node_id, indegree, outdegree, type_counts, max_degree, total_blocks)
+            score = _score_block(
+                block, node_id, indegree, outdegree, type_counts, max_degree, total_blocks
+            )
             records.append(
                 ScoredBlock(
                     file_path=model.file_path,
@@ -193,7 +197,9 @@ def _add_selected(
         selected_order.append(item.node_id)
         selected_counts[layer] += 1
     else:
-        by_node[item.node_id] = replace(existing, selection_layers=existing.selection_layers + (layer,))
+        by_node[item.node_id] = replace(
+            existing, selection_layers=existing.selection_layers + (layer,)
+        )
 
 
 def _l1_scope_measurement_upstream(
@@ -218,14 +224,20 @@ def _l1_scope_measurement_upstream(
 def _rank(records: list[ScoredBlock], limit: int) -> list[ScoredBlock]:
     return sorted(
         records,
-        key=lambda item: (-item.score.total_score, -item.degree, item.block.name, item.block.block_id),
+        key=lambda item: (
+            -item.score.total_score,
+            -item.degree,
+            item.block.name,
+            item.block.block_id,
+        ),
     )[:limit]
 
 
 def _is_measurement_or_scope(block: SlxBlock) -> bool:
     block_type = normalize_block_type(block.block_type)
     return (
-        block_type in {"Scope", "Display", "To Workspace", "To File", "XY Graph", "RMS", "Fourier", "FFT"}
+        block_type
+        in {"Scope", "Display", "To Workspace", "To File", "XY Graph", "RMS", "Fourier", "FFT"}
         or "Measurement" in block_type
     )
 
@@ -275,4 +287,8 @@ def _score_distribution(selected: list[ScoredBlock]) -> dict[str, dict[str, floa
 def _summarize_score(values: list[float]) -> dict[str, float]:
     if not values:
         return {"min": 0.0, "median": 0.0, "max": 0.0}
-    return {"min": round(min(values), 3), "median": round(statistics.median(values), 3), "max": round(max(values), 3)}
+    return {
+        "min": round(min(values), 3),
+        "median": round(statistics.median(values), 3),
+        "max": round(max(values), 3),
+    }

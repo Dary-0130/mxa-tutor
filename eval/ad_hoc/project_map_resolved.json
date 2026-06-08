@@ -1,0 +1,29 @@
+{
+  "run_id": "ad_hoc_20260608",
+  "db_path": "eval/ad_hoc/eval.sqlite",
+  "db_hash_or_blank": "22c46c4dc64e3ad94c99455feb8f6dc2480494b2547fa54fd7be64ff9627b3e5",
+  "resolved_at": "2026-06-07T18:17:47.802668",
+  "coverage_evaluation": "ad_hoc",
+  "projects": {
+    "01_ee_a": {
+      "runtime_project_id": "e445ffac-1d8e-4f44-bf3a-b4b91257b2c6",
+      "chunk_count": 491,
+      "ingest_status": "ready"
+    },
+    "02_ee_b": {
+      "runtime_project_id": "e5aff045-3343-47a7-847a-aa2a55f9f3e3",
+      "chunk_count": 399,
+      "ingest_status": "ready"
+    },
+    "03_ee_c": {
+      "runtime_project_id": "6970ae78-0034-4714-9960-e5cad01977a1",
+      "chunk_count": 816,
+      "ingest_status": "ready"
+    },
+    "04_ee_d": {
+      "runtime_project_id": "b118b63f-a4f7-42f5-a21c-f3d0f8676b18",
+      "chunk_count": 134,
+      "ingest_status": "ready"
+    }
+  }
+}

@@ -79,7 +79,12 @@ def test_evidence_builder_outputs_typed_payloads_and_sequential_ids() -> None:
 
     parameter = next(item for item in evidence if item["kind"] == "parameter")
     assert parameter["payload"]["block_ref"]["block_name"] in {"Vdc", "Kp", "Bus Creator1"}
-    assert parameter["payload"]["role_guess"] in {"unknown", "operating_point", "gain", "observation"}
+    assert parameter["payload"]["role_guess"] in {
+        "unknown",
+        "operating_point",
+        "gain",
+        "observation",
+    }
     assert set(parameter["source_ref"]) == {
         "file_path",
         "line_range",

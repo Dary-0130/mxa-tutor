@@ -1,0 +1,24 @@
+{
+  "run_id": "ad_hoc_20260608_024454",
+  "started_at": "2026-06-08T02:44:54.315524",
+  "ended_at": "2026-06-08T02:51:59.492991",
+  "prompt_path": "core/prompts/qa_with_context.yaml",
+  "prompt_version": "v0.2-rc",
+  "loaded_prompt_path": "F:\\mxa-tutor\\core\\prompts\\qa_with_context.yaml",
+  "model_name": "deepseek-v4-flash",
+  "temperature": "",
+  "top_p": "",
+  "question_count": 60,
+  "success_count": 59,
+  "failure_count": 1,
+  "fallback_count": 8,
+  "overview_chunks_added": 4,
+  "handle_chat_attempt_count": 61,
+  "failures": [
+    {
+      "case_id": "01_ee_a_005",
+      "error_type": "parse_validation_error",
+      "error_message_sanitized": "parse_validation_error"
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "project_title": "03_ee_c EE SLX",
+  "project_type": "new_energy",
+  "one_sentence_summary": "03_ee_c is a Simulink-only electrical engineering model with 789 blocks and 916 ",
+  "main_entry_files": [
+    {
+      "file_path": "03_ee_c.slx",
+      "role": "Open this .slx model first (03_ee_c)."
+    }
+  ],
+  "main_simulink_models": [
+    {
+      "file_path": "03_ee_c.slx",
+      "summary": "Parsed model 03_ee_c with 789 blocks, 916 lines, and 27 subsystems."
+    }
+  ],
+  "main_execution_flow": [
+    "Open `03_ee_c.slx` and inspect the root-level signal path.",
+    "Identify source, measurement, control, and power-stage blocks from names and types.",
+    "Open subsystems to follow how signals are grouped and transformed.",
+    "Check solver settings and key block parameters before changing the model."
+  ],
+  "key_files": [
+    {
+      "file_path": "03_ee_c.slx",
+      "why_key": "Main Simulink model used as the entry point."
+    },
+    {
+      "file_path": "03_ee_c.slx",
+      "why_key": "Contains 789 parsed blocks and 27 subsystems."
+    },
+    {
+      "file_path": "03_ee_c.slx",
+      "why_key": "Contains parsed simulation settings: StartTime=0.0, StopTime=6, FixedStep=auto."
+    }
+  ],
+  "key_blocks": [
+    {
+      "block_name": "220 kV",
+      "block_type": "Three-Phase Programmable Voltage Source",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible Three-Phase Programmable Voltage Source block in the model structure."
+    },
+    {
+      "block_name": "220 kV/35 kV 50 MVA",
+      "block_type": "Three-Phase Transformer (Two Windings)",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible Three-Phase Transformer (Two Windings) block in the model structure."
+    },
+    {
+      "block_name": "2500 MVA X0/X1=3",
+      "block_type": "Three-Phase Mutual Inductance Z1-Z0",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible Three-Phase Mutual Inductance Z1-Z0 block in the model structure."
+    },
+    {
+      "block_name": "35 kV/ 690 V 5*2.5 MVA",
+      "block_type": "Three-Phase Transformer (Two Windings)",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible Three-Phase Transformer (Two Windings) block in the model structure."
+    },
+    {
+      "block_name": "5 km line",
+      "block_type": "Three-Phase PI Section Line",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible Three-Phase PI Section Line block in the model structure."
+    },
+    {
+      "block_name": "B220",
+      "block_type": "Three-Phase VI Measurement",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible Three-Phase VI Measurement block in the model structure."
+    },
+    {
+      "block_name": "B35",
+      "block_type": "Three-Phase VI Measurement",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible Three-Phase VI Measurement block in the model structure."
+    },
+    {
+      "block_name": "B690",
+      "block_type": "Three-Phase VI Measurement",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible Three-Phase VI Measurement block in the model structure."
+    },
+    {
+      "block_name": "Bus Selector",
+      "block_type": "BusSelector",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible BusSelector block in the model structure."
+    },
+    {
+      "block_name": "Bus Selector1",
+      "block_type": "BusSelector",
+      "location": "03_ee_c.slx / <root>",
+      "why_key": "Represents a visible BusSelector block in the model structure."
+    }
+  ],
+  "knowledge_points": [
+    "Simulink signal-flow reading",
+    "Electrical power conversion or machine model structure",
+    "Subsystem-level model decomposition",
+    "Solver and block-parameter interpretation"
+  ],
+  "beginner_reading_order": [
+    "Start from `03_ee_c.slx`.",
+    "Read root-level blocks and signal directions.",
+    "Expand the largest subsystems and map their child blocks.",
+    "Compare important block parameters with the solver configuration."
+  ],
+  "likely_confusing_points": [
+    "Some block names are domain abbreviations and need electrical-engineering context.",
+    "Subsystem nesting can hide the real control or power-stage signal path."
+  ],
+  "evidence": [
+    {
+      "file_path": "03_ee_c.slx",
+      "line_range": null,
+      "block_id": "1"
+    },
+    {
+      "file_path": "03_ee_c.slx",
+      "line_range": null,
+      "block_id": "2"
+    },
+    {
+      "file_path": "03_ee_c.slx",
+      "line_range": null,
+      "block_id": "4"
+    }
+  ]
+}
