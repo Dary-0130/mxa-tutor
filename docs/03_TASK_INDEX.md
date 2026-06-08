@@ -181,6 +181,7 @@ P2 v0.1 不承诺:
 | TASK-305 | 教学 Prompt 优化(电气教材语境) | ✅ | Codex + PM | 304 |
 | TASK-306 | 评测脚本 + 评测集运行 | 🔍 | Codex + PM | 304 |
 | TASK-307 | **Evidence Citation Enforcer(证据引用强制器)** ⭐ | ✅ | Codex | 304 |
+| TASK-308 | Simulation Explanation Pack(EvidenceBuilder + 讲解产物链) | 🔲 | Codex + PM | 303, 307 |
 
 ### Week 3 验收
 
