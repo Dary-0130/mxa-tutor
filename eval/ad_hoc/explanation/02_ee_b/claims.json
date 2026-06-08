@@ -1,0 +1,248 @@
+{
+  "claims": [
+    {
+      "claim_id": "C001",
+      "section": "project_purpose",
+      "claim_type": "project_purpose",
+      "text": "模型是02_ee_b，一个Simulink-only电气工程模型，包含391个模块和384条静态连接线，用于MMC仿真。",
+      "evidence_ids": [
+        "E001"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C002",
+      "section": "reading_order",
+      "claim_type": "reading_order",
+      "text": "打开`02_ee_b.slx`并检查根层信号路径。",
+      "evidence_ids": [
+        "E002"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C003",
+      "section": "reading_order",
+      "claim_type": "reading_order",
+      "text": "按顺序：识别源、测量、控制、功率级块；打开子系统；检查求解器设置和关键参数。",
+      "evidence_ids": [
+        "E004"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C004",
+      "section": "key_subsystems",
+      "claim_type": "uncertainty_boundary",
+      "text": "控制子系统Control包含287个模块，包括Nearest Level Pulse Generator（73块）。",
+      "evidence_ids": [
+        "E137",
+        "E138"
+      ],
+      "is_inference": true,
+      "confidence": "low"
+    },
+    {
+      "claim_id": "C005",
+      "section": "key_subsystems",
+      "claim_type": "uncertainty_boundary",
+      "text": "功率级有5个Half-Bridge MMC模块，参数如电容C由工作区变量C_PM定义。",
+      "evidence_ids": [
+        "E048",
+        "E049"
+      ],
+      "is_inference": true,
+      "confidence": "low"
+    },
+    {
+      "claim_id": "C006",
+      "section": "key_subsystems",
+      "claim_type": "uncertainty_boundary",
+      "text": "均压算法子系统包含MATLAB Function模块，内部有S-Function。",
+      "evidence_ids": [
+        "E024",
+        "E030"
+      ],
+      "is_inference": true,
+      "confidence": "low"
+    },
+    {
+      "claim_id": "C007",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "Iap和Ian的输出分别连接到Add1的输入端口1和2。",
+      "evidence_ids": [
+        "E148",
+        "E151"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C008",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "Half-Bridge MMC的输出连接到Half-Bridge MMC2和MMC3。",
+      "evidence_ids": [
+        "E146",
+        "E147"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C009",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "Mux和Mux1多路复用信号后连接到Scope模块Uref_Cr和Uref_n。",
+      "evidence_ids": [
+        "E194",
+        "E197"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C010",
+      "section": "parameter_reason",
+      "claim_type": "uncertainty_boundary",
+      "text": "PWM Generator (P)的BridgeType参数设置为Half-bridge，Fc参数引用变量Fc。",
+      "evidence_ids": [
+        "E007",
+        "E008"
+      ],
+      "is_inference": true,
+      "confidence": "low"
+    },
+    {
+      "claim_id": "C011",
+      "section": "parameter_reason",
+      "claim_type": "uncertainty_boundary",
+      "text": "Half-Bridge MMC的电容C参数设置为工作区变量C_PM，Cs参数设置为Cs。",
+      "evidence_ids": [
+        "E049",
+        "E050"
+      ],
+      "is_inference": true,
+      "confidence": "low"
+    },
+    {
+      "claim_id": "C012",
+      "section": "parameter_reason",
+      "claim_type": "uncertainty_boundary",
+      "text": "其他Half-Bridge MMC模块（如MMC2-5）的电容均使用相同变量C_PM和Cs。",
+      "evidence_ids": [
+        "E052",
+        "E055",
+        "E058",
+        "E061",
+        "E064"
+      ],
+      "is_inference": true,
+      "confidence": "low"
+    },
+    {
+      "claim_id": "C013",
+      "section": "modification_advice",
+      "claim_type": "modification_advice",
+      "text": "修改子模块电容时，先在工作区调整变量C_PM，再观察Voltage Measurement1的输出以评估效果。",
+      "evidence_ids": [
+        "E049",
+        "E100"
+      ],
+      "is_inference": true,
+      "confidence": "medium"
+    },
+    {
+      "claim_id": "C014",
+      "section": "modification_advice",
+      "claim_type": "uncertainty_boundary",
+      "text": "修改PWM载波频率时，可调整工作区变量Fc，并观察PWM Generator输出或Scope的变化。",
+      "evidence_ids": [
+        "E008",
+        "E194"
+      ],
+      "is_inference": true,
+      "confidence": "medium"
+    },
+    {
+      "claim_id": "C015",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "电压测量块Voltage Measurement1-6提供各观测点电压信号，输出类型为Complex。",
+      "evidence_ids": [
+        "E099",
+        "E103",
+        "E107",
+        "E066",
+        "E079",
+        "E083"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C016",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "电流测量块Ian和Iap提供相电流信号，通过Gain=1输出。",
+      "evidence_ids": [
+        "E087",
+        "E090"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C018",
+      "section": "uncertainty_boundary",
+      "claim_type": "uncertainty_boundary",
+      "text": "存在未定义的工作区变量引用Ts_Power和Nb_PM，实际值需在运行前设置。",
+      "evidence_ids": [
+        "E205",
+        "E209"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C019",
+      "section": "uncertainty_boundary",
+      "claim_type": "uncertainty_boundary",
+      "text": "模型包含24个库链接块，其内部参数和逻辑无法静态解析。",
+      "evidence_ids": [
+        "E213"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C020",
+      "section": "uncertainty_boundary",
+      "claim_type": "uncertainty_boundary",
+      "text": "均压算法子系统的MATLAB Function包含S-Function，其具体算法未详细解析。",
+      "evidence_ids": [
+        "E024",
+        "E030"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    }
+  ],
+  "rejected_claims": [
+    {
+      "claim_id": "C017",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "示波器Scope块Bridge Power、Current、Uref_Cr等用于显示波形。",
+      "evidence_ids": [
+        "E003"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    }
+  ]
+}

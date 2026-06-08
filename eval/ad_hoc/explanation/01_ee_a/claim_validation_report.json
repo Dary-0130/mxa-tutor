@@ -1,0 +1,123 @@
+{
+  "total_claims_count": 8,
+  "accepted_claims_count": 8,
+  "rejected_claims_count": 0,
+  "downgrade_count": 0,
+  "recoverable_failure_count": 0,
+  "rejected_claim_ids": [],
+  "connection_claims_original_count": 1,
+  "connection_downgrade_count": 0,
+  "connection_downgrade_rate": 0.0,
+  "parameter_claims_original_count": 1,
+  "parameter_downgrade_count": 0,
+  "parameter_downgrade_rate": 0.0,
+  "modification_claims_original_count": 1,
+  "modification_downgrade_count": 0,
+  "modification_downgrade_rate": 0.0,
+  "overview_only_downgrade_count": 0,
+  "acceptance_pass": true,
+  "acceptance_reasons": [],
+  "events": [
+    {
+      "claim_id": "C001",
+      "original_claim_type": "project_purpose",
+      "final_claim_type": "project_purpose",
+      "action": "accepted",
+      "downgrade_reason": null,
+      "evidence_kind_set": [
+        "project_overview_field",
+        "slx_block",
+        "subsystem"
+      ],
+      "rule_id": null,
+      "recoverable": false
+    },
+    {
+      "claim_id": "C002",
+      "original_claim_type": "reading_order",
+      "final_claim_type": "reading_order",
+      "action": "accepted",
+      "downgrade_reason": null,
+      "evidence_kind_set": [
+        "project_overview_field"
+      ],
+      "rule_id": null,
+      "recoverable": false
+    },
+    {
+      "claim_id": "C003",
+      "original_claim_type": "project_purpose",
+      "final_claim_type": "project_purpose",
+      "action": "accepted",
+      "downgrade_reason": null,
+      "evidence_kind_set": [
+        "subsystem"
+      ],
+      "rule_id": null,
+      "recoverable": false
+    },
+    {
+      "claim_id": "C004",
+      "original_claim_type": "connection_logic",
+      "final_claim_type": "connection_logic",
+      "action": "accepted",
+      "downgrade_reason": null,
+      "evidence_kind_set": [
+        "slx_line"
+      ],
+      "rule_id": null,
+      "recoverable": false
+    },
+    {
+      "claim_id": "C005",
+      "original_claim_type": "parameter_reason",
+      "final_claim_type": "parameter_reason",
+      "action": "accepted",
+      "downgrade_reason": null,
+      "evidence_kind_set": [
+        "parameter",
+        "slx_block"
+      ],
+      "rule_id": null,
+      "recoverable": false
+    },
+    {
+      "claim_id": "C006",
+      "original_claim_type": "modification_advice",
+      "final_claim_type": "modification_advice",
+      "action": "accepted",
+      "downgrade_reason": null,
+      "evidence_kind_set": [
+        "measurement",
+        "parameter",
+        "slx_block"
+      ],
+      "rule_id": null,
+      "recoverable": false
+    },
+    {
+      "claim_id": "C007",
+      "original_claim_type": "observation_point",
+      "final_claim_type": "observation_point",
+      "action": "accepted",
+      "downgrade_reason": null,
+      "evidence_kind_set": [
+        "measurement"
+      ],
+      "rule_id": null,
+      "recoverable": false
+    },
+    {
+      "claim_id": "C008",
+      "original_claim_type": "uncertainty_boundary",
+      "final_claim_type": "uncertainty_boundary",
+      "action": "accepted",
+      "downgrade_reason": null,
+      "evidence_kind_set": [
+        "simulink_caveat"
+      ],
+      "rule_id": null,
+      "recoverable": false
+    }
+  ]
+}

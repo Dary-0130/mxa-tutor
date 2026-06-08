@@ -1,0 +1,132 @@
+{
+  "project_title": "02_ee_b EE SLX",
+  "project_type": "power_electronics",
+  "one_sentence_summary": "02_ee_b is a Simulink-only electrical engineering model with 391 blocks and 384 ",
+  "main_entry_files": [
+    {
+      "file_path": "02_ee_b.slx",
+      "role": "Open this .slx model first (02_ee_b)."
+    }
+  ],
+  "main_simulink_models": [
+    {
+      "file_path": "02_ee_b.slx",
+      "summary": "Parsed model 02_ee_b with 391 blocks, 384 lines, and 8 subsystems."
+    }
+  ],
+  "main_execution_flow": [
+    "Open `02_ee_b.slx` and inspect the root-level signal path.",
+    "Identify source, measurement, control, and power-stage blocks from names and types.",
+    "Open subsystems to follow how signals are grouped and transformed.",
+    "Check solver settings and key block parameters before changing the model."
+  ],
+  "key_files": [
+    {
+      "file_path": "02_ee_b.slx",
+      "why_key": "Main Simulink model used as the entry point."
+    },
+    {
+      "file_path": "02_ee_b.slx",
+      "why_key": "Contains 391 parsed blocks and 8 subsystems."
+    },
+    {
+      "file_path": "02_ee_b.slx",
+      "why_key": "Contains parsed simulation settings: StartTime=0.0, StopTime=1, FixedStep=auto."
+    }
+  ],
+  "key_blocks": [
+    {
+      "block_name": "Add1",
+      "block_type": "Sum",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Sum block in the model structure."
+    },
+    {
+      "block_name": "Add2",
+      "block_type": "Sum",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Sum block in the model structure."
+    },
+    {
+      "block_name": "Add3",
+      "block_type": "Sum",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Sum block in the model structure."
+    },
+    {
+      "block_name": "Bridge Power",
+      "block_type": "Scope",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Scope block in the model structure."
+    },
+    {
+      "block_name": "Constant",
+      "block_type": "Constant",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Constant block in the model structure."
+    },
+    {
+      "block_name": "Constant1",
+      "block_type": "Constant",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Constant block in the model structure."
+    },
+    {
+      "block_name": "Constant2",
+      "block_type": "Constant",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Constant block in the model structure."
+    },
+    {
+      "block_name": "Constant3",
+      "block_type": "Constant",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Constant block in the model structure."
+    },
+    {
+      "block_name": "Constant4",
+      "block_type": "Constant",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Constant block in the model structure."
+    },
+    {
+      "block_name": "Constant5",
+      "block_type": "Constant",
+      "location": "02_ee_b.slx / <root>",
+      "why_key": "Represents a visible Constant block in the model structure."
+    }
+  ],
+  "knowledge_points": [
+    "Simulink signal-flow reading",
+    "Electrical power conversion or machine model structure",
+    "Subsystem-level model decomposition",
+    "Solver and block-parameter interpretation"
+  ],
+  "beginner_reading_order": [
+    "Start from `02_ee_b.slx`.",
+    "Read root-level blocks and signal directions.",
+    "Expand the largest subsystems and map their child blocks.",
+    "Compare important block parameters with the solver configuration."
+  ],
+  "likely_confusing_points": [
+    "Some block names are domain abbreviations and need electrical-engineering context.",
+    "Subsystem nesting can hide the real control or power-stage signal path."
+  ],
+  "evidence": [
+    {
+      "file_path": "02_ee_b.slx",
+      "line_range": null,
+      "block_id": "22388"
+    },
+    {
+      "file_path": "02_ee_b.slx",
+      "line_range": null,
+      "block_id": "22390"
+    },
+    {
+      "file_path": "02_ee_b.slx",
+      "line_range": null,
+      "block_id": "22401"
+    }
+  ]
+}

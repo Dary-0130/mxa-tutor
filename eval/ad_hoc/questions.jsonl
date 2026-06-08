@@ -1,0 +1,60 @@
+{"case_id":"01_ee_a_001","project_alias":"01_ee_a","question_type":"总体","question":"这个 01_ee_a 工程整体是在仿真什么电气系统？我看到有 110kV 电源、变压器和 Universal Bridge，但没看出来主线是什么。"}
+{"case_id":"01_ee_a_002","project_alias":"01_ee_a","question_type":"总体","question":"我第一次打开 01_ee_a.slx，应该从根层哪条信号路径开始看，才能把电网、变压器、变流器和测量量串起来？"}
+{"case_id":"01_ee_a_003","project_alias":"01_ee_a","question_type":"总体","question":"这个模型有 30 个 subsystem，整体架构是按电气一次系统、控制系统、测量系统分层的吗？我该怎么划分这些部分？"}
+{"case_id":"01_ee_a_004","project_alias":"01_ee_a","question_type":"总体","question":"这个工程的主入口是不是就是 01_ee_a.slx？打开后应优先看哪些根层 block 来判断仿真的研究对象？"}
+{"case_id":"01_ee_a_005","project_alias":"01_ee_a","question_type":"总体","question":"如果我要给导师汇报这个模型，应该怎样从工程层面概括它的电源、网侧阻抗、变压器、变流器和测量点之间的关系？"}
+{"case_id":"01_ee_a_006","project_alias":"01_ee_a","question_type":"模块","question":"根层的 Universal Bridge block“3”和“11”分别在电路里承担什么角色？它们之间是并列结构还是前后级结构？"}
+{"case_id":"01_ee_a_007","project_alias":"01_ee_a","question_type":"模块","question":"“400MVA 110 kV/690V 10% X/R=30”这个三相双绕组变压器 block 在模型里怎么连接网侧和低压侧？"}
+{"case_id":"01_ee_a_008","project_alias":"01_ee_a","question_type":"模块","question":"“4000 MVA X/R=10”这个 Three-Phase Series RLC Branch 是在等效电网短路容量吗？它和 110kV 电源之间的电气意义怎么读？"}
+{"case_id":"01_ee_a_009","project_alias":"01_ee_a","question_type":"模块","question":"B_Grid、B_Conv、B_Stator 这几个 Three-Phase VI Measurement 测量点各自采的是什么位置的电压电流？"}
+{"case_id":"01_ee_a_010","project_alias":"01_ee_a","question_type":"模块","question":"根层的 Parallel RLC Branch“1”在这个系统里是滤波、补偿还是负载等效？我应该沿着哪几根线判断它的作用？"}
+{"case_id":"01_ee_a_011","project_alias":"01_ee_a","question_type":"参数","question":"“4000 MVA X/R=10”这个电网等效参数为什么这样设？对并网电压刚度和暂态电流会有什么影响需要重点检查？"}
+{"case_id":"01_ee_a_012","project_alias":"01_ee_a","question_type":"参数","question":"“400MVA 110 kV/690V 10% X/R=30”的容量、电压等级和短路阻抗放在一起看，和这个变流器侧模型匹配吗？"}
+{"case_id":"01_ee_a_013","project_alias":"01_ee_a","question_type":"参数","question":"这个模型 StopTime 设为 6 秒、FixedStep 是 auto，做电力电子开关和电网暂态仿真时这个仿真时长和步长设置合理吗？"}
+{"case_id":"01_ee_a_014","project_alias":"01_ee_a","question_type":"修改","question":"如果我想把网侧从 110kV 改成另一个电压等级，除了 Three-Phase Programmable Voltage Source，还需要同步检查哪些变压器和测量环节？"}
+{"case_id":"01_ee_a_015","project_alias":"01_ee_a","question_type":"修改","question":"我想调网侧等效强弱，比如改变短路容量或 X/R 比，应该主要改哪个 RLC Branch，改完后看哪些测量点判断结果是否正常？"}
+{"case_id":"02_ee_b_001","project_alias":"02_ee_b","question_type":"总体","question":"这个 02_ee_b 工程整体是在做哪类电力电子仿真？根层有很多 Constant、Sum 和 Bridge Power，我还没看出主控制目标。"}
+{"case_id":"02_ee_b_002","project_alias":"02_ee_b","question_type":"总体","question":"02_ee_b.slx 是不是唯一主入口？打开后应该先沿着功率级看，还是先沿着 Add 和 Constant 这些控制信号看？"}
+{"case_id":"02_ee_b_003","project_alias":"02_ee_b","question_type":"总体","question":"这个模型只有 1 秒仿真时间、8 个 subsystem，整体更像稳态功率计算还是开关暂态过程分析？"}
+{"case_id":"02_ee_b_004","project_alias":"02_ee_b","question_type":"总体","question":"如果我要快速理解这个模型的架构，根层的 Scope、Sum、Constant 和桥臂功率测量之间应该怎么分组看？"}
+{"case_id":"02_ee_b_005","project_alias":"02_ee_b","question_type":"总体","question":"这个工程的电气主回路和控制计算是混在根层了吗？有没有推荐的阅读顺序，避免只看到一堆 Add 和 Constant？"}
+{"case_id":"02_ee_b_006","project_alias":"02_ee_b","question_type":"模块","question":"Add1、Add2、Add3 这几个 Sum block 分别在合成什么信号？我该怎么判断它们是在做误差计算、相量叠加还是功率平衡？"}
+{"case_id":"02_ee_b_007","project_alias":"02_ee_b","question_type":"模块","question":"Bridge Power 这个 Scope 显示的量来自哪里？它是在观察桥臂输入功率、输出功率还是某个中间计算量？"}
+{"case_id":"02_ee_b_008","project_alias":"02_ee_b","question_type":"模块","question":"Constant 到 Constant5 这些常数块看起来很多，它们分别更像参考值、器件参数还是初始条件？应该按信号线怎么追踪？"}
+{"case_id":"02_ee_b_009","project_alias":"02_ee_b","question_type":"模块","question":"这些 Sum block 和 Constant block 之间的连接逻辑，是否构成了某种调制或功率计算算法？我应该优先看哪几个连接点？"}
+{"case_id":"02_ee_b_010","project_alias":"02_ee_b","question_type":"模块","question":"Bridge Power Scope 前面的信号如果经过多个 Add 处理，怎样确认显示的是物理功率而不是归一化或误差信号？"}
+{"case_id":"02_ee_b_011","project_alias":"02_ee_b","question_type":"参数","question":"StopTime 设为 1 秒对这个电力电子模型够不够？如果有开关暂态或慢速控制环，1 秒会不会太短或太长？"}
+{"case_id":"02_ee_b_012","project_alias":"02_ee_b","question_type":"参数","question":"Constant 到 Constant5 的取值如果对应参考量或器件参数，怎么判断这些常数是否和桥式功率级的额定工况匹配？"}
+{"case_id":"02_ee_b_013","project_alias":"02_ee_b","question_type":"参数","question":"FixedStep=auto 用在这个模型里是否合适？如果模型包含电力电子开关，步长设置会不会影响 Bridge Power 的波形可信度？"}
+{"case_id":"02_ee_b_014","project_alias":"02_ee_b","question_type":"修改","question":"如果我想改变桥式功率级的输出功率参考，应该优先检查哪些 Constant 和 Add block，而不是直接改 Scope 前的信号？"}
+{"case_id":"02_ee_b_015","project_alias":"02_ee_b","question_type":"修改","question":"我想让 Bridge Power 的波形更平滑或更容易分析，应该改采样/仿真设置，还是在测量和信号处理 block 上调？"}
+{"case_id":"03_ee_c_001","project_alias":"03_ee_c","question_type":"总体","question":"这个 03_ee_c 工程整体是在模拟一个新能源并网系统吗？我看到 220kV、35kV、690V 和 5 km line，但不确定主研究对象。"}
+{"case_id":"03_ee_c_002","project_alias":"03_ee_c","question_type":"总体","question":"03_ee_c.slx 的主入口就是根层模型吗？从 220 kV 电源到 690 V 侧，应该按什么顺序读这个系统？"}
+{"case_id":"03_ee_c_003","project_alias":"03_ee_c","question_type":"总体","question":"这个模型有 789 个 block 和 27 个 subsystem，整体是按电压等级分层，还是按控制、测量、功率级分层？"}
+{"case_id":"03_ee_c_004","project_alias":"03_ee_c","question_type":"总体","question":"如果只想先把主电气链路搞清楚，220 kV 电源、220/35 kV 变压器、5 km line、35 kV/690 V 变压器之间的阅读路径是什么？"}
+{"case_id":"03_ee_c_005","project_alias":"03_ee_c","question_type":"总体","question":"这个工程更适合用来分析电网侧扰动、线路影响，还是低压侧变流器并网行为？从导览信息看应该怎么判断？"}
+{"case_id":"03_ee_c_006","project_alias":"03_ee_c","question_type":"模块","question":"“220 kV/35 kV 50 MVA”这个变压器在系统中承担什么接口作用？它前后两侧的测量点应该怎么配合看？"}
+{"case_id":"03_ee_c_007","project_alias":"03_ee_c","question_type":"模块","question":"“2500 MVA X0/X1=3”这个 Three-Phase Mutual Inductance Z1-Z0 block 主要是在表示什么电网等效？它和普通 RLC 支路有什么区别？"}
+{"case_id":"03_ee_c_008","project_alias":"03_ee_c","question_type":"模块","question":"“5 km line”这个 Three-Phase PI Section Line 在模型里会引入哪些线路效应？我应该看哪些前后端信号来验证它的影响？"}
+{"case_id":"03_ee_c_009","project_alias":"03_ee_c","question_type":"模块","question":"B220、B35、B690 这三个 Three-Phase VI Measurement 分别对应哪些电压等级的观测点？它们在分析故障或稳态时怎么配合使用？"}
+{"case_id":"03_ee_c_010","project_alias":"03_ee_c","question_type":"模块","question":"Bus Selector 和 Bus Selector1 从测量总线里取了哪些量？我怎么确认后续控制或显示用的是相电压、线电压还是电流？"}
+{"case_id":"03_ee_c_011","project_alias":"03_ee_c","question_type":"参数","question":"220 kV/35 kV 50 MVA 和 35 kV/690 V 5*2.5 MVA 这两级变压器容量设置是否协调？会不会在低压侧形成容量瓶颈？"}
+{"case_id":"03_ee_c_012","project_alias":"03_ee_c","question_type":"参数","question":"5 km line 用 PI Section Line 表示时，线路长度设为 5 km 对这个电压等级和仿真目标是否合理？"}
+{"case_id":"03_ee_c_013","project_alias":"03_ee_c","question_type":"参数","question":"“2500 MVA X0/X1=3”里的短路容量和零序/正序比值对三相不平衡或接地故障分析有什么影响？这些取值需要怎么检查合理性？"}
+{"case_id":"03_ee_c_014","project_alias":"03_ee_c","question_type":"修改","question":"如果我想把并网点从 35 kV 侧移动到 220 kV 侧或 690 V 侧，主要需要调整哪些变压器、线路和测量 block？"}
+{"case_id":"03_ee_c_015","project_alias":"03_ee_c","question_type":"修改","question":"我想研究线路长度变化对低压侧电压波动的影响，应该改 5 km line 这个 block 的哪些参数，并观察 B35 还是 B690？"}
+{"case_id":"04_ee_d_001","project_alias":"04_ee_d","question_type":"总体","question":"这个 04_ee_d 工程整体是在研究 220kV 到 35kV 系统的什么问题？我看到电源、变压器、电容支路和测量点，但主目标不明确。"}
+{"case_id":"04_ee_d_002","project_alias":"04_ee_d","question_type":"总体","question":"04_ee_d.slx 是主入口的话，根层应该先看 220kV 电源、1226 互感阻抗，还是先看 C、C1 这些 RLC 支路？"}
+{"case_id":"04_ee_d_003","project_alias":"04_ee_d","question_type":"总体","question":"这个模型只有 126 个 block、8 个 subsystem，相比大型并网模型是不是更偏向某个局部电网或补偿装置的分析？"}
+{"case_id":"04_ee_d_004","project_alias":"04_ee_d","question_type":"总体","question":"如果我要画这个工程的简化单线图，应该怎样把 220kV source、220kV/35kV 变压器、C/C1 和测量点组织起来？"}
+{"case_id":"04_ee_d_005","project_alias":"04_ee_d","question_type":"总体","question":"这个工程的整体架构里，哪些 block 属于一次电气网络，哪些只是测量和信号选择？能不能按根层信号流帮我区分？"}
+{"case_id":"04_ee_d_006","project_alias":"04_ee_d","question_type":"模块","question":"“1226”这个 Three-Phase Mutual Inductance Z1-Z0 block 在模型里具体表示哪一段电网阻抗？它对正序和零序通道分别有什么作用需要看？"}
+{"case_id":"04_ee_d_007","project_alias":"04_ee_d","question_type":"模块","question":"C 和 C1 这两个 Parallel RLC Branch 是并联补偿、电容滤波，还是两个不同母线上的负载等效？怎么从连接关系判断？"}
+{"case_id":"04_ee_d_008","project_alias":"04_ee_d","question_type":"模块","question":"“220kV/35kV 10%”这个三相变压器 block 的 10% 是在模型里怎样参与电压变换和短路阻抗表现的？"}
+{"case_id":"04_ee_d_009","project_alias":"04_ee_d","question_type":"模块","question":"B1 和 B2 这两个 Three-Phase VI Measurement 分别测的是变压器哪一侧或哪个母线？它们的输出后面被 Bus Selector 怎么拆分？"}
+{"case_id":"04_ee_d_010","project_alias":"04_ee_d","question_type":"模块","question":"1246 这个 Voltage Measurement 和 B1/B2 三相 VI Measurement 有什么分工？为什么模型里同时需要单相电压测量和三相测量？"}
+{"case_id":"04_ee_d_011","project_alias":"04_ee_d","question_type":"参数","question":"220kV/35kV 变压器标了 10% 阻抗，这个值对短路电流和电压跌落仿真是否敏感？需要怎么判断它是否合理？"}
+{"case_id":"04_ee_d_012","project_alias":"04_ee_d","question_type":"参数","question":"C 和 C1 的 RLC 参数如果用于无功补偿或滤波，应该根据 35kV 侧还是 220kV 侧的基准来检查它们的量级？"}
+{"case_id":"04_ee_d_013","project_alias":"04_ee_d","question_type":"参数","question":"StopTime 设为 2 秒、FixedStep=auto，在这个含互感阻抗和并联 RLC 支路的电网模型里是否能覆盖关键暂态过程？"}
+{"case_id":"04_ee_d_014","project_alias":"04_ee_d","question_type":"修改","question":"如果我想把补偿容量调大或调小，应该主要改 C、C1 这两个 Parallel RLC Branch 的哪些参数，并看哪些测量点验证？"}
+{"case_id":"04_ee_d_015","project_alias":"04_ee_d","question_type":"修改","question":"我想把这个模型改成不同电压等级的变电站等效，除了 220kV 电源和 220kV/35kV 变压器，还要同步调整哪些测量和阻抗 block？"}

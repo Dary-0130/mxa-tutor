@@ -1,0 +1,623 @@
+{
+  "project_id": "b118b63f-a4f7-42f5-a21c-f3d0f8676b18",
+  "title": "04_ee_d: 基于VSC的电网连接Simulink模型",
+  "sections": [
+    {
+      "section_id": "project_purpose",
+      "heading": "工程在做什么",
+      "body": "该模型是一个基于电压源变流器（VSC）的电网连接仿真系统。主要包括一个220kV三相可编程电压源、降压变压器（220kV/35kV）、一个两电平VSC桥（Universal Bridge），以及配套的数据采集与控制系统。控制系统包含锁相环（PLL）、坐标变换（abc-dq）、电流调节器和PWM生成器。模型共126个块，用于模拟VSC并网运行，但所有证据均为静态结构，未经过仿真验证。",
+      "claim_ids": [
+        "C001"
+      ]
+    },
+    {
+      "section_id": "reading_order",
+      "heading": "建议阅读顺序",
+      "body": "建议打开`04_ee_d.slx`后，先从根层看起：识别220kV电源、变压器、VSC、测量模块B1/B2的连接关系。然后进入Data acquisition子系统，了解电压电流如何经PLL和坐标变换得到dq分量。接着进入VSC1 Controller → Current regulator → Current Controlller，观察电流内环的PI调节和信号路由。最后可查看Subsystem4中的dq反变换和乘法运算，以及PWM Generator。注意子系统嵌套可能隐藏路径，需逐层展开。",
+      "claim_ids": [
+        "C002",
+        "C003",
+        "C004"
+      ]
+    },
+    {
+      "section_id": "key_subsystems",
+      "heading": "关键子系统和模块",
+      "body": "模型的关键子系统包括：① Data acquisition（31个块），内含Transformation abc → dq（16个块）和Line to phase（6个块）；② VSC1 Controller（68个块），内含Current regulator（60个块），而Current regulator又包含Current Controlller（39个块）和Subsystem4（15个块）；③ Current Controlller内含Discrete PI Controller1（9个块）。根层关键模块：220kV电源、变压器220kV/35kV 10%、VSC1、choke 1、B1/B2测量、PLL和PWM Generator。",
+      "claim_ids": [
+        "C005",
+        "C006",
+        "C007",
+        "C008",
+        "C009",
+        "C010"
+      ]
+    },
+    {
+      "section_id": "connection_logic",
+      "heading": "信号连接逻辑",
+      "body": "主功率回路：220kV电源经三相互感器1226连接到测量模块B1，再经过变压器220kV/35kV 10%降压，然后通过B2测量后接入choke 1（三相RL串联分支），最后进入VSC1的交流侧。VSC1直流侧连接直流电压源和电容C1。控制信号路径：Vabc和Iabc从根层进入Data acquisition，Vabc先经Line to phase转换，再进入PLL (3ph)得到同步相位，同时Vabc和Iabc分别进入Transformation abc → dq。该子系统内利用两个abc to dq0变换（Alignment为-90度）得到Udq和Idq，并通过Power (dq0, Instantaneous)计算有功无功P&Q。Udq、Idq和P&Q经Bus Creator打包为Feedback信号。在VSC1 Controller中，Feedback解包后，Udq和Idq送入Current Controlller，经过滤波和PI调节得到Udq_ref，再经Subsystem4中的dq反变换和乘法生成调制波，最后通过PWM Generator输出脉冲到VSC1。",
+      "claim_ids": [
+        "C011",
+        "C012",
+        "C013",
+        "C014",
+        "C015",
+        "C016",
+        "C017",
+        "C018"
+      ]
+    },
+    {
+      "section_id": "parameter_reason",
+      "heading": "关键参数怎么看",
+      "body": "注意以下非默认参数（括号内为当前值）：① PLL (3ph)的AGC='on', FilterCutOffFreq=25；② PWM Generator (2-Level)的Fc='PWM_freq'（工作区变量），Freq=60；③ Discrete PI Controller1的Gain参数Kp4='Kp'、Kp5='Ki'（均为变量），积分器初始条件'Init'；④ Second-Order Filter的Fo='PWM_freq/2'，FilterType='Lowpass'；⑤ Universal Bridge VSC1的Arms=3, Device='IGBT / Diodes'；⑥ 变压器使用数据文件'basic_model'。这些参数值多为变量，需在MATLAB工作区或模型回调中定义。",
+      "claim_ids": [
+        "C019",
+        "C020",
+        "C021",
+        "C022",
+        "C023",
+        "C024",
+        "C025"
+      ]
+    },
+    {
+      "section_id": "modification_advice",
+      "heading": "如果要修改先动哪里",
+      "body": "如果要修改模型行为，建议首先确认工作区变量定义（如Ts、Kp、Ki、PWM_freq、L_RL等），这些变量在模型多处使用。例如，修改PWM频率可改变'PWM_freq'；调节电流环动态可修改'Kp'和'Ki'。修改前可打开Discrete PI Controller1内部的Scope2（4个输入端口），观察比例、积分、限幅等内部信号，以帮助调参。调整PLL的FilterCutOffFreq会影响同步速度，choke 1的电感表达式'L_RL*Vnom^2/Pnom/(2*pi*Fnom)'涉及多个工作区变量，修改需小心。",
+      "claim_ids": [
+        "C026",
+        "C027",
+        "C028",
+        "C029"
+      ]
+    },
+    {
+      "section_id": "observation_point",
+      "heading": "应该观察哪些位置",
+      "body": "关键观测点包括：① B1（Three-Phase VI Measurement）：位于变压器原边，可观察220kV侧电压电流，且已启用电流测量和pu显示；② B2（Three-Phase VI Measurement）：位于变压器副边与choke之间，同样可观察35kV侧电压电流；③ U_AB（Multimeter）：测量线电压U_AB，连接到Waveforms1 Scope的第3端口；④ Scope2：位于Discrete PI Controller1内部，有4个输入端口，可查看PI调节器的内部信号（如比例、积分、饱和输出等）。这些观测点均为静态存在，仿真时可查看波形。",
+      "claim_ids": [
+        "C030",
+        "C031",
+        "C032",
+        "C033"
+      ]
+    },
+    {
+      "section_id": "uncertainty_boundary",
+      "heading": "不确定边界",
+      "body": "本解释基于静态结构证据，未执行仿真。许多参数为工作区变量（如Ts, Kp, Ki, PWM_freq, L_RL等），实际值未知，因此无法判断仿真结果是否稳定或正确。另有14个块为库链接或掩码子系统（如PLL、PWM Generator、变压器等），其内部实现细节不可见。此外，部分块命名依赖电气工程缩写，容易误解，且子系统嵌套可能隐藏真实信号路径。建议在理解这些局限性的前提下使用本模型。",
+      "claim_ids": [
+        "C034",
+        "C035",
+        "C036",
+        "C037"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "C001",
+      "section": "project_purpose",
+      "claim_type": "project_purpose",
+      "text": "该模型是一个基于VSC的电网连接仿真系统，包含220kV电源、变压器、VSC桥及控制系统。",
+      "evidence_ids": [
+        "E001",
+        "E003",
+        "E097",
+        "E100",
+        "E066",
+        "E130",
+        "E127"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C002",
+      "section": "reading_order",
+      "claim_type": "reading_order",
+      "text": "建议从根层开始，查看电源、变压器、VSC及测量模块的连接。",
+      "evidence_ids": [
+        "E002",
+        "E004"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C003",
+      "section": "reading_order",
+      "claim_type": "reading_order",
+      "text": "然后进入Data acquisition子系统，了解电压电流经PLL和坐标变换的过程。",
+      "evidence_ids": [
+        "E130",
+        "E069",
+        "E006"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C004",
+      "section": "reading_order",
+      "claim_type": "reading_order",
+      "text": "最后查看VSC1 Controller内部的电流调节和PWM生成部分。",
+      "evidence_ids": [
+        "E127",
+        "E128",
+        "E129",
+        "E021"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C005",
+      "section": "key_subsystems",
+      "claim_type": "reading_order",
+      "text": "Data acquisition子系统包含31个块，内含Transformation abc → dq和Line to phase。",
+      "evidence_ids": [
+        "E130",
+        "E131",
+        "E134"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C006",
+      "section": "key_subsystems",
+      "claim_type": "reading_order",
+      "text": "VSC1 Controller子系统包含68个块，内含Current regulator（60个块）。",
+      "evidence_ids": [
+        "E127",
+        "E128"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C007",
+      "section": "key_subsystems",
+      "claim_type": "reading_order",
+      "text": "Current regulator包含Current Controlller（39个块）和Subsystem4（15个块）。",
+      "evidence_ids": [
+        "E129",
+        "E132"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C008",
+      "section": "key_subsystems",
+      "claim_type": "reading_order",
+      "text": "Current Controlller内含Discrete PI Controller1（9个块）。",
+      "evidence_ids": [
+        "E133"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C009",
+      "section": "key_subsystems",
+      "claim_type": "reading_order",
+      "text": "根层关键模块包括220kV电源、变压器、VSC1、choke1、B1/B2测量等。",
+      "evidence_ids": [
+        "E097",
+        "E100",
+        "E066",
+        "E103",
+        "E106",
+        "E110"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C010",
+      "section": "key_subsystems",
+      "claim_type": "reading_order",
+      "text": "PLL和PWM Generator是控制回路的关键库链接块。",
+      "evidence_ids": [
+        "E006",
+        "E021"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C011",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "220kV电源经互感器1226连接到B1，再经变压器220kV/35kV 10%连接到B2。",
+      "evidence_ids": [
+        "E148",
+        "E149",
+        "E150",
+        "E154",
+        "E155",
+        "E156",
+        "E151",
+        "E152",
+        "E153"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C012",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "B2后接choke1，choke1三相分别连接VSC1的三个交流端子。",
+      "evidence_ids": [
+        "E136",
+        "E137",
+        "E138",
+        "E139",
+        "E140",
+        "E141"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C013",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "VSC1直流侧连接直流电压源和电容C1。",
+      "evidence_ids": [
+        "E142",
+        "E147"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C014",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "Vabc和Iabc从根层进入Data acquisition，Vabc经Line to phase后同时送入PLL和Transformation abc → dq。",
+      "evidence_ids": [
+        "E158",
+        "E159",
+        "E160",
+        "E165",
+        "E167",
+        "E168",
+        "E169"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C015",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "Transformation abc → dq内部：Iabc经abc to dq0变换输出Idq，Vabc经abc to dq1变换输出Udq，两者再经Power (dq0, Instantaneous)计算P&Q。",
+      "evidence_ids": [
+        "E175",
+        "E176",
+        "E177",
+        "E181",
+        "E182",
+        "E183",
+        "E186",
+        "E187"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C016",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "Transformation abc → dq的输出U、I、P&Q经由Bus Creator打包后从Feedback端口送出。",
+      "evidence_ids": [
+        "E172",
+        "E173",
+        "E174",
+        "E178",
+        "E179",
+        "E180",
+        "E186",
+        "E187",
+        "E188"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C017",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "VSC1 Controller内部：Feedback解包后，Udq和Idq送入Current Controlller，经PI调节输出Udq_ref，再经Subsystem4反变换和乘法后送至PWM Generator。",
+      "evidence_ids": [
+        "E143",
+        "E189",
+        "E190",
+        "E191",
+        "E192",
+        "E193",
+        "E194"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C018",
+      "section": "connection_logic",
+      "claim_type": "connection_logic",
+      "text": "PWM Generator输出脉冲从Pulse_RSC端口送出到VSC1门极。",
+      "evidence_ids": [
+        "E143",
+        "E189",
+        "E190"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C019",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "PLL (3ph)的AGC为'on'，FilterCutOffFreq为25，这些是直接设定值。",
+      "evidence_ids": [
+        "E006",
+        "E007",
+        "E008"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C020",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "PWM Generator (2-Level)的Fc为变量'PWM_freq'，Freq为60，ModulatorMode默认为'Natural'。",
+      "evidence_ids": [
+        "E021",
+        "E022",
+        "E023"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C021",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "Discrete PI Controller1的增益Kp4='Kp'，Kp5='Ki'，均为工作区变量。",
+      "evidence_ids": [
+        "E063",
+        "E064",
+        "E065",
+        "E080",
+        "E081",
+        "E082",
+        "E114",
+        "E115",
+        "E116"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C022",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "Second-Order Filter的FilterType='Lowpass'，Fo='PWM_freq/2'，也是变量表达式。",
+      "evidence_ids": [
+        "E077",
+        "E078",
+        "E079"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C023",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "Universal Bridge VSC1的Arms=3，Device='IGBT / Diodes'，Snubber参数默认。",
+      "evidence_ids": [
+        "E066",
+        "E067",
+        "E068"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C024",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "变压器220kV/35kV 10%使用数据文件'basic_model'，CoreType为'Three single-phase transformers'。",
+      "evidence_ids": [
+        "E100",
+        "E101",
+        "E102"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C025",
+      "section": "parameter_reason",
+      "claim_type": "parameter_reason",
+      "text": "choke1的BranchType='RL'，电感表达式涉及工作区变量L_RL、Vnom、Pnom、Fnom。",
+      "evidence_ids": [
+        "E103",
+        "E104",
+        "E105"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C026",
+      "section": "modification_advice",
+      "claim_type": "uncertainty_boundary",
+      "text": "修改前应先确认工作区变量Ts、Kp、Ki、PWM_freq、L_RL等的定义。",
+      "evidence_ids": [
+        "E195",
+        "E196",
+        "E197",
+        "E198",
+        "E199",
+        "E200",
+        "E201",
+        "E202"
+      ],
+      "is_inference": true,
+      "confidence": "low"
+    },
+    {
+      "claim_id": "C027",
+      "section": "modification_advice",
+      "claim_type": "uncertainty_boundary",
+      "text": "调整电流环动态可修改Kp和Ki，调整PWM频率可修改PWM_freq。",
+      "evidence_ids": [
+        "E081",
+        "E115",
+        "E022"
+      ],
+      "is_inference": true,
+      "confidence": "low"
+    },
+    {
+      "claim_id": "C028",
+      "section": "modification_advice",
+      "claim_type": "uncertainty_boundary",
+      "text": "修改PLL滤波器截止频率FilterCutOffFreq影响同步速度。",
+      "evidence_ids": [
+        "E008"
+      ],
+      "is_inference": true,
+      "confidence": "low"
+    },
+    {
+      "claim_id": "C029",
+      "section": "modification_advice",
+      "claim_type": "modification_advice",
+      "text": "可利用Discrete PI Controller1内部的Scope2观察比例、积分、饱和等信号辅助调参。",
+      "evidence_ids": [
+        "E123",
+        "E124",
+        "E125"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C030",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "B1 (Three-Phase VI Measurement)位于变压器原边，可观察220kV侧电压电流，已启用电流测量和pu显示。",
+      "evidence_ids": [
+        "E106",
+        "E107",
+        "E108",
+        "E109"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C031",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "B2位于变压器副边与choke之间，可观察35kV侧电压电流。",
+      "evidence_ids": [
+        "E110",
+        "E111",
+        "E112",
+        "E113"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C032",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "U_AB (Multimeter)测量线电压U_AB，连接到Waveforms1 Scope的第3端口。",
+      "evidence_ids": [
+        "E117",
+        "E118",
+        "E119",
+        "E157"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C033",
+      "section": "observation_point",
+      "claim_type": "observation_point",
+      "text": "Scope2位于Discrete PI Controller1内部，有4个输入端口，可观察PI调节器内部信号。",
+      "evidence_ids": [
+        "E123",
+        "E124",
+        "E125"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C034",
+      "section": "uncertainty_boundary",
+      "claim_type": "uncertainty_boundary",
+      "text": "模型参数多为工作区变量（如Ts, Kp, Ki, PWM_freq, L_RL等），实际值未知，无法判断仿真结果。",
+      "evidence_ids": [
+        "E195",
+        "E196",
+        "E197",
+        "E198",
+        "E199",
+        "E200",
+        "E201",
+        "E202"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C035",
+      "section": "uncertainty_boundary",
+      "claim_type": "uncertainty_boundary",
+      "text": "模型中有14个库链接或掩码块（如PLL、PWM Generator、变压器等），内部实现不可见。",
+      "evidence_ids": [
+        "E203"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C036",
+      "section": "uncertainty_boundary",
+      "claim_type": "uncertainty_boundary",
+      "text": "部分块命名依赖电气工程缩写，可能造成误解；子系统嵌套可能隐藏真实信号路径。",
+      "evidence_ids": [
+        "E005"
+      ],
+      "is_inference": false,
+      "confidence": "high"
+    },
+    {
+      "claim_id": "C037",
+      "section": "uncertainty_boundary",
+      "claim_type": "uncertainty_boundary",
+      "text": "本解释基于静态结构，未执行仿真，不能保证模型运行正确性或稳定性。",
+      "evidence_ids": [
+        "E001",
+        "E002"
+      ],
+      "is_inference": true,
+      "confidence": "medium"
+    }
+  ]
+}
