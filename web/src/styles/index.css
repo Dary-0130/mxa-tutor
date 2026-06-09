@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+:root {
+  --color-concrete: #2c2c2c;
+  --color-ite: #e8e4de;
+  --color-rebar: #8b8680;
+  --color-formwork: #3a3a3a;
+  --color-signal: #e85d3a;
+  --color-signal-dim: #c44d2e;
+  --font-display: "IBM Plex Sans", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Noto Sans Mono", monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  border-radius: 0 !important;
+}
+
+html {
+  background-color: var(--color-concrete);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--color-concrete);
+  color: var(--color-ite);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.texture-concrete {
+  position: relative;
+  isolation: isolate;
+}
+
+.texture-concrete::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.035;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
+
+.brutal-panel {
+  border: 2px solid var(--color-rebar);
+  background-color: color-mix(in srgb, var(--color-formwork) 92%, black);
+}
