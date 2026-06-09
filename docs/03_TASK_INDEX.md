@@ -179,9 +179,9 @@ P2 v0.1 不承诺:
 | TASK-303 | 工程分块策略(chunk + metadata) | ✅ | Codex | 102, 103, 107 |
 | TASK-304 | 向量 RAG 整合到 ChatService | ✅ | Codex | 205, 302, 303 |
 | TASK-305 | 教学 Prompt 优化(电气教材语境) | ✅ | Codex + PM | 304 |
-| TASK-306 | 评测脚本 + 评测集运行 | 🔍 | Codex + PM | 304 |
+| TASK-306 | 评测脚本 + 评测集运行 | ⏸ | Codex + PM | 304 |
 | TASK-307 | **Evidence Citation Enforcer(证据引用强制器)** ⭐ | ✅ | Codex | 304 |
-| TASK-308 | Simulation Explanation Pack(EvidenceBuilder + 讲解产物链) | 🔲 | Codex + PM | 303, 307 |
+| TASK-308 | Simulation Explanation Pack(EvidenceBuilder + 讲解产物链) | ✅ | Codex + PM | 303, 307 |
 
 ### Week 3 验收
 
@@ -337,10 +337,10 @@ P2 v0.1 不承诺:
 Week 0:  [✅✅✅⬜]              3/4
 Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅]         7/7  (含 TASK-207)
-Week 3:  [✅✅✅✅✅✅⬜]         6/7  (含 TASK-307;306 仍 🔍 等 306b)
+Week 3:  [✅✅✅✅✅✅⏸✅]  7/8
 Week 4:  [⬜⬜⬜⬜⬜⬜]           0/6
 
-总计: 24/32
+总计: 25/32
 ```
 
 ---
