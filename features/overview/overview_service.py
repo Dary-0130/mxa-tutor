@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from pathlib import PurePath
 from typing import Protocol
 
 from loguru import logger
@@ -143,7 +144,9 @@ def parse_location(location: str) -> tuple[str, str]:
 
 def _validate_file_paths(overview: ProjectOverview, project: Project) -> None:
     project_files = {file_info.relative_path for file_info in project.files}
-    slx_files = {model.file_path for model in project.slx_models}
+    slx_files = {
+        file_info.relative_path for file_info in project.files if file_info.file_type == ".slx"
+    }
 
     referenced_files: list[str] = []
     referenced_files.extend(item.file_path for item in overview.main_entry_files)
@@ -158,15 +161,30 @@ def _validate_file_paths(overview: ProjectOverview, project: Project) -> None:
 
 
 def _validate_block_entries(blocks: list[BlockEntry], project: Project) -> None:
-    known_blocks = {
-        (model.file_path, block.name, block.block_type, block.parent_subsystem or "<root>")
-        for model in project.slx_models
-        for block in model.blocks
+    slx_file_paths = {
+        file_info.relative_path for file_info in project.files if file_info.file_type == ".slx"
+    }
+    rel_by_basename = {
+        PurePath(relative_path).name: relative_path for relative_path in slx_file_paths
     }
 
-    for block in blocks:
-        model_path, parent = parse_location(block.location)
-        key = (model_path, block.block_name, block.block_type, parent)
+    known_blocks = set()
+    for model in project.slx_models:
+        model_basename = PurePath(model.file_path).name
+        model_relative_path = rel_by_basename.get(model_basename, model.file_path)
+        for slx_block in model.blocks:
+            known_blocks.add(
+                (
+                    model_relative_path,
+                    slx_block.name,
+                    slx_block.block_type,
+                    slx_block.parent_subsystem or "<root>",
+                )
+            )
+
+    for entry in blocks:
+        model_path, parent = parse_location(entry.location)
+        key = (model_path, entry.block_name, entry.block_type, parent)
         if key not in known_blocks:
             raise OverviewGenerationError("AI 输出包含不存在的 block 引用,请刷新重试")
 

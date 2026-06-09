@@ -55,13 +55,13 @@ EXPECTED_CONSTRAINTS = {
     "one_sentence_summary": {"min_length": 1, "max_length": 80},
     "main_entry_files": {"min_length": 1, "max_length": 3},
     "main_simulink_models": {"max_length": 5},
-    "main_execution_flow": {"min_length": 3, "max_length": 7},
-    "key_files": {"min_length": 3, "max_length": 8},
+    "main_execution_flow": {"min_length": 3, "max_length": 10},
+    "key_files": {"min_length": 1, "max_length": 8},
     "key_blocks": {"max_length": 10},
     "knowledge_points": {"min_length": 3, "max_length": 6},
     "beginner_reading_order": {"min_length": 3, "max_length": 6},
     "likely_confusing_points": {"min_length": 2, "max_length": 5},
-    "evidence": {"min_length": 3},
+    "evidence": {"min_length": 1},
 }
 
 EXPECTED_PROJECT_TYPES = (

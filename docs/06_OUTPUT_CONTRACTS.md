@@ -49,13 +49,13 @@ A 类 `ProjectOverview` schema 处于**契约级**。它不是一次 prompt 输�
 | `one_sentence_summary` | string | 1-80 字 | 一句话讲清楚工程做什么 | 像老师介绍课题,不是百科定义 |
 | `main_entry_files` | array[`EntryFileEntry`] | 1-3 个 | 主入口脚本 / 首读文件 | 学生第一步该打开的文件 |
 | `main_simulink_models` | array[`SimulinkModelEntry`] | 0-5 个 | 顶层 Simulink 模型 | 纯 `.m` 工程可为空数组 |
-| `main_execution_flow` | array[string] | 3-7 步 | 工程执行流 | 自然语言步骤,不是函数名清单 |
-| `key_files` | array[`KeyFileEntry`] | 3-8 个 | 关键文件 | 只列“学生该看”的文件,不是全量文件树 |
+| `main_execution_flow` | array[string] | 3-10 步 | 工程执行流 | 自然语言步骤,不是函数名清单 |
+| `key_files` | array[`KeyFileEntry`] | 1-8 个 | 关键文件 | 只列“学生该看”的文件,不是全量文件树 |
 | `key_blocks` | array[`BlockEntry`] | 0-10 个 | 关键 Simulink block | 无 Simulink 或无关键 block 时可为空 |
 | `knowledge_points` | array[string] | 3-6 个 | 关联课程知识点 | 对齐中文工科课程术语 |
 | `beginner_reading_order` | array[string] | 3-6 步 | 新手阅读顺序 | 必须给具体动作,不能写“先理解基础概念” |
 | `likely_confusing_points` | array[string] | 2-5 个 | 学生容易卡住的问题 | 必须是看工程会问的问题,不是教科书难点 |
-| `evidence` | array[`SourceRefEntry`] | 至少 3 个 | 证据引用 | 壁垒 3:无证据不许硬答 |
+| `evidence` | array[`SourceRefEntry`] | 至少 1 个 | 证据引用 | 壁垒 3:无证据不许硬答 |
 
 ### 2.2 EntryFileEntry / SimulinkModelEntry / KeyFileEntry
 
