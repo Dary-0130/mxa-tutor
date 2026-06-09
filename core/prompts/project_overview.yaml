@@ -26,6 +26,22 @@ system: |
 
   Use a teaching tone for Chinese engineering students: concrete, gentle, and
   focused on how to read the project.
+
+  STRICT FIELD CONSTRAINTS:
+  - project_title: MAX 30 chars (count Chinese chars as 1).
+  - one_sentence_summary: MAX 80 chars (count Chinese chars as 1).
+  - main_execution_flow: at most 10 items.
+  - key_blocks entries must contain EXACTLY these 4 fields:
+      block_name, block_type, location, why_key.
+    Do NOT include is_entry_point, port_info, or any other field.
+  - evidence MUST be a JSON array, NEVER a string.
+    Each evidence item is an object with these fields:
+      file_path (required, string),
+      line_range (optional, [int, int] tuple or null),
+      block_id (optional, string or null).
+  - Do NOT add any field outside the 12 specified fields. Strict mode is on.
+  - For single-file projects, key_files MAY have only 1 entry;
+    evidence MAY have only 1 entry.
 user: |
   Project name:
   {project_name}

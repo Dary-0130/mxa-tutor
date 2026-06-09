@@ -198,7 +198,7 @@
       "items": {
         "type": "string"
       },
-      "maxItems": 7,
+      "maxItems": 10,
       "minItems": 3,
       "title": "Main Execution Flow",
       "type": "array"
@@ -208,7 +208,7 @@
         "$ref": "#/$defs/KeyFileEntry"
       },
       "maxItems": 8,
-      "minItems": 3,
+      "minItems": 1,
       "title": "Key Files",
       "type": "array"
     },
@@ -251,7 +251,7 @@
       "items": {
         "$ref": "#/$defs/SourceRefEntry"
       },
-      "minItems": 3,
+      "minItems": 1,
       "title": "Evidence",
       "type": "array"
     }

@@ -52,7 +52,7 @@ def test_project_overview_accepts_valid_12_field_payload() -> None:
         ("project_title", ""),
         ("main_entry_files", []),
         ("main_execution_flow", ["one", "two"]),
-        ("key_files", [{"file_path": "main.m", "why_key": "only one"}]),
+        ("key_files", []),
         ("knowledge_points", ["one", "two"]),
         ("likely_confusing_points", ["one"]),
     ],
