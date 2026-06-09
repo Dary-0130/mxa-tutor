@@ -42,6 +42,7 @@ class AppSettings(BaseSettings):
     chunking_max_params_per_block: int = Field(default=12, ge=0, le=50)
     chunking_max_subsystem_child_block_names: int = Field(default=20, ge=0, le=100)
     chunking_description_max_chars: int = Field(default=300, ge=0, le=1000)
+    chunking_max_chunks_per_m_script: int = Field(default=80, ge=1, le=100)
 
     # Storage
     db_path: str = "./data/mxa.db"
