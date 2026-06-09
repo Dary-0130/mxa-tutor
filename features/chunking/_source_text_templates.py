@@ -37,11 +37,41 @@ def truncate_source_text(
     return _truncate_field(_collapse_whitespace(text), max_chars)
 
 
-def build_m_file_source_text(file_info: FileInfo, m_file: MFile, description_max: int) -> str:
+def build_m_file_source_text(
+    file_info: FileInfo,
+    m_file: MFile,
+    description_max: int,
+    section_count: int = 0,
+) -> str:
     desc = _truncate_field(_collapse_whitespace(file_info.description or ""), description_max)
+    if m_file.functions:
+        body = f"含 {len(m_file.functions)} 个函数"
+    elif section_count > 0:
+        body = f"含 {section_count} 段赋值"
+    else:
+        body = "无函数无赋值"
     return (
         f"文件 {file_info.relative_path},类型 {file_info.file_type},"
-        f"角色 {m_file.file_role},含 {len(m_file.functions)} 个函数。{desc}"
+        f"角色 {m_file.file_role},{body}。{desc}"
+    )
+
+
+def build_m_script_section_source_text(
+    file_info: FileInfo,
+    m_file: MFile,
+    section_index: int,
+    section_total: int,
+    section_title: str,
+    section_code: str,
+    code_max: int,
+) -> str:
+    """Build source_text for a single script section chunk."""
+    _ = m_file
+    title_part = f"标题 {section_title}" if section_title else ""
+    code = _truncate_field(section_code, code_max)
+    return (
+        f"脚本 {file_info.relative_path} 第 {section_index} 段(共 {section_total} 段){title_part}\n"
+        f"{code}"
     )
 
 

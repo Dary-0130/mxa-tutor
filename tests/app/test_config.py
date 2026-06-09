@@ -24,6 +24,7 @@ ENV_KEYS = [
     "EMBEDDING_NORMALIZE",
     "VECTOR_TOP_K",
     "VECTOR_MIN_SCORE",
+    "CHUNKING_MAX_CHUNKS_PER_M_SCRIPT",
     "LOG_LEVEL",
 ]
 
@@ -49,6 +50,7 @@ def test_default_values(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     assert cfg.embedding_normalize is True
     assert cfg.vector_top_k == 8
     assert cfg.vector_min_score == 0.3
+    assert cfg.chunking_max_chunks_per_m_script == 80
     assert cfg.db_path == "./data/mxa.db"
     assert cfg.upload_dir == "./data/uploads"
     assert cfg.upload_ttl_hours == 24
@@ -98,6 +100,8 @@ def test_missing_required_raises(monkeypatch: pytest.MonkeyPatch, tmp_path) -> N
         ("VECTOR_TOP_K", "51"),
         ("VECTOR_MIN_SCORE", "-1.1"),
         ("VECTOR_MIN_SCORE", "1.1"),
+        ("CHUNKING_MAX_CHUNKS_PER_M_SCRIPT", "0"),
+        ("CHUNKING_MAX_CHUNKS_PER_M_SCRIPT", "101"),
     ],
 )
 def test_vector_bounds_raise(

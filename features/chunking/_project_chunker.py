@@ -15,6 +15,7 @@ from ._chunk_id import make_chunk_id
 from ._source_text_templates import (
     build_m_file_source_text,
     build_m_function_source_text,
+    build_m_script_section_source_text,
     build_mat_variable_source_text,
     build_slx_block_source_text,
     build_slx_subsystem_source_text,
@@ -28,6 +29,7 @@ def build_drafts(project: Project, graph: ProjectGraph, settings: AppSettings) -
     drafts: list[ChunkDraft] = []
     drafts.extend(_build_m_file_drafts(project, settings))
     drafts.extend(_build_m_function_drafts(project, settings))
+    drafts.extend(_build_m_script_drafts(project, settings))
     drafts.extend(_build_slx_block_drafts(project, settings))
     drafts.extend(_build_slx_subsystem_drafts(project, settings))
     drafts.extend(_build_mat_variable_drafts(project, settings))
@@ -35,6 +37,8 @@ def build_drafts(project: Project, graph: ProjectGraph, settings: AppSettings) -
 
 
 def _build_m_file_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
+    from ._m_script_parser import split_m_script
+
     files_by_path = {_normalize_path(info.relative_path): info for info in project.files}
     drafts: list[ChunkDraft] = []
     for m_file in project.m_files:
@@ -44,10 +48,15 @@ def _build_m_file_drafts(project: Project, settings: AppSettings) -> list[ChunkD
                 "m_file_chunk_skipped: project_id={} reason=missing_file_info", project.id
             )
             continue
+        section_count = 0
+        if not m_file.functions and m_file.raw_code:
+            sections = split_m_script(m_file.raw_code, settings.chunking_max_chunks_per_m_script)
+            section_count = len(sections)
         raw = build_m_file_source_text(
             file_info,
             m_file,
             description_max=settings.chunking_description_max_chars,
+            section_count=section_count,
         )
         drafts.append(
             ChunkDraft(
@@ -64,6 +73,54 @@ def _build_m_file_drafts(project: Project, settings: AppSettings) -> list[ChunkD
                 source_text=_finalize_source_text(raw, settings),
             )
         )
+    return drafts
+
+
+def _build_m_script_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
+    from ._m_script_parser import split_m_script
+
+    files_by_path = {_normalize_path(info.relative_path): info for info in project.files}
+    drafts: list[ChunkDraft] = []
+    for m_file in project.m_files:
+        if m_file.functions or not m_file.raw_code:
+            continue
+
+        file_info = _find_file_info(files_by_path, m_file.file_path)
+        if file_info is None:
+            continue
+
+        sections = split_m_script(m_file.raw_code, settings.chunking_max_chunks_per_m_script)
+        total = len(sections)
+        if total == 0:
+            continue
+
+        for section in sections:
+            raw = build_m_script_section_source_text(
+                file_info=file_info,
+                m_file=m_file,
+                section_index=section.index,
+                section_total=total,
+                section_title=section.title,
+                section_code=section.code,
+                code_max=settings.chunking_max_source_text_chars,
+            )
+            drafts.append(
+                ChunkDraft(
+                    chunk_id=make_chunk_id(
+                        project.id, "m_file", m_file.file_path, f"section_{section.index}"
+                    ),
+                    project_id=project.id,
+                    source_type="m_file",
+                    file_path=m_file.file_path,
+                    symbol_name=section.title if section.title else f"section_{section.index}",
+                    line_range=None,
+                    block_id=None,
+                    block_name=None,
+                    block_type=None,
+                    parent_subsystem=None,
+                    source_text=_finalize_source_text(raw, settings),
+                )
+            )
     return drafts
 
 
