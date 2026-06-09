@@ -92,9 +92,12 @@ def build_slx_block_source_text(
     block: SlxBlock,
     param_value_max: int,
     max_params: int,
+    *,
+    params_override: dict[str, str] | None = None,
 ) -> str:
     parent = block.parent_subsystem or "顶层"
-    sorted_items = sorted(block.parameters.items())[:max_params]
+    params = params_override if params_override is not None else block.parameters
+    sorted_items = sorted(params.items())[:max_params]
     params_str = ",".join(
         f"{key}={_truncate_field(_collapse_whitespace(str(value)), param_value_max)}"
         for key, value in sorted_items
