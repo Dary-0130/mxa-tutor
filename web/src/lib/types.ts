@@ -1,5 +1,6 @@
 export type ProjectStatusValue = "parsing" | "ready" | "failed";
-export type ProjectTypeValue =
+
+export type ProjectType =
   | "control_system"
   | "signal_processing"
   | "power_electronics"
@@ -7,6 +8,7 @@ export type ProjectTypeValue =
   | "motor_control"
   | "new_energy"
   | "general";
+
 export type Confidence = "high" | "medium" | "low";
 export type FallbackReason =
   | "no_retrieval_hits"
@@ -36,19 +38,47 @@ export interface SourceRef {
   parameter_name?: string | null;
 }
 
+export interface EntryFileEntry {
+  file_path: string;
+  role: string;
+}
+
+export interface SimulinkModelEntry {
+  file_path: string;
+  summary: string;
+}
+
+export interface KeyFileEntry {
+  file_path: string;
+  why_key: string;
+}
+
+export interface BlockEntry {
+  block_name: string;
+  block_type: string;
+  location: string;
+  why_key: string;
+}
+
+export interface SourceRefEntry {
+  file_path: string;
+  line_range?: [number, number] | null;
+  block_id?: string | null;
+}
+
 export interface ProjectOverview {
   project_title: string;
-  project_type: ProjectTypeValue;
+  project_type: ProjectType;
   one_sentence_summary: string;
-  main_entry_files: { file_path: string; role: string }[];
-  main_simulink_models: { file_path: string; summary: string }[];
+  main_entry_files: EntryFileEntry[];
+  main_simulink_models: SimulinkModelEntry[];
   main_execution_flow: string[];
-  key_files: { file_path: string; why_key: string }[];
-  key_blocks: { block_name: string; block_type: string; location: string; why_key: string }[];
+  key_files: KeyFileEntry[];
+  key_blocks: BlockEntry[];
   knowledge_points: string[];
   beginner_reading_order: string[];
   likely_confusing_points: string[];
-  evidence: Pick<SourceRef, "file_path" | "line_range" | "block_id">[];
+  evidence: SourceRefEntry[];
 }
 
 export interface ChatResponse {

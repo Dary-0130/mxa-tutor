@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "typecheck": "tsc -b",
+    "preview": "vite preview",
+    "smoke:task402": "node scripts/task402-smoke.mjs"
   },
   "dependencies": {
     "react": "^19.2.6",

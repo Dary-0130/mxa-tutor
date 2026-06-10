@@ -1,0 +1,154 @@
+.upload-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  color: var(--color-ite);
+}
+
+.upload-content {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) 460px;
+  gap: clamp(32px, 6vw, 104px);
+  align-items: center;
+  width: min(1180px, calc(100vw - 96px));
+  min-height: 100vh;
+  margin: 0 auto;
+}
+
+.upload-copy h1 {
+  max-width: 720px;
+  margin: 18px 0 0;
+  font-size: clamp(3.1rem, 6vw, 6.6rem);
+  font-weight: 950;
+  line-height: 0.94;
+  letter-spacing: 0;
+}
+
+.upload-copy p:last-child {
+  max-width: 560px;
+  margin: 28px 0 0;
+  color: var(--color-cold);
+  font-size: 1rem;
+  line-height: 1.9;
+}
+
+.upload-dropzone,
+.upload-status-card {
+  width: min(100%, 460px);
+  min-height: 260px;
+  border: 1px solid rgba(222, 232, 218, 0.22);
+  background: rgba(8, 13, 13, 0.42);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.28);
+}
+
+.upload-dropzone {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  padding: 28px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.upload-dropzone[data-dragging="true"] {
+  border-color: var(--color-signal);
+  background: rgba(29, 35, 32, 0.62);
+  transform: translateY(-2px);
+}
+
+.upload-dropzone[data-disabled="true"] {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.upload-dropzone strong {
+  font-size: 1.45rem;
+  font-weight: 900;
+}
+
+.upload-dropzone span:not(.upload-dropzone__mark) {
+  color: var(--color-cold);
+}
+
+.upload-dropzone__mark {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border: 2px solid var(--color-signal);
+  color: var(--color-signal);
+  font: 900 1.1rem var(--font-mono);
+}
+
+.upload-dropzone__error {
+  max-width: 340px;
+  margin: 10px 0 0;
+  color: #ffb69e;
+  line-height: 1.7;
+}
+
+.upload-status-card {
+  display: grid;
+  align-content: center;
+  gap: 22px;
+  padding: 30px;
+}
+
+.upload-status-card h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.upload-status-card p {
+  margin: 8px 0 0;
+  color: var(--color-rebar);
+  font-family: var(--font-mono);
+}
+
+.upload-status-card__row {
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-cold);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.upload-progress {
+  height: 8px;
+  background: rgba(232, 228, 222, 0.16);
+}
+
+.upload-progress span {
+  display: block;
+  height: 100%;
+  background: var(--color-signal);
+  transition: width 160ms linear;
+}
+
+@supports not ((backdrop-filter: blur(10px)) or (-webkit-backdrop-filter: blur(10px))) {
+  .upload-dropzone,
+  .upload-status-card {
+    background:
+      linear-gradient(180deg, rgba(18, 24, 23, 0.82), rgba(8, 13, 13, 0.76)),
+      var(--noise-texture, none);
+  }
+}
+
+@media (max-width: 900px) {
+  .upload-content {
+    grid-template-columns: 1fr;
+    width: min(100% - 32px, 560px);
+    padding: 48px 0;
+  }
+
+  .upload-copy h1 {
+    font-size: clamp(2.5rem, 12vw, 4.8rem);
+  }
+}

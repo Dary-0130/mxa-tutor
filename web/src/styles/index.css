@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@import "./scene.css";
+@import "./upload.css";
+@import "./overview.css";
 
 :root {
   --color-concrete: #2c2c2c;
@@ -7,6 +10,8 @@
   --color-formwork: #3a3a3a;
   --color-signal: #e85d3a;
   --color-signal-dim: #c44d2e;
+  --color-moss: #8fa58d;
+  --color-cold: #d5e1db;
   --font-display: "IBM Plex Sans", "Noto Sans SC", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "Noto Sans Mono", monospace;
 }
@@ -55,4 +60,39 @@ body {
 .brutal-panel {
   border: 2px solid var(--color-rebar);
   background-color: color-mix(in srgb, var(--color-formwork) 92%, black);
+}
+
+.section-kicker {
+  margin: 0;
+  color: var(--color-signal);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.text-command {
+  width: fit-content;
+  border: 0;
+  background: transparent;
+  color: var(--color-ite);
+  cursor: pointer;
+  font: 800 0.78rem var(--font-mono);
+  letter-spacing: 0;
+  text-decoration: underline;
+  text-decoration-color: var(--color-signal);
+  text-underline-offset: 6px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
