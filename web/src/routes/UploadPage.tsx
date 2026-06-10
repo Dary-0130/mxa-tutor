@@ -122,11 +122,13 @@ export function UploadPage() {
   return (
     <main className="upload-page">
       <UploadScene state={sceneState} progress={state.progress} />
+      <div className="upload-corner-tag" aria-hidden="true">
+        MATLAB · SIMULINK
+      </div>
       <section className="upload-content" aria-label="上传 MATLAB 工程">
         <div className="upload-copy">
-          <p className="section-kicker">MXA TUTOR</p>
-          <h1>拖入你的 MATLAB 工程</h1>
-          <p>上传 zip 后,系统会解析工程结构并生成可提问的导览。</p>
+          <h1 className="upload-hero-brand">MXA TUTOR</h1>
+          <p className="upload-hero-tagline">工科仿真 AI 助教</p>
         </div>
         {busy && state.file ? (
           <UploadStatusCard
