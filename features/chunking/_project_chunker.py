@@ -25,6 +25,7 @@ from ._source_text_templates import (
     build_slx_subsystem_source_text,
     truncate_source_text,
 )
+from ._workspace_resolver import extract_workspace_literals
 
 METADATA_PARAM_KEYS: Final[frozenset[str]] = frozenset(
     {
@@ -283,6 +284,7 @@ def _build_m_function_drafts(project: Project, settings: AppSettings) -> list[Ch
 
 
 def _build_slx_block_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
+    workspace_literals = extract_workspace_literals(project.m_files)
     candidates: list[_SlxBlockCandidate] = []
     for model in project.slx_models:
         for block in model.blocks:
@@ -311,11 +313,13 @@ def _build_slx_block_drafts(project: Project, settings: AppSettings) -> list[Chu
     for group in _group_duplicate_blocks(candidates):
         blocks = [candidate.block for candidate in group]
         if group[0].meaningful and _should_merge_group(blocks):
-            drafts.append(_build_merged_slx_block_draft(project, settings, group))
+            drafts.append(
+                _build_merged_slx_block_draft(project, settings, group, workspace_literals)
+            )
             continue
 
         for candidate in group:
-            drafts.append(_build_slx_block_draft(project, settings, candidate))
+            drafts.append(_build_slx_block_draft(project, settings, candidate, workspace_literals))
     return drafts
 
 
@@ -323,6 +327,7 @@ def _build_slx_block_draft(
     project: Project,
     settings: AppSettings,
     candidate: _SlxBlockCandidate,
+    workspace_literals: dict[str, str],
 ) -> ChunkDraft:
     raw = build_slx_block_source_text(
         candidate.model,
@@ -330,6 +335,7 @@ def _build_slx_block_draft(
         param_value_max=settings.chunking_param_value_max_chars,
         max_params=settings.chunking_max_params_per_block,
         params_override=candidate.meaningful,
+        workspace_literals=workspace_literals,
     )
     return ChunkDraft(
         chunk_id=make_chunk_id(
@@ -352,6 +358,7 @@ def _build_merged_slx_block_draft(
     project: Project,
     settings: AppSettings,
     group: list[_SlxBlockCandidate],
+    workspace_literals: dict[str, str],
 ) -> ChunkDraft:
     representative = group[0]
     names = [candidate.block.name for candidate in group]
@@ -361,6 +368,7 @@ def _build_merged_slx_block_draft(
         param_value_max=settings.chunking_param_value_max_chars,
         max_params=settings.chunking_max_params_per_block,
         params_override=representative.meaningful,
+        workspace_literals=workspace_literals,
     )
     raw = (
         f"{raw},合并同参数重复 block 总数 {len(group)},"
