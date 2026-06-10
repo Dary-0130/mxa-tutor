@@ -7,6 +7,7 @@ from core.domain.m_file import MFile
 from core.domain.project import FileInfo, Project, ProjectType
 from core.domain.slx_model import SlxBlock, SlxModel
 from features.chunking import _project_chunker
+from features.chunking._source_text_templates import build_slx_block_source_text
 
 
 def _settings(monkeypatch) -> AppSettings:
@@ -159,6 +160,73 @@ def test_source_text_only_contains_meaningful_params(monkeypatch) -> None:
     assert "Value=80" in drafts[0].source_text
     assert "Position" not in drafts[0].source_text
     assert "SourceType" not in drafts[0].source_text
+
+
+def test_slx_block_source_text_marks_unresolved_and_inlines_workspace_literals() -> None:
+    text = build_slx_block_source_text(
+        model=_model(
+            "model.slx",
+            [
+                _block(
+                    "source-1",
+                    "Source",
+                    "Sine Wave",
+                    {"Amplitude": "U1", "SampleTime": "Ts_sys"},
+                )
+            ],
+        ),
+        block=_block(
+            "source-1",
+            "Source",
+            "Sine Wave",
+            {"Amplitude": "U1", "SampleTime": "Ts_sys"},
+        ),
+        param_value_max=80,
+        max_params=12,
+        workspace_literals={"Ts_sys": "1e-6"},
+    )
+
+    assert "Amplitude=U1[未在 workspace 定义]" in text
+    assert "SampleTime=Ts_sys(=1e-6)" in text
+
+
+def test_slx_block_source_text_no_workspace_fallback_compatible() -> None:
+    text = build_slx_block_source_text(
+        model=_model("model.slx", []),
+        block=_block("source-1", "Source", "Sine Wave", {"Amplitude": "U1"}),
+        param_value_max=80,
+        max_params=12,
+    )
+
+    assert "Amplitude=U1" in text
+    assert "[未在 workspace 定义]" not in text
+    assert "(=" not in text
+
+
+def test_slx_block_drafts_pass_workspace_literals(monkeypatch) -> None:
+    settings = _settings(monkeypatch)
+    project = _project(
+        slx_models=[
+            _model(
+                "model.slx",
+                [
+                    _block(
+                        "source-1",
+                        "Source",
+                        "Sine Wave",
+                        {"Amplitude": "U1", "SampleTime": "Ts_sys"},
+                    )
+                ],
+            )
+        ],
+        m_files=[MFile("main.m", "script", [], [], [], "Ts_sys = 1e-6;")],
+    )
+
+    drafts = _slx_drafts(project, settings)
+
+    assert len(drafts) == 1
+    assert "Amplitude=U1[未在 workspace 定义]" in drafts[0].source_text
+    assert "SampleTime=Ts_sys(=1e-6)" in drafts[0].source_text
 
 
 def test_merge_guard_group_size_less_than_three_does_not_merge(monkeypatch) -> None:

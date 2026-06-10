@@ -11,6 +11,8 @@ from core.domain.slx_model import SlxBlock, SlxModel
 from core.domain.teaching_unit import TeachingUnit
 from features.overview.overview_schemas import ProjectOverview
 
+from ._workspace_resolver import is_unresolved_var_ref
+
 _TRUNCATE_MARKER: Final[str] = "[…]"
 _SOURCE_TEXT_MAX_CHARS_DEFAULT: Final[int] = 1024
 
@@ -94,14 +96,26 @@ def build_slx_block_source_text(
     max_params: int,
     *,
     params_override: dict[str, str] | None = None,
+    workspace_literals: dict[str, str] | None = None,
 ) -> str:
     parent = block.parent_subsystem or "顶层"
     params = params_override if params_override is not None else block.parameters
     sorted_items = sorted(params.items())[:max_params]
-    params_str = ",".join(
-        f"{key}={_truncate_field(_collapse_whitespace(str(value)), param_value_max)}"
-        for key, value in sorted_items
-    )
+    param_parts: list[str] = []
+    for key, value in sorted_items:
+        value_text = _collapse_whitespace(str(value))
+        value_truncated = _truncate_field(value_text, param_value_max)
+        value_stripped = value_text.strip()
+        if workspace_literals is not None and is_unresolved_var_ref(
+            value_stripped, workspace_literals
+        ):
+            param_parts.append(f"{key}={value_truncated}[未在 workspace 定义]")
+        elif workspace_literals is not None and value_stripped in workspace_literals:
+            actual = _truncate_field(workspace_literals[value_stripped], param_value_max)
+            param_parts.append(f"{key}={value_truncated}(={actual})")
+        else:
+            param_parts.append(f"{key}={value_truncated}")
+    params_str = ",".join(param_parts)
     flags = []
     if block.is_library_link:
         flags.append("library_link")
