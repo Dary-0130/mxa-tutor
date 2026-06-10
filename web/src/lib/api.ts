@@ -5,6 +5,11 @@ export interface ApiError {
   message: string;
 }
 
+export interface UploadTask<T> {
+  promise: Promise<T>;
+  abort: () => void;
+}
+
 export class ApiException extends Error {
   readonly status: number;
   readonly code: string;
@@ -41,8 +46,20 @@ async function parseError(response: Response): Promise<ApiException> {
   }
 }
 
+function networkError(): ApiException {
+  return new ApiException(0, "network_error", "网络连接失败,请检查网络后重试");
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(buildUrl(path), { headers: { Accept: "application/json" } });
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path), { headers: { Accept: "application/json" } });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw networkError();
+    }
+    throw error;
+  }
   if (!response.ok) {
     throw await parseError(response);
   }
@@ -50,24 +67,32 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(buildUrl(path), {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path), {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw networkError();
+    }
+    throw error;
+  }
   if (!response.ok) {
     throw await parseError(response);
   }
   return (await response.json()) as T;
 }
 
-export async function apiUpload(
+export function apiUploadTask(
   path: string,
   file: File,
   onProgress?: (percent: number) => void,
-): Promise<UploadResponse> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
+): UploadTask<UploadResponse> {
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise<UploadResponse>((resolve, reject) => {
     const formData = new FormData();
     formData.append("file", file);
 
@@ -92,7 +117,20 @@ export async function apiUpload(
         ),
       );
     };
-    xhr.onerror = () => reject(new ApiException(0, "network_error", "网络异常，请稍后重试"));
+    xhr.onerror = () => reject(networkError());
+    xhr.onabort = () => reject(new DOMException("Upload aborted", "AbortError"));
     xhr.send(formData);
   });
+  return {
+    promise,
+    abort: () => xhr.abort(),
+  };
+}
+
+export async function apiUpload(
+  path: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+): Promise<UploadResponse> {
+  return apiUploadTask(path, file, onProgress).promise;
 }
