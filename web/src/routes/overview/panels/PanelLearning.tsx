@@ -38,7 +38,7 @@ export function PanelLearning({ overview, onFocusPanel }: PanelLearningProps) {
 
   return (
     <PanelFrame index={4} title="学习路径" onFocusPanel={onFocusPanel}>
-      <div className="learning-stack">
+      <div className="learning-stack" data-native-scroll>
         <LearningSection title="知识点" items={overview.knowledge_points} />
         <LearningSection title="阅读顺序" items={overview.beginner_reading_order} />
         <LearningSection title="容易卡住的地方" items={overview.likely_confusing_points} />
