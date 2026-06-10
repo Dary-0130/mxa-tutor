@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import Callable
 from pathlib import PurePath
-from typing import Protocol
+from typing import Any, Protocol
 
 from loguru import logger
 from pydantic import ValidationError
@@ -113,11 +113,11 @@ class ProjectOverviewService:
             logger.error("Overview JSON parse failed: error_type={}", type(exc).__name__)
             raise OverviewGenerationError("导览生成失败,请刷新重试") from None
 
-        try:
-            overview = ProjectOverview.model_validate(payload)
-        except ValidationError as exc:
-            logger.error("Overview schema validation failed: error_type={}", type(exc).__name__)
+        if not isinstance(payload, dict):
+            logger.error("Overview schema validation failed: error_type=payload_not_mapping")
             raise OverviewGenerationError("导览生成失败,请刷新重试") from None
+
+        overview = self._try_parse_with_list_truncation(payload)
 
         try:
             _validate_file_paths(overview, project)
@@ -128,6 +128,69 @@ class ProjectOverviewService:
             raise OverviewGenerationError("导览生成失败,请刷新重试") from None
 
         return overview
+
+    def _try_parse_with_list_truncation(self, raw_dict: dict[str, Any]) -> ProjectOverview:
+        """Parse ProjectOverview with graceful top-level list truncation."""
+        try:
+            return ProjectOverview.model_validate(raw_dict)
+        except ValidationError as exc:
+            errors = exc.errors()
+            truncations: list[tuple[str, int, int]] = []
+            for error in errors:
+                error_dict: dict[str, Any] = dict(error)
+                if not self._is_truncatable_list_too_long(error_dict, raw_dict):
+                    logger.error(
+                        "Overview schema validation failed: error_type={} error_count={}",
+                        type(exc).__name__,
+                        len(errors),
+                    )
+                    raise OverviewGenerationError("导览生成失败,请刷新重试") from None
+
+                field_name = str(error_dict["loc"][0])
+                max_length = int((error_dict.get("ctx") or {})["max_length"])
+                current_length = len(raw_dict[field_name])
+                truncations.append((field_name, current_length, max_length))
+
+            for field_name, _current_length, max_length in truncations:
+                raw_dict[field_name] = raw_dict[field_name][:max_length]
+
+            try:
+                result = ProjectOverview.model_validate(raw_dict)
+            except ValidationError as retry_exc:
+                logger.error(
+                    "overview_lenient_parse_failed_on_retry: error_type={} truncated_fields={}",
+                    type(retry_exc).__name__,
+                    [field_name for field_name, _current, _max_length in truncations],
+                )
+                raise OverviewGenerationError("导览生成失败,请刷新重试") from None
+
+            logger.info(
+                "overview_lenient_parse_truncated: truncations={}",
+                [
+                    {"field": field_name, "from": current_length, "to": max_length}
+                    for field_name, current_length, max_length in truncations
+                ],
+            )
+            return result
+
+    @staticmethod
+    def _is_truncatable_list_too_long(
+        error: dict[str, Any],
+        raw_dict: dict[str, Any],
+    ) -> bool:
+        """Return True iff this error is a top-level list exceeding max_length."""
+        if error.get("type") != "too_long":
+            return False
+        location = error.get("loc", ())
+        if not isinstance(location, tuple) or len(location) != 1:
+            return False
+        field_name = location[0]
+        if not isinstance(field_name, str):
+            return False
+        if not isinstance(raw_dict.get(field_name), list):
+            return False
+        context = error.get("ctx") or {}
+        return "max_length" in context
 
 
 def parse_location(location: str) -> tuple[str, str]:
