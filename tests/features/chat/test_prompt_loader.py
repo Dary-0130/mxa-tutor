@@ -10,7 +10,7 @@ def test_load_prompt_template_reads_qa_yaml() -> None:
 
     template = load_prompt_template()
 
-    assert template.version == "v0.3-rc"
+    assert template.version == "v0.3"
     assert "source_id" in template.description
     assert "{source_block}" in template.user
 

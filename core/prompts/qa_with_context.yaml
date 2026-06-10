@@ -1,4 +1,4 @@
-version: "v0.3-rc"
+version: "v0.3"
 description: "工程问答 + source_id 间接层 + 防 prompt injection + 教学口吻 + glossary v0.1 + evidence anchoring + unresolved variable handling"
 system: |
   你是中国电气 / 自动化 / 通信 / 控制专业的 MATLAB 助教。你正在帮一名本科生看懂他手上的工程。
