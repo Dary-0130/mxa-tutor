@@ -1,11 +1,12 @@
-.overview-page,
-.overview-state-page {
+.overview-page, .overview-state-page {
   position: relative;
+  z-index: 1;
   min-height: 100vh;
   color: var(--color-ite);
 }
 
 .overview-scroll {
+  position: relative; z-index: 2;
   display: flex;
   width: 100vw;
   height: 100vh;
@@ -29,7 +30,6 @@
 .overview-scroll::-webkit-scrollbar-thumb {
   background: rgba(232, 93, 58, 0.8);
 }
-
 .overview-panel {
   position: relative;
   display: grid;
@@ -48,7 +48,6 @@
   align-self: center;
   width: min(1040px, 100%);
 }
-
 .panel-count {
   position: absolute;
   right: 42px;
@@ -155,6 +154,7 @@
   max-height: calc(100vh - 260px);
   margin-top: 34px;
   overflow-y: auto;
+  padding-bottom: 80px;
 }
 
 .flow-timeline {
@@ -197,8 +197,12 @@
 .learning-stack {
   display: grid;
   max-width: 760px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
   gap: 24px;
   margin-top: 28px;
+  padding-right: 8px;
+  padding-bottom: 80px;
 }
 
 .learning-section ul,
@@ -310,11 +314,29 @@
   padding: 32px;
 }
 
-.overview-state-page > p,
+.overview-state-page > p {
+  position: relative;
+  z-index: 2;
+  border: 1px solid rgba(220, 230, 220, 0.18);
+  background: rgba(8, 13, 13, 0.66);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 28px 36px;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  color: var(--color-cold);
+  text-align: center;
+}
+
 .overview-error-panel {
-  border: 1px solid rgba(220, 230, 220, 0.14);
-  background: rgba(8, 13, 13, 0.48);
-  padding: 24px;
+  position: relative;
+  z-index: 2;
+  border: 1px solid rgba(220, 230, 220, 0.18);
+  background: rgba(8, 13, 13, 0.66);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 28px 36px;
 }
 
 .overview-error-panel h1 {
@@ -332,6 +354,11 @@
 }
 
 @supports not ((backdrop-filter: blur(10px)) or (-webkit-backdrop-filter: blur(10px))) {
+  .overview-state-page > p,
+  .overview-error-panel {
+    background: linear-gradient(180deg, rgba(18, 24, 23, 0.86), rgba(8, 13, 13, 0.78));
+  }
+
   .file-row,
   .info-card {
     background: linear-gradient(180deg, rgba(18, 24, 23, 0.78), rgba(8, 13, 13, 0.72));
