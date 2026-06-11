@@ -8,6 +8,8 @@ from concurrent.futures import TimeoutError as FuturesTimeout
 from contextlib import suppress
 from pathlib import Path
 
+from loguru import logger
+
 from adapters.parser._zip_paths import _compute_target_within_dest, _normalize_zip_path
 from adapters.parser._zip_policy import classify_extension
 from app.config import AppSettings
@@ -169,7 +171,8 @@ def _check_file_size_and_ext(
         raise ProjectTooLargeError(f"单个文件解压后过大: {info.filename}")
 
     ext = Path(normalized).suffix.lower()
-    if classify_extension(ext) == "deny":
+    policy = classify_extension(ext)
+    if policy == "deny":
         raise FileTypeNotAllowedError(f"包含不支持的文件类型: {ext}")
 
 
@@ -205,6 +208,14 @@ def _extract_infos(
 
         if info.filename in directory_names or info.is_dir():
             _make_directory(target)
+            continue
+
+        ext = target.suffix.lower()
+        if classify_extension(ext) == "skip":
+            logger.info(
+                "file_skipped_by_policy: ext={} reason=non_consumable_binary_or_doc",
+                ext,
+            )
             continue
 
         _ensure_target_parent(dest_root, target)

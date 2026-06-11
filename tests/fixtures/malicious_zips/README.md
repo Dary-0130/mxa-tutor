@@ -17,6 +17,6 @@ python tests/fixtures/malicious_zips/build_fixtures.py /tmp/mxa-malicious-zips
 | `zip_slip_paths.zip` | `../escape.m` 路径穿越 | `ZipSlipError` |
 | `symlink_chain.zip` | Unix symlink entry + 后续 payload | `ZipSlipError` |
 | `duplicate_collision.zip` | 原始重复、NFC 碰撞、大小写碰撞 | `ZipSlipError` |
-| `forbidden_type.zip` | `.mexw64` 黑名单扩展 | `FileTypeNotAllowedError` |
+| `forbidden_type.zip` | `.exe` 黑名单扩展 | `FileTypeNotAllowedError` |
 | `encrypted_or_bad_method.zip` | BZIP2 压缩方法 | `ZipBombError` |
 | `total_uncompressed_exceeds_cap.zip` | 小型随机数据,测试时降低总解压阈值触发 | `ZipBombError` |
