@@ -36,7 +36,7 @@ class _SystemClock:
 
 
 class ChunkingService:
-    """Project path stores 5 类 project chunks; overview path stores 1 overview chunk."""
+    """Project path stores 7 类 project chunks; overview path stores 1 overview chunk."""
 
     _DUP_CHUNK_ID_ARGS: Final[tuple[str, ...]] = ("chunk_id already exists",)
 
@@ -62,7 +62,7 @@ class ChunkingService:
         return embeddings
 
     async def build_embed_store_project_chunks(self, project: Project) -> int:
-        if not project.m_files and not project.slx_models and not project.mat_files:
+        if not _has_project_chunk_inputs(project):
             logger.info("project_chunking_skipped: project_id={} reason=no_chunks", project.id)
             return 0
 
@@ -92,13 +92,15 @@ class ChunkingService:
         counts = _count_by_type(drafts)
         logger.info(
             "project_chunks_added: project_id={} m_file={} m_function={} "
-            "slx_block={} slx_subsystem={} mat_variable={}",
+            "slx_block={} slx_subsystem={} mat_variable={} c_file={} h_file={}",
             project.id,
             counts["m_file"],
             counts["m_function"],
             counts["slx_block"],
             counts["slx_subsystem"],
             counts["mat_variable"],
+            counts["c_file"],
+            counts["h_file"],
         )
         return len(chunks)
 
@@ -148,9 +150,20 @@ class ChunkingService:
 
 def _count_by_type(drafts: list[ChunkDraft]) -> dict[str, int]:
     return {
+        "c_file": sum(1 for draft in drafts if draft.source_type == "c_file"),
+        "h_file": sum(1 for draft in drafts if draft.source_type == "h_file"),
         "m_file": sum(1 for draft in drafts if draft.source_type == "m_file"),
         "m_function": sum(1 for draft in drafts if draft.source_type == "m_function"),
         "slx_block": sum(1 for draft in drafts if draft.source_type == "slx_block"),
         "slx_subsystem": sum(1 for draft in drafts if draft.source_type == "slx_subsystem"),
         "mat_variable": sum(1 for draft in drafts if draft.source_type == "mat_variable"),
     }
+
+
+def _has_project_chunk_inputs(project: Project) -> bool:
+    return (
+        bool(project.m_files)
+        or bool(project.slx_models)
+        or bool(project.mat_files)
+        or any(file.file_type in {".c", ".h"} for file in project.files)
+    )

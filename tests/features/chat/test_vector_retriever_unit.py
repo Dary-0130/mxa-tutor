@@ -118,6 +118,8 @@ async def _search(hits: list[QueryHit]) -> list:
 @pytest.mark.asyncio
 async def test_maps_chunk_source_types_to_retrieval_source_types() -> None:
     source_types = {
+        "c_file": "function",
+        "h_file": "function",
         "m_file": "file",
         "m_function": "function",
         "slx_block": "block",
@@ -130,6 +132,34 @@ async def test_maps_chunk_source_types_to_retrieval_source_types() -> None:
     results = await _search(hits)
 
     assert [result.source_type for result in results] == list(source_types.values())
+
+
+@pytest.mark.asyncio
+async def test_vector_retriever_maps_c_h_chunks_to_function() -> None:
+    hits = [
+        QueryHit(_chunk("c_file", file_path="DAB_Sfcn.c", source_text="mdlOutputs"), 0.9),
+        QueryHit(_chunk("h_file", file_path="PID.h", source_text="pid_calc"), 0.8),
+    ]
+
+    results = await _search(hits)
+
+    assert [result.source_type for result in results] == ["function", "function"]
+    assert [result.source_ref.file_path for result in results] == ["DAB_Sfcn.c", "PID.h"]
+
+
+@pytest.mark.asyncio
+async def test_vector_retriever_no_unknown_source_type_for_c_h() -> None:
+    results = await _search(
+        [
+            QueryHit(_chunk("c_file", file_path="controller.c"), 0.9),
+            QueryHit(_chunk("h_file", file_path="controller.h"), 0.8),
+        ]
+    )
+
+    assert {result.source_ref.file_path for result in results} == {
+        "controller.c",
+        "controller.h",
+    }
 
 
 @pytest.mark.asyncio

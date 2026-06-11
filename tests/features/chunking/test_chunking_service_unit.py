@@ -7,7 +7,7 @@ from datetime import datetime
 import pytest
 
 from adapters.embedding.sentence_transformer import SentenceTransformerEmbedder
-from core.domain.project import Project
+from core.domain.project import FileInfo, Project
 from core.domain.project_graph import ProjectGraph
 from core.interfaces.embedder import EmbeddingProvider
 from core.interfaces.vector_store import ChunkRecord, QueryHit, VectorStore
@@ -113,6 +113,28 @@ def _service(
     )
 
 
+def _attach_c_h_sources(project: Project, chunk_settings, tmp_path):
+    upload_root = tmp_path / "uploads"
+    project_root = upload_root / project.id
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "include").mkdir(parents=True)
+    (project_root / "src" / "controller.c").write_text(
+        "static void controller(void) {\n    Phase = 90;\n}\n",
+        encoding="utf-8",
+    )
+    (project_root / "include" / "controller.h").write_text(
+        "typedef struct { float Kp; } PID;\nvoid pid_calc(PID *v);\n",
+        encoding="utf-8",
+    )
+    project.files.extend(
+        [
+            FileInfo("src/controller.c", ".c", 42),
+            FileInfo("include/controller.h", ".h", 58),
+        ]
+    )
+    return chunk_settings.model_copy(update={"upload_dir": str(upload_root)})
+
+
 def test_chunk_draft_has_storage_free_shape() -> None:
     assert {field.name for field in fields(ChunkDraft)} == {
         "chunk_id",
@@ -140,23 +162,35 @@ def test_chunk_id_namespace_hash_and_empty_identifier() -> None:
         make_chunk_id("p1", "m_file")
 
 
-def test_project_drafts_emit_five_project_classes_and_flags(
+def test_project_drafts_emit_seven_project_classes_and_flags(
     rich_project,
     chunk_settings,
+    tmp_path,
 ) -> None:
+    settings = _attach_c_h_sources(rich_project, chunk_settings, tmp_path)
     drafts = _project_chunker.build_drafts(
         rich_project,
         FakeGraphProvider().build(rich_project),
-        chunk_settings,
+        settings,
     )
     by_type = {
         source_type: [draft for draft in drafts if draft.source_type == source_type]
         for source_type in {draft.source_type for draft in drafts}
     }
 
-    assert set(by_type) == {"m_file", "m_function", "slx_block", "slx_subsystem", "mat_variable"}
+    assert set(by_type) == {
+        "c_file",
+        "h_file",
+        "m_file",
+        "m_function",
+        "slx_block",
+        "slx_subsystem",
+        "mat_variable",
+    }
     assert all(draft.source_type != "teaching_unit" for draft in drafts)
     assert by_type["m_file"][0].symbol_name is None
+    assert len(by_type["c_file"]) == 1
+    assert len(by_type["h_file"]) == 1
     assert len(by_type["slx_block"]) == 3
     assert any(",标记 library_link" in draft.source_text for draft in by_type["slx_block"])
     assert any(",标记 model_reference" in draft.source_text for draft in by_type["slx_block"])
@@ -165,38 +199,42 @@ def test_project_drafts_emit_five_project_classes_and_flags(
 async def test_service_materializes_and_stores_project_chunks(
     rich_project,
     chunk_settings,
+    tmp_path,
 ) -> None:
+    settings = _attach_c_h_sources(rich_project, chunk_settings, tmp_path)
     vector_store = FakeVectorStore()
-    count = await _service(
-        chunk_settings, vector_store=vector_store
-    ).build_embed_store_project_chunks(rich_project)
+    count = await _service(settings, vector_store=vector_store).build_embed_store_project_chunks(
+        rich_project
+    )
 
-    assert count == 7
-    assert await vector_store.get_chunk_count("p1") == 7
+    assert count == 9
+    assert await vector_store.get_chunk_count("p1") == 9
     assert vector_store.delete_calls == []
     assert {chunk.source_type for chunk in vector_store.chunks} == {
+        "c_file",
+        "h_file",
         "m_file",
         "m_function",
         "slx_block",
         "slx_subsystem",
         "mat_variable",
     }
-    assert all(
-        chunk.model_name == chunk_settings.embedding_model_name for chunk in vector_store.chunks
-    )
+    assert all(chunk.model_name == settings.embedding_model_name for chunk in vector_store.chunks)
     assert all(chunk.created_at is not None for chunk in vector_store.chunks)
 
 
 async def test_project_duplicate_is_noop_without_delete(
     rich_project,
     chunk_settings,
+    tmp_path,
 ) -> None:
+    settings = _attach_c_h_sources(rich_project, chunk_settings, tmp_path)
     vector_store = FakeVectorStore()
-    service = _service(chunk_settings, vector_store=vector_store)
+    service = _service(settings, vector_store=vector_store)
 
-    assert await service.build_embed_store_project_chunks(rich_project) == 7
+    assert await service.build_embed_store_project_chunks(rich_project) == 9
     assert await service.build_embed_store_project_chunks(rich_project) == 0
-    assert await vector_store.get_chunk_count("p1") == 7
+    assert await vector_store.get_chunk_count("p1") == 9
     assert vector_store.delete_calls == []
 
 
