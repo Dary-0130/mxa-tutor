@@ -16,3 +16,7 @@ dist/
 web/dist/
 build/
 *.egg-info/
+
+# Temporary diagnostic / inspection scripts (per project handoff § 6)
+/tools_*.py
+/diag_*.py
