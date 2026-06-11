@@ -8,12 +8,14 @@ from datetime import datetime
 from typing import Final, Literal
 
 SourceType = Literal[
+    "c_file",
+    "h_file",
     "m_file",
     "m_function",
-    "slx_block",
-    "slx_subsystem",
     "mat_variable",
     "project_overview",
+    "slx_block",
+    "slx_subsystem",
     "teaching_unit",
 ]
 RESERVED_SOURCE_TYPES: Final[frozenset[str]] = frozenset({"teaching_unit"})
