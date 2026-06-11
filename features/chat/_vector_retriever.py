@@ -14,12 +14,14 @@ from core.interfaces.vector_store import QueryHit, VectorStore
 from features.chat._retriever import RetrievalHit, Retriever, SourceType
 
 _SOURCE_TYPE_MAP: dict[str, SourceType] = {
+    "c_file": "function",
+    "h_file": "function",
     "m_file": "file",
     "m_function": "function",
-    "slx_block": "block",
-    "slx_subsystem": "subsystem",
     "mat_variable": "param",
     "project_overview": "overview",
+    "slx_block": "block",
+    "slx_subsystem": "subsystem",
 }
 
 _SNIPPET_MAX_CHARS = 300

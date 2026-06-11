@@ -10,6 +10,8 @@
 ## 0. 范围
 
 本文覆盖 A 类输出:项目总览(Project Overview),即上传解析完成后首屏展示的结构化 JSON。
+本文另在 § 8 补充检索层 `ChunkRecord` 契约说明,用于前端 / 评测 / RAG 消费者理解
+chunk 元数据字段和 `source_type` 词表。
 
 本文不覆盖:
 
@@ -228,7 +230,59 @@ make verify-schema
 
 ---
 
-## 8. 评测维度(对齐 05 § 10)
+## 8. ChunkRecord Schema(RAG 检索层)
+
+`ChunkRecord` 是进入向量库和 RAG 检索链路的 chunk 元数据契约。本文描述其消费语义;
+实现真值源仍是 `core/interfaces/vector_store.py:25-41::ChunkRecord` 和
+`core/interfaces/vector_store.py:10-20::SourceType`。
+
+### 8.1 字段表(14 字段)
+
+| 字段 | 类型 | 可空 | 语义 |
+|---|---|---|---|
+| `chunk_id` | string | 否 | chunk 全局稳定 ID,由 `make_chunk_id` / `make_overview_chunk_id` 生成 |
+| `project_id` | string | 否 | 所属上传工程 ID |
+| `source_type` | `SourceType` | 否 | chunk 来源类型,见 § 8.2 |
+| `file_path` | string | 否 | 工程内相对路径;项目总览使用 `__project_overview__` |
+| `symbol_name` | string | 是 | 函数名、脚本段名、变量名、子系统名或 C/H section 标题 |
+| `line_range` | tuple[int, int] | 是 | 源码行号范围;适用于 `.m` / `.c` / `.h` 等文本来源 |
+| `block_id` | string | 是 | Simulink block ID;仅 block chunk 必填 |
+| `block_name` | string | 是 | Simulink block / subsystem 展示名 |
+| `block_type` | string | 是 | Simulink block 类型;非 block 来源为空 |
+| `parent_subsystem` | string | 是 | 所属父子系统;顶层或非 Simulink 来源为空 |
+| `source_text` | string | 否 | 用于 embedding 和 LLM 上下文的隐私加工文本,不是原始文件全文 |
+| `embedding` | list[float] | 否 | 预计算向量 |
+| `model_name` | string | 否 | embedding 模型名 |
+| `created_at` | datetime | 是 | chunk 入库时间;未持久化前可为空 |
+
+### 8.2 SourceType 9 枚举值
+
+| 字面值 | 语义 | 当前用途 |
+|---|---|---|
+| `c_file` | C 源码 section chunk | `.c` 顶层结构切段,映射到 chat 层 `function` |
+| `h_file` | C header section chunk | `.h` 头文件切段,映射到 chat 层 `function` |
+| `m_file` | MATLAB 文件 / 脚本段 chunk | `.m` 文件概览和脚本 section |
+| `m_function` | MATLAB 函数 chunk | `.m` 文件中的函数定义 |
+| `mat_variable` | MAT 变量 chunk | `.mat` 变量元数据 |
+| `project_overview` | 项目总览 chunk | overview service 单独产出 |
+| `slx_block` | Simulink block chunk | 有工程语义的 block 参数和标记 |
+| `slx_subsystem` | Simulink subsystem chunk | 子系统及其子 block 摘要 |
+| `teaching_unit` | 教学单元 chunk | reserved,当前不由项目 chunker 产出 |
+
+`RESERVED_SOURCE_TYPES` 当前仅包含 `teaching_unit`。`c_file` / `h_file` 已是正式生效类型,
+不属于 reserved。
+
+### 8.3 隐私与证据边界
+
+- `source_text` 是加工后的教学 / 检索文本,不得持久化大段原始源码。
+- `.c` / `.h` chunk 的证据摘录最多保留 10 行连续原始代码。
+- 日志只允许记录路径、行号、函数名、扩展名和原因,不得记录源码内容。
+- Chat 层 `RetrievalHit.source_type` 不扩展 `c_file` / `h_file`;VectorRetriever 将二者映射为
+  `function`,保持下游问答 schema 稳定。
+
+---
+
+## 9. 评测维度(对齐 05 § 10)
 
 评测脚本消费 `ProjectOverview` 时,至少应看这些维度:
 
@@ -242,7 +296,7 @@ make verify-schema
 
 ---
 
-## 9. 与 05 / Prompt yaml / Service 的对应关系
+## 10. 与 05 / Prompt yaml / Service 的对应关系
 
 | 层 | 文件 | 职责 | 与本文关系 |
 |---|---|---|---|
@@ -257,7 +311,7 @@ make verify-schema
 
 ---
 
-## 10. 版本
+## 11. 版本
 
 v0.1 - 2026-06-05 起 freeze,与 TASK-203 commit `871c8e2` 的 `ProjectOverview` 实现一致。
 

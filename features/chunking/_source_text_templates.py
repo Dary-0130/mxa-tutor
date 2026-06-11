@@ -11,6 +11,8 @@ from core.domain.slx_model import SlxBlock, SlxModel
 from core.domain.teaching_unit import TeachingUnit
 from features.overview.overview_schemas import ProjectOverview
 
+from ._c_source_splitter import CSourceSection
+from ._h_source_splitter import HSourceSection
 from ._workspace_resolver import is_unresolved_var_ref
 
 _TRUNCATE_MARKER: Final[str] = "[…]"
@@ -152,6 +154,38 @@ def build_mat_variable_source_text(mat: MatMetadata, var: MatVariable) -> str:
     )
 
 
+def build_c_source_text(
+    file_info: FileInfo,
+    section: CSourceSection,
+    evidence_max_lines: int = 10,
+) -> str:
+    signature = _section_signature(section)
+    evidence = _select_code_evidence(section.code, evidence_max_lines)
+    globals_text = _global_declaration_summary(section.code)
+    globals_part = f"\n关键全局声明:\n{globals_text}" if globals_text else ""
+    return (
+        f"C 源码 {file_info.relative_path},kind={section.kind},"
+        f"line_range={section.line_start}-{section.line_end},title={section.title}\n"
+        f"签名: {signature}{globals_part}\n"
+        f"证据摘录(最多 {evidence_max_lines} 行):\n{evidence}"
+    )
+
+
+def build_h_source_text(
+    file_info: FileInfo,
+    section: HSourceSection,
+    evidence_max_lines: int = 10,
+) -> str:
+    signature = _section_signature(section)
+    evidence = _select_code_evidence(section.code, evidence_max_lines)
+    return (
+        f"头文件 {file_info.relative_path},kind={section.kind},"
+        f"line_range={section.line_start}-{section.line_end},title={section.title}\n"
+        f"签名: {signature}\n"
+        f"证据摘录(最多 {evidence_max_lines} 行):\n{evidence}"
+    )
+
+
 def build_project_overview_source_text(overview: ProjectOverview) -> str:
     return (
         f"项目 {overview.project_title} 类型 {overview.project_type}。"
@@ -168,3 +202,62 @@ def build_teaching_unit_source_text(unit: TeachingUnit) -> str:
         f"教学单元 {unit.title}({unit.level}):{unit.summary} "
         f"讲解步骤 {','.join(unit.explanation_steps)}"
     )
+
+
+def _section_signature(section: CSourceSection) -> str:
+    for line in section.code.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return _truncate_field(stripped, 180)
+    return section.title
+
+
+def _select_code_evidence(code: str, max_lines: int) -> str:
+    if max_lines <= 0:
+        return ""
+    meaningful = [
+        line.rstrip()
+        for line in code.splitlines()
+        if line.strip() and line.strip() not in {"{", "}"}
+    ]
+    if not meaningful:
+        return ""
+
+    priority_terms = (
+        "OutMax",
+        "OutMin",
+        "Kp",
+        "Ki",
+        "Phase",
+        "Tsw",
+        "pid_calc",
+        "typedef",
+        "#define",
+        "static",
+    )
+    selected: list[str] = []
+    for line in meaningful:
+        if any(term in line for term in priority_terms):
+            selected.append(line)
+            if len(selected) >= max_lines:
+                return "\n".join(selected)
+
+    for line in meaningful:
+        if line not in selected:
+            selected.append(line)
+            if len(selected) >= max_lines:
+                break
+    return "\n".join(selected)
+
+
+def _global_declaration_summary(code: str) -> str:
+    lines = []
+    for line in code.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("//", "/*", "*", "#")):
+            continue
+        if any(stripped.startswith(prefix) for prefix in ("float ", "int ", "real_T ", "double ")):
+            lines.append(stripped)
+        if len(lines) >= 5:
+            break
+    return "\n".join(lines)

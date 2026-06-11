@@ -1,10 +1,10 @@
-"""Build 5 类 project chunks from parsed project data."""
+"""Build 7 类 project chunks from parsed project data."""
 
 from __future__ import annotations
 
 import re
 from collections import defaultdict
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Final, NamedTuple
 
 from loguru import logger
@@ -14,9 +14,13 @@ from core.domain.project import FileInfo, Project
 from core.domain.project_graph import ProjectGraph
 from core.domain.slx_model import SlxBlock, SlxModel
 
+from ._c_source_splitter import split_c_source
 from ._chunk_draft import ChunkDraft
 from ._chunk_id import make_chunk_id
+from ._h_source_splitter import split_h_source
 from ._source_text_templates import (
+    build_c_source_text,
+    build_h_source_text,
     build_m_file_source_text,
     build_m_function_source_text,
     build_m_script_section_source_text,
@@ -154,7 +158,7 @@ def _is_block_parameters_section(section_title: str) -> bool:
 
 
 def build_drafts(project: Project, graph: ProjectGraph, settings: AppSettings) -> list[ChunkDraft]:
-    """Project path emits 5 类 project chunks; overview uses its own entry."""
+    """Project path emits 7 类 project chunks; overview uses its own entry."""
     _ = graph
     drafts: list[ChunkDraft] = []
     drafts.extend(_build_m_file_drafts(project, settings))
@@ -163,6 +167,8 @@ def build_drafts(project: Project, graph: ProjectGraph, settings: AppSettings) -
     drafts.extend(_build_slx_block_drafts(project, settings))
     drafts.extend(_build_slx_subsystem_drafts(project, settings))
     drafts.extend(_build_mat_variable_drafts(project, settings))
+    drafts.extend(_build_c_source_drafts(project, settings))
+    drafts.extend(_build_h_source_drafts(project, settings))
     return drafts
 
 
@@ -449,8 +455,103 @@ def _build_mat_variable_drafts(project: Project, settings: AppSettings) -> list[
     return drafts
 
 
+def _build_c_source_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
+    drafts: list[ChunkDraft] = []
+    upload_root = Path(settings.upload_dir) / project.id
+    for file_info in project.files:
+        if file_info.file_type != ".c":
+            continue
+
+        full_path = upload_root / file_info.relative_path
+        raw_code = _read_source_text(full_path)
+        if raw_code is None:
+            logger.warning(
+                "c_file_chunk_skipped: project_id={} file_path={} reason=read_failed",
+                project.id,
+                file_info.relative_path,
+            )
+            continue
+
+        for section in split_c_source(raw_code):
+            raw = build_c_source_text(file_info, section, evidence_max_lines=10)
+            drafts.append(
+                ChunkDraft(
+                    chunk_id=make_chunk_id(
+                        project.id,
+                        "c_file",
+                        file_info.relative_path,
+                        f"section_{section.index}",
+                    ),
+                    project_id=project.id,
+                    source_type="c_file",
+                    file_path=file_info.relative_path,
+                    symbol_name=section.title,
+                    line_range=(section.line_start, section.line_end),
+                    block_id=None,
+                    block_name=None,
+                    block_type=None,
+                    parent_subsystem=None,
+                    source_text=_finalize_source_text(raw, settings),
+                )
+            )
+    return drafts
+
+
+def _build_h_source_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
+    drafts: list[ChunkDraft] = []
+    upload_root = Path(settings.upload_dir) / project.id
+    for file_info in project.files:
+        if file_info.file_type != ".h":
+            continue
+
+        full_path = upload_root / file_info.relative_path
+        raw_code = _read_source_text(full_path)
+        if raw_code is None:
+            logger.warning(
+                "h_file_chunk_skipped: project_id={} file_path={} reason=read_failed",
+                project.id,
+                file_info.relative_path,
+            )
+            continue
+
+        for section in split_h_source(raw_code):
+            raw = build_h_source_text(file_info, section, evidence_max_lines=10)
+            drafts.append(
+                ChunkDraft(
+                    chunk_id=make_chunk_id(
+                        project.id,
+                        "h_file",
+                        file_info.relative_path,
+                        f"section_{section.index}",
+                    ),
+                    project_id=project.id,
+                    source_type="h_file",
+                    file_path=file_info.relative_path,
+                    symbol_name=section.title,
+                    line_range=(section.line_start, section.line_end),
+                    block_id=None,
+                    block_name=None,
+                    block_type=None,
+                    parent_subsystem=None,
+                    source_text=_finalize_source_text(raw, settings),
+                )
+            )
+    return drafts
+
+
 def _finalize_source_text(raw: str, settings: AppSettings) -> str:
     return truncate_source_text(raw, settings.chunking_max_source_text_chars)
+
+
+def _read_source_text(path: Path) -> str | None:
+    for encoding in ("utf-8", "utf-8-sig", "gbk", "latin-1"):
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+        except OSError:
+            return None
+    return None
 
 
 def _find_file_info(files_by_path: dict[str, FileInfo], file_path: str) -> FileInfo | None:
