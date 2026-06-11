@@ -51,7 +51,7 @@ def build_duplicate_collision(out_dir: Path) -> None:
 def build_forbidden_type(out_dir: Path) -> None:
     with zipfile.ZipFile(out_dir / "forbidden_type.zip", "w") as zf:
         zf.writestr("model.m", "disp('ok');")
-        zf.writestr("native/evil.mexw64", b"MZ fake binary")
+        zf.writestr("native/evil.exe", b"MZ fake binary")
 
 
 def build_encrypted_or_bad_method(out_dir: Path) -> None:

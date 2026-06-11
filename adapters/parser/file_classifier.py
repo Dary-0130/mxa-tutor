@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+from loguru import logger
+
 from adapters.parser._zip_policy import classify_extension
 from core.domain.exceptions import FileTypeNotAllowedError, ZipSlipError
 from core.domain.project import FileInfo
@@ -26,6 +28,12 @@ def classify_files(extracted_root: Path, project_root: Path) -> list[FileInfo]:
             policy = classify_extension(ext)
             if policy == "deny":
                 raise FileTypeNotAllowedError(f"包含不支持的文件类型: {ext}")
+            if policy == "skip":
+                logger.info(
+                    "file_skipped_by_policy: ext={} reason=non_consumable_binary_or_doc",
+                    ext,
+                )
+                continue
 
             file_type = ext if policy == "allow" else "other"
             files.append(

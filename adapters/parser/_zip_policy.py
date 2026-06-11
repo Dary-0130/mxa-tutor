@@ -1,40 +1,43 @@
 from typing import Literal
 
-ALLOW_EXTS: frozenset[str] = frozenset(
+ALLOW_EXTS = sorted(
     {
-        ".m",
-        ".mlx",
-        ".slx",
-        ".mdl",
-        ".mat",
-        ".prj",
-        ".ssc",
+        ".bmp",
+        ".c",
+        ".csv",
         ".fig",
-        ".sldd",
+        ".gif",
+        ".h",
+        ".jpeg",
+        ".jpg",
+        ".json",
+        ".m",
+        ".mat",
+        ".md",
+        ".mdl",
         ".mldatx",
+        ".mlx",
+        ".png",
+        ".prj",
+        ".sldd",
         ".slreqx",
         ".sltx",
+        ".slx",
+        ".ssc",
+        ".svg",
+        ".tif",
+        ".tiff",
         ".txt",
-        ".md",
-        ".csv",
-        ".json",
+        ".webp",
         ".xml",
         ".yaml",
         ".yml",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".svg",
-        ".pdf",
-        ".bmp",
-        ".gif",
-        ".tif",
-        ".tiff",
-        ".webp",
     }
 )
 
-DENY_EXTS: frozenset[str] = frozenset(
+SKIP_EXTS = sorted([".mexa64", ".mexmaci64", ".mexw64", ".pdf"])
+
+_ORIGINAL_DENY_EXTS: frozenset[str] = frozenset(
     {
         ".exe",
         ".bat",
@@ -102,9 +105,17 @@ DENY_EXTS: frozenset[str] = frozenset(
     }
 )
 
+DENY_EXTS = sorted(ext for ext in _ORIGINAL_DENY_EXTS if ext not in SKIP_EXTS)
 
-def classify_extension(ext: str) -> Literal["allow", "deny", "other"]:
-    """按扩展名返回 allow / deny / other。"""
+assert set(ALLOW_EXTS).isdisjoint(SKIP_EXTS)
+assert set(ALLOW_EXTS).isdisjoint(DENY_EXTS)
+assert set(SKIP_EXTS).isdisjoint(DENY_EXTS)
+
+
+def classify_extension(ext: str) -> Literal["allow", "skip", "deny", "other"]:
+    """按扩展名返回 allow / skip / deny / other。"""
+    if ext in SKIP_EXTS:
+        return "skip"
     if ext in ALLOW_EXTS:
         return "allow"
     if ext in DENY_EXTS:
