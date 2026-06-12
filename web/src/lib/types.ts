@@ -92,18 +92,47 @@ export interface ChatResponse {
   fallback_reason: FallbackReason | null;
 }
 
+export interface ChatRequest {
+  question: string;
+  session_id?: string;
+}
+
+export interface ChatSessionDTO {
+  session_id: string;
+  title: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessageDTO {
+  message_id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  created_at: string;
+  citations: SourceRef[];
+}
+
 export interface ChatSessionsResponse {
   project_id: string;
-  sessions: { session_id: string; title: string | null; created_at: string; updated_at: string }[];
+  sessions: ChatSessionDTO[];
 }
 
 export interface ChatMessagesResponse {
   session_id: string;
-  messages: {
-    message_id: string;
-    role: "user" | "assistant" | "system";
-    content: string;
-    created_at: string;
-    citations: SourceRef[];
-  }[];
+  messages: ChatMessageDTO[];
+}
+
+export interface UIMessage {
+  message_id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  citations: SourceRef[];
+  status: "sent" | "pending" | "failed" | "orphan";
+  is_fallback?: boolean;
+  fallbackInferredFromHistory?: boolean;
+  fallback_reason?: FallbackReason | null;
+  error_code?: string;
+  confidence?: Confidence;
+  follow_up_suggestions?: string[];
 }
