@@ -1,4 +1,5 @@
 const OVERVIEW_SEEN_PREFIX = "mxa:overview-seen:";
+const CHAT_ACTIVE_SESSION_PREFIX = "mxa:chat-active-session:";
 const SCROLL_HINT_KEY = "mxa:scroll-hint-shown";
 const OVERVIEW_SEEN_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -70,5 +71,45 @@ export function markScrollHintShown(): void {
     storage.setItem(SCROLL_HINT_KEY, "1");
   } catch {
     // Non-critical hint state.
+  }
+}
+
+export function readChatActiveSession(projectId: string): string | null {
+  const storage = getStorage();
+  if (!storage) {
+    return null;
+  }
+  try {
+    return storage.getItem(`${CHAT_ACTIVE_SESSION_PREFIX}${projectId}`);
+  } catch {
+    return null;
+  }
+}
+
+export function writeChatActiveSession(projectId: string, sessionId: string): void {
+  const storage = getStorage();
+  if (!storage) {
+    return;
+  }
+  try {
+    storage.setItem(`${CHAT_ACTIVE_SESSION_PREFIX}${projectId}`, sessionId);
+  } catch {
+    // Non-critical chat session state.
+  }
+}
+
+export function clearChatActiveSession(projectId: string, sessionId?: string | null): void {
+  const storage = getStorage();
+  if (!storage) {
+    return;
+  }
+  const key = `${CHAT_ACTIVE_SESSION_PREFIX}${projectId}`;
+  try {
+    if (sessionId && storage.getItem(key) !== sessionId) {
+      return;
+    }
+    storage.removeItem(key);
+  } catch {
+    // Non-critical chat session state.
   }
 }
