@@ -16,7 +16,7 @@ def _clear_prompt_cache() -> None:
 def test_load_prompt_template_reads_project_overview_yaml() -> None:
     template = load_prompt_template()
 
-    assert template.version == "v0.1"
+    assert template.version == "v0.2-rc"
     assert template.description
     assert "{file_list}" in template.user
     assert "project_type" in template.system
