@@ -19,7 +19,7 @@ export function ChatHeader({
   sessions,
 }: ChatHeaderProps) {
   return (
-    <header className="border-b-2 border-[var(--color-rebar)] bg-[var(--color-concrete)] px-4 py-3">
+    <header className="border-b-2 border-[var(--color-rebar)] bg-[var(--color-concrete)]/70 px-4 py-3 backdrop-blur-md">
       <div className="mx-auto flex max-w-6xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <Link className="text-command" to={`/view/${projectId}`}>

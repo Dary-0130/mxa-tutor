@@ -30,7 +30,7 @@ export function MessageList({
           <p className="font-mono text-sm text-[var(--color-rebar)]">正在加载会话...</p>
         ) : null}
         {!messagesLoading && messages.length === 0 ? (
-          <div className="border border-[var(--color-rebar)] p-6">
+          <div className="border border-[var(--color-rebar)] bg-[var(--color-formwork)]/40 p-6 backdrop-blur-md">
             <p className="section-kicker">READY</p>
             <h2 className="mt-3 text-2xl font-black">从工程本身开始问</h2>
             <p className="mt-3 text-sm leading-7 text-[var(--color-rebar)]">
