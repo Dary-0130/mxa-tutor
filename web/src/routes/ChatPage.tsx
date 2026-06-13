@@ -1,5 +1,6 @@
 import { useReducer } from "react";
 import { useParams } from "react-router-dom";
+import { PanoramaScene } from "../components/scene/PanoramaScene";
 import { resolveErrorMessage } from "../lib/errorMessages";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ChatInputBar } from "./chat/ChatInputBar";
@@ -36,7 +37,9 @@ function ChatPageContent({ projectId }: { projectId: string }) {
   const locked = state.sending || isNewSessionUnconfirmed(state);
 
   return (
-    <section className="flex h-[calc(100vh-72px)] min-h-[620px] flex-col bg-[var(--color-concrete)]">
+    <>
+      <PanoramaScene panoramaX={0} />
+    <section className="relative z-10 flex h-[calc(100vh-72px)] min-h-[620px] flex-col">
       <ChatHeader
         activeSessionId={state.activeSessionId}
         disabled={locked}
@@ -66,6 +69,7 @@ function ChatPageContent({ projectId }: { projectId: string }) {
         onSubmit={() => void chat.sendCurrentDraft()}
       />
     </section>
+    </>
   );
 }
 
