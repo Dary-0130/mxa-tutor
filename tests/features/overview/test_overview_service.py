@@ -4,6 +4,7 @@ import copy
 from typing import Any
 
 import pytest
+from loguru import logger
 
 from core.domain.exceptions import (
     LLMAuthError,
@@ -54,6 +55,45 @@ class NoopChunkingService:
         return 0
 
 
+class TrackingOverviewCache(InMemoryOverviewCache):
+    def __init__(self) -> None:
+        super().__init__()
+        self.put_calls = 0
+
+    async def put(self, project_id: str, overview: ProjectOverview) -> None:
+        self.put_calls += 1
+        await super().put(project_id, overview)
+
+
+class SequenceOverviewProviderFake:
+    def __init__(self, *items: Any, on_call: Any | None = None) -> None:
+        self.items = list(items)
+        self.on_call = on_call
+        self.calls = 0
+        self.kwargs = {}
+
+    def chat(
+        self,
+        messages: list[Any],
+        json_mode: bool = False,
+        timeout: float = 30.0,
+        max_tokens: int | None = None,
+    ) -> Any:
+        self.calls += 1
+        self.kwargs = {
+            "messages": messages,
+            "json_mode": json_mode,
+            "timeout": timeout,
+            "max_tokens": max_tokens,
+        }
+        if self.on_call is not None:
+            self.on_call(self.calls)
+        item = self.items[self.calls - 1]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
 def _service(project: Any, response: Any) -> ProjectOverviewService:
     builder = OverviewBuilderFake(make_overview_graph())
     return ProjectOverviewService(
@@ -66,11 +106,39 @@ def _service(project: Any, response: Any) -> ProjectOverviewService:
     )
 
 
+def _service_with_cache(
+    project: Any,
+    provider: Any,
+    cache: TrackingOverviewCache,
+) -> ProjectOverviewService:
+    builder = OverviewBuilderFake(make_overview_graph())
+    return ProjectOverviewService(
+        OverviewStoreFake(project),
+        cache,
+        OverviewResolverFake(),
+        provider,
+        chunking_service=NoopChunkingService(),
+        graph_builder_factory=lambda: builder,
+    )
+
+
 def _parse(project: Any, payload: dict[str, Any] | str) -> ProjectOverview:
     return _service(
         project,
         make_overview_response(make_overview_payload()),
     )._parse_and_validate(make_overview_response(payload), project)
+
+
+def _invalid_citation_payload() -> dict[str, Any]:
+    payload = copy.deepcopy(make_overview_payload())
+    payload["evidence"][0]["file_path"] = "missing.m"
+    return payload
+
+
+def _capture_log_messages() -> tuple[list[str], int]:
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    return messages, sink_id
 
 
 @pytest.fixture
@@ -159,6 +227,99 @@ async def test_get_or_generate_passes_llm_errors_through(
 
     with pytest.raises(error_type):
         await service.get_or_generate("p1")
+
+
+@pytest.mark.asyncio
+async def test_citation_retry_first_attempt_success(project: Any) -> None:
+    cache = TrackingOverviewCache()
+    provider = SequenceOverviewProviderFake(make_overview_response(make_overview_payload()))
+    service = _service_with_cache(project, provider, cache)
+
+    overview = await service.get_or_generate("p1")
+
+    assert overview.project_title == "Buck 控制"
+    assert provider.calls == 1
+    assert cache.put_calls == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["invalid_json_then_success", "invalid_citation_then_success"],
+)
+@pytest.mark.asyncio
+async def test_citation_retry_second_attempt_success(case: str, project: Any) -> None:
+    cache = TrackingOverviewCache()
+
+    def _assert_cache_clean(call_number: int) -> None:
+        if call_number == 2:
+            assert cache.put_calls == 0
+
+    first_payload: dict[str, Any] | str
+    if case == "invalid_json_then_success":
+        first_payload = "not json"
+    else:
+        first_payload = _invalid_citation_payload()
+
+    provider = SequenceOverviewProviderFake(
+        make_overview_response(first_payload),
+        make_overview_response(make_overview_payload()),
+        on_call=_assert_cache_clean,
+    )
+    service = _service_with_cache(project, provider, cache)
+    messages, sink_id = _capture_log_messages()
+    try:
+        overview = await service.get_or_generate("p1")
+    finally:
+        logger.remove(sink_id)
+
+    assert overview.project_title == "Buck 控制"
+    assert provider.calls == 2
+    assert cache.put_calls == 1
+    assert any(
+        "Overview citation retry succeeded: project_id=p1 attempt=2/3" in m for m in messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_citation_retry_exhausted(project: Any) -> None:
+    cache = TrackingOverviewCache()
+    provider = SequenceOverviewProviderFake(
+        make_overview_response("not json"),
+        make_overview_response("not json"),
+        make_overview_response("not json"),
+    )
+    service = _service_with_cache(project, provider, cache)
+    messages, sink_id = _capture_log_messages()
+    try:
+        with pytest.raises(OverviewGenerationError):
+            await service.get_or_generate("p1")
+    finally:
+        logger.remove(sink_id)
+
+    assert provider.calls == 3
+    assert cache.put_calls == 0
+    assert any(
+        "Overview citation validation failed: project_id=p1 attempt=3/3 "
+        "error_type=OverviewGenerationError" in m
+        for m in messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_citation_retry_supplier_error_passthrough(project: Any) -> None:
+    cache = TrackingOverviewCache()
+    provider = SequenceOverviewProviderFake(LLMTimeoutError("timeout"))
+    service = _service_with_cache(project, provider, cache)
+    messages, sink_id = _capture_log_messages()
+    try:
+        with pytest.raises(LLMTimeoutError):
+            await service.get_or_generate("p1")
+    finally:
+        logger.remove(sink_id)
+
+    assert provider.calls == 1
+    assert cache.put_calls == 0
+    assert not any("Overview citation" in m for m in messages)
 
 
 @pytest.mark.parametrize("text", ["not json", '{"project_title": "only one"}'])
