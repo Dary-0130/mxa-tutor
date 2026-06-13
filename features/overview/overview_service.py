@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from core.domain.exceptions import OverviewGenerationError
 from core.domain.project import Project
 from core.domain.project_graph import ProjectGraph
-from core.interfaces.llm_provider import LLMResponse, TextProvider
+from core.interfaces.llm_provider import LLMMessage, LLMResponse, TextProvider
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
 from features.chunking import ChunkingService
@@ -27,6 +27,7 @@ from .project_graph_builder import ProjectGraphBuilder
 
 DEFAULT_OVERVIEW_TIMEOUT_SECONDS = 60.0
 DEFAULT_OVERVIEW_MAX_TOKENS = 4000
+DEFAULT_CITATION_MAX_ATTEMPTS = 3
 
 
 class ProjectGraphBuilderLike(Protocol):
@@ -48,7 +49,10 @@ class ProjectOverviewService:
         graph_builder_factory: Callable[[], ProjectGraphBuilderLike] | None = None,
         timeout: float = DEFAULT_OVERVIEW_TIMEOUT_SECONDS,
         max_tokens: int = DEFAULT_OVERVIEW_MAX_TOKENS,
+        citation_max_attempts: int = DEFAULT_CITATION_MAX_ATTEMPTS,
     ) -> None:
+        if citation_max_attempts < 1:
+            raise ValueError("citation_max_attempts must be >= 1")
         self._store = store
         self._cache = cache
         self._project_type_resolver = project_type_resolver
@@ -57,6 +61,7 @@ class ProjectOverviewService:
         self._graph_builder_factory = graph_builder_factory or ProjectGraphBuilder
         self._timeout = timeout
         self._max_tokens = max_tokens
+        self._citation_max_attempts = citation_max_attempts
 
     async def get_or_generate(self, project_id: str) -> ProjectOverview:
         """Return cached overview or generate a fresh one."""
@@ -83,14 +88,7 @@ class ProjectOverviewService:
             project_id,
             template.version,
         )
-        response = await asyncio.to_thread(
-            self._text_provider.chat,
-            messages,
-            json_mode=True,
-            timeout=self._timeout,
-            max_tokens=self._max_tokens,
-        )
-        overview = self._parse_and_validate(response, project)
+        overview = await self._generate_overview_with_citation_retry(project_id, messages, project)
         await self._cache.put(project_id, overview)
         try:
             await self._chunking_service.build_embed_store_overview_chunk(overview, project_id)
@@ -105,6 +103,43 @@ class ProjectOverviewService:
     def _build_graph_sync(self, project: Project) -> ProjectGraph:
         builder = self._graph_builder_factory()
         return builder.build(project)
+
+    async def _generate_overview_with_citation_retry(
+        self, project_id: str, messages: list[LLMMessage], project: Project
+    ) -> ProjectOverview:
+        for attempt in range(1, self._citation_max_attempts + 1):
+            response = await asyncio.to_thread(
+                self._text_provider.chat,
+                messages,
+                json_mode=True,
+                timeout=self._timeout,
+                max_tokens=self._max_tokens,
+            )
+            try:
+                overview = self._parse_and_validate(response, project)
+            except OverviewGenerationError as exc:
+                logger.info(
+                    "Overview citation validation failed: "
+                    "project_id={} attempt={}/{} error_type={}",
+                    project_id,
+                    attempt,
+                    self._citation_max_attempts,
+                    type(exc).__name__,
+                )
+                if attempt >= self._citation_max_attempts:
+                    raise
+                continue
+
+            if attempt > 1:
+                logger.info(
+                    "Overview citation retry succeeded: project_id={} attempt={}/{}",
+                    project_id,
+                    attempt,
+                    self._citation_max_attempts,
+                )
+            return overview
+
+        raise RuntimeError("unreachable")
 
     def _parse_and_validate(self, response: LLMResponse, project: Project) -> ProjectOverview:
         try:
