@@ -26,7 +26,7 @@ export function ChatInputBar({
   }
 
   return (
-    <footer className="border-t-2 border-[var(--color-rebar)] bg-[var(--color-concrete)] px-4 py-4">
+    <footer className="border-t-2 border-[var(--color-rebar)] bg-[var(--color-concrete)]/70 px-4 py-4 backdrop-blur-md">
       <div className="mx-auto grid max-w-6xl gap-3">
         <label className="sr-only" htmlFor="chat-input">
           输入问题
