@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from features.overview.overview_schemas import ProjectOverview
+    from core.domain.project_overview import ProjectOverview
 
 
 class OverviewCache(ABC):
