@@ -6,9 +6,9 @@ import re
 from dataclasses import asdict
 from typing import Literal
 
+from core.domain.project_overview import ProjectOverview
 from core.domain.slx_model import SlxBlock, SlxLine, SlxModel
 from core.domain.source_ref import SourceRef
-from features.overview.overview_schemas import ProjectOverview
 
 from ._evidence_pack import (
     EndpointRef,

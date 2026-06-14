@@ -7,9 +7,9 @@ from typing import Final
 from core.domain.m_file import MFile, MFunction
 from core.domain.mat_metadata import MatMetadata, MatVariable
 from core.domain.project import FileInfo
+from core.domain.project_overview import ProjectOverview
 from core.domain.slx_model import SlxBlock, SlxModel
 from core.domain.teaching_unit import TeachingUnit
-from features.overview.overview_schemas import ProjectOverview
 
 from ._c_source_splitter import CSourceSection
 from ._h_source_splitter import HSourceSection

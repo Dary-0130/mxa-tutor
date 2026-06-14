@@ -11,9 +11,9 @@ from loguru import logger
 from app.config import AppSettings
 from core.domain.project import Project
 from core.domain.project_graph import ProjectGraph
+from core.domain.project_overview import ProjectOverview
 from core.interfaces.embedder import EmbeddingProvider
 from core.interfaces.vector_store import ChunkRecord, VectorStore
-from features.overview.overview_schemas import ProjectOverview
 
 from . import _overview_chunker, _project_chunker
 from ._chunk_draft import ChunkDraft

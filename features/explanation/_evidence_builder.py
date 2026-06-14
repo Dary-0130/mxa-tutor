@@ -6,9 +6,9 @@ from core.domain.m_file import MFile
 from core.domain.mat_metadata import MatMetadata
 from core.domain.project import Project
 from core.domain.project_graph import ProjectGraph
+from core.domain.project_overview import ProjectOverview
 from core.domain.slx_model import SlxLine, SlxModel
 from core.domain.source_ref import SourceRef
-from features.overview.overview_schemas import ProjectOverview
 
 from ._evidence_helpers import (
     block_index,
