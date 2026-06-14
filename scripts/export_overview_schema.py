@@ -26,14 +26,14 @@ import json
 import sys
 from pathlib import Path
 
-from features.overview.overview_schemas import ProjectOverview
+from features.overview.overview_schemas import ProjectOverviewSchema
 
 OUTPUT_PATH = Path("schemas") / "project_overview.schema.json"
 
 
 def main() -> int:
     """Export the current ProjectOverview JSON Schema."""
-    schema = ProjectOverview.model_json_schema()
+    schema = ProjectOverviewSchema.model_json_schema()
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_bytes(
         (json.dumps(schema, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
