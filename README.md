@@ -2,6 +2,32 @@
 
 不是从零学 MATLAB,而是把你手上的工程讲明白。拖一个工程进来,带你看懂、问答到底。
 
+## 开发环境对齐
+
+本项目 Python 环境必须用 conda 的 **mxa** env(Python 3.11),其他 Python 版本(3.13)numpy 1.26 wheel 缺失会导致 install fail。
+
+```powershell
+# 新机器首次设置(若 mxa env 不存在)
+conda create -n mxa python=3.11
+conda activate mxa
+pip install -r requirements.txt -r requirements-dev.txt
+
+# 日常激活(已有 mxa env)
+conda activate mxa
+pytest                          # 或 python -m pytest
+```
+
+**关键依赖锁定真值**(2026-06-14 TASK-310 Stage 0 实测):
+
+- Python 3.11.15
+- numpy 1.26.4
+- sentence_transformers 3.3.0
+- pytest 8.3.3
+
+**注**:本机 Anaconda base / app / py13 env 均 Python 3.13,sentence_transformers 装得上但 numpy 1.26.x 在 3.13 无 wheel,会触发源码 build → 缺 C 编译器 → fail。**必须用 mxa env**。
+
+未来归档计划(X10 候选):新增 `environment.yml`(conda 一键复刻)+ `Makefile` pytest 路径统一 + `.python-version`(pyenv 标准)。
+
 ## 快速启动
 
 1. 克隆仓库:
