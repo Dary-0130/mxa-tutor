@@ -119,7 +119,7 @@ P2 v0.1 不承诺:
 | TASK-205 | **粗 RAG 问答 API(关键词 + metadata 检索)** ⭐ | ✅ | Codex | 203, 204 |
 | TASK-206 | 错误处理 + 中文化 | ✅ | Codex | 201-205 |
 | TASK-207 | **ProjectOverview Schema + 教学输出契约** ⭐ | ✅ | Codex | 203 |
-| TASK-208 | **chat citations payload 净化(file_path 相对化 + line_range 透传)** ⭐ | 🔲 | Codex | 204, 303, 304 |
+| TASK-208 | **chat citations payload 净化(file_path 相对化 + line_range 透传)** ⭐ | ✅ | Codex | 204, 303, 304 |
 | TASK-209 | 完整版工程上传 + .c/.h 入 chunker + 完整版 v7 评测 | ✅ | Codex | 202, 303, 304 |
 
 ### Week 2 验收
@@ -338,20 +338,20 @@ P2 v0.1 不承诺:
 ```
 Week 0:  [✅✅✅⬜]              3/4
 Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
-Week 2:  [✅✅✅✅✅✅✅✅🔲]      8/9  (含 TASK-207 / TASK-208 立项 / TASK-209)
+Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅]  7/8
 Week 4:  [✅✅✅⬜⬜⬜]           3/6
 
-总计: 29/34
+总计: 30/34
 ```
 
 ---
 
 ## 下一步
 
-**当前状态**:**TASK-403 v0.4 + chore PR 双完工**(2026-06-13;TASK-403 v0.4 chat 页背景复用 PanoramaScene,commit 3bfa496 / #85;决策 12 v0.3.2 → v0.4 升仪 + 03 索引同步 + TASK-208 立项,本档 chore PR)。Week 4 主线剩 **TASK-404 激活码 / TASK-405 部署 / TASK-406 内测**;Week 2 新立 **TASK-208 chat citations payload 净化**(填补 207 → 209 跳号洞;由 PM DevTools 实测 chat answer JSON 抓 file_path 暴露服务器绝对路径 + line_range null 触发)。**项目级里程碑**:决策 12 升 v0.4(R5.1 入仓模式起稿粒度 / R6.2 派单 prompt 自身一致性 grep / R7.2 R7.1 字面工艺纪律深化;§ 7.1.3 PM 救场密度反思立 KPI 12 起稿粒度自查清单;§ 4.1 #6 反思结论:守门救场工艺有效但不充分,继续累积观察);Codex 工艺正向累积 9 次(本任 +1:TASK-403 v0.4 Codex 主动声明实测局限性);**PM 救场架构师 5 次,触发独立阈值 ≥ 5,项目首次单任 +4 异常密度**(本任 +4:TASK-407 误编号 / git mv 入仓决议 / "PM 保存到 D 盘" 冗余拦截 / 本档 DevTools 端点路径凭印象拦截)。
+**当前状态**:**TASK-208 v0.1.1 + chore PR 双完工**(2026-06-14;TASK-208 chat citations file_path 相对化,5 类文件型 chunk 三处同源 sanitize,squash commit `75d7514` / #87;反例累积同步 + 03 索引 TASK-208 ✅,本档 chore PR)。Week 4 主线剩 **TASK-404 激活码 / TASK-405 部署 / TASK-406 内测**;Week 2 完工(8/9 → 9/9,30/34)。**项目级里程碑**:TASK-208 经 GPT R0 conditional pass + 19 条全采纳 → GPT R1 conditional pass + 11 条全采纳 → Codex 完工 23 passed 0 skip → PM 真启动验收 fresh data PASS,**双 AI 互审 + Codex 实测 + PM 真启动 工艺协议正常工作**;**决策 12 沿用 v0.4 不升 v0.5**(§ 4.1.1 反思结论沿用:守门救场工艺有效但不充分,继续累积观察);Codex 工艺正向累积 13 次(本任 +4:chore PR #86 阶段 grep -c TASK-208 期望值凭印象 / P1.1.1 Stage 0 抓 chunk_record 表不存在 / P1.1.2 主动声明采样偏差 / Codex 完工主动声明 sentence_transformers 环境异常);PM 救场架构师 +1(累积 6,本任"看不懂"救场架构师 6 项决策清单冗余违反 PM "默认推荐一条"偏好)。**留 X2 观察任务**(本任未完成):待 m_function 召回出现的 chat 样本 → PM 实测 line_range 是否丢失;若丢失起 B2 修复;若无明确证据 X2 长期 reserved。
 
-**决策 09 反例库**:75 → **90**(本任 TASK-403 v0.4 + chore 累积 +15:K_28a 27→33 +6 / K_28b 3→4 +1 / K_30 14→20 +6 / K_36 2→4 +2)。**K 总(剔除救场)= 69 ≥ 15**(决策 12 v0.4 数据);**已立项 K 类**:K_28a / K_28b / K_30 / K_31 / K_34 / K_36 + **Codex 守门救场(累积 9,§ 4.1 #6 反思结论 — 工艺规则有效但不充分)** / **PM 救场架构师(累积 5,触发独立阈值 ≥ 5,§ 7.1.3 反思立 KPI 12)**。
+**决策 09 反例库**:90 → **108**(本任 TASK-208 累积 +18:K_28a 33→36 +3 / K_30 20→23 +3 / K_34 6→9 +3 / K_36 4→13 +9)。**K 总(剔除救场)= 87 ≥ 15**(本任 +18);**已立项 K 类**:K_28a / K_28b / K_30 / K_31 / K_34 / K_36 + **Codex 守门救场(累积 13,§ 4.1.1 反思结论沿用)** / **PM 救场架构师(累积 6,沿用触发独立阈值 ≥ 5)**。
 
 ---
 
