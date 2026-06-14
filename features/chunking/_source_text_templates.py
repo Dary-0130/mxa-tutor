@@ -46,7 +46,9 @@ def build_m_file_source_text(
     m_file: MFile,
     description_max: int,
     section_count: int = 0,
+    public_file_path: str | None = None,
 ) -> str:
+    file_path = public_file_path or file_info.relative_path
     desc = _truncate_field(_collapse_whitespace(file_info.description or ""), description_max)
     if m_file.functions:
         body = f"含 {len(m_file.functions)} 个函数"
@@ -54,10 +56,7 @@ def build_m_file_source_text(
         body = f"含 {section_count} 段赋值"
     else:
         body = "无函数无赋值"
-    return (
-        f"文件 {file_info.relative_path},类型 {file_info.file_type},"
-        f"角色 {m_file.file_role},{body}。{desc}"
-    )
+    return f"文件 {file_path},类型 {file_info.file_type}," f"角色 {m_file.file_role},{body}。{desc}"
 
 
 def build_m_script_section_source_text(
@@ -68,27 +67,25 @@ def build_m_script_section_source_text(
     section_title: str,
     section_code: str,
     code_max: int,
+    public_file_path: str | None = None,
 ) -> str:
     """Build source_text for a single script section chunk."""
     _ = m_file
+    file_path = public_file_path or file_info.relative_path
     title_part = f"标题 {section_title}" if section_title else ""
     code = _truncate_field(section_code, code_max)
-    return (
-        f"脚本 {file_info.relative_path} 第 {section_index} 段(共 {section_total} 段){title_part}\n"
-        f"{code}"
-    )
+    return f"脚本 {file_path} 第 {section_index} 段(共 {section_total} 段){title_part}\n" f"{code}"
 
 
 def build_m_function_source_text(
     m_file: MFile,
     func: MFunction,
     docstring_max: int,
+    public_file_path: str | None = None,
 ) -> str:
+    file_path = public_file_path or m_file.file_path
     doc = _truncate_field(_collapse_whitespace(func.docstring or ""), docstring_max)
-    return (
-        f"函数 {func.name} 位于 {m_file.file_path},"
-        f"输入 {func.inputs},输出 {func.outputs}。{doc}"
-    )
+    return f"函数 {func.name} 位于 {file_path}," f"输入 {func.inputs},输出 {func.outputs}。{doc}"
 
 
 def build_slx_block_source_text(
@@ -99,7 +96,9 @@ def build_slx_block_source_text(
     *,
     params_override: dict[str, str] | None = None,
     workspace_literals: dict[str, str] | None = None,
+    public_file_path: str | None = None,
 ) -> str:
+    file_path = public_file_path or model.file_path
     parent = block.parent_subsystem or "顶层"
     params = params_override if params_override is not None else block.parameters
     sorted_items = sorted(params.items())[:max_params]
@@ -127,7 +126,7 @@ def build_slx_block_source_text(
         flags.append("masked")
     flag_text = f",标记 {'/'.join(flags)}" if flags else ""
     return (
-        f"Block {block.name}({block.block_type}) 位于 {model.file_path}/{parent},"
+        f"Block {block.name}({block.block_type}) 位于 {file_path}/{parent},"
         f"参数 {params_str}{flag_text}"
     )
 
@@ -138,20 +137,25 @@ def build_slx_subsystem_source_text(
     child_block_ids: list[str],
     block_id_to_name: dict[str, str],
     top_n: int,
+    public_file_path: str | None = None,
 ) -> str:
+    file_path = public_file_path or model.file_path
     names = [block_id_to_name[bid] for bid in child_block_ids[:top_n] if bid in block_id_to_name]
     suffix = f"等 {len(child_block_ids)} 个" if len(child_block_ids) > top_n else ""
     return (
-        f"子系统 {subsystem_name} 在 {model.file_path} 内,"
+        f"子系统 {subsystem_name} 在 {file_path} 内,"
         f"包含 {len(child_block_ids)} 个 block。子 block:{','.join(names)}{suffix}"
     )
 
 
-def build_mat_variable_source_text(mat: MatMetadata, var: MatVariable) -> str:
+def build_mat_variable_source_text(
+    mat: MatMetadata,
+    var: MatVariable,
+    public_file_path: str | None = None,
+) -> str:
+    file_path = public_file_path or mat.file_path
     role_suffix = f",角色 {var.likely_role}" if var.likely_role else ""
-    return (
-        f"变量 {var.name} 在 {mat.file_path} 中,类型 {var.var_type},shape {var.shape}{role_suffix}"
-    )
+    return f"变量 {var.name} 在 {file_path} 中,类型 {var.var_type},shape {var.shape}{role_suffix}"
 
 
 def build_c_source_text(

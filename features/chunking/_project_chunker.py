@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Final, NamedTuple
 
 from loguru import logger
 
 from app.config import AppSettings
+from core.domain.file_paths import is_public_file_path
 from core.domain.project import FileInfo, Project
 from core.domain.project_graph import ProjectGraph
 from core.domain.slx_model import SlxBlock, SlxModel
@@ -74,6 +76,7 @@ class _SlxBlockCandidate(NamedTuple):
     model: SlxModel
     block: SlxBlock
     meaningful: dict[str, str]
+    public_file_path: str
     group_key: _GroupKey
 
 
@@ -175,15 +178,13 @@ def build_drafts(project: Project, graph: ProjectGraph, settings: AppSettings) -
 def _build_m_file_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
     from ._m_script_parser import split_m_script
 
-    files_by_path = {_normalize_path(info.relative_path): info for info in project.files}
+    file_info_by_path = {_normalize_path(info.relative_path): info for info in project.files}
     drafts: list[ChunkDraft] = []
     for m_file in project.m_files:
-        file_info = _find_file_info(files_by_path, m_file.file_path)
-        if file_info is None:
-            logger.warning(
-                "m_file_chunk_skipped: project_id={} reason=missing_file_info", project.id
-            )
+        public_file_path = _public_path_or_log(project, "m_file", m_file.file_path)
+        if public_file_path is None:
             continue
+        file_info = file_info_by_path[public_file_path]
         section_count = 0
         if not m_file.functions and m_file.raw_code:
             sections = split_m_script(m_file.raw_code, settings.chunking_max_chunks_per_m_script)
@@ -193,13 +194,14 @@ def _build_m_file_drafts(project: Project, settings: AppSettings) -> list[ChunkD
             m_file,
             description_max=settings.chunking_description_max_chars,
             section_count=section_count,
+            public_file_path=public_file_path,
         )
         drafts.append(
             ChunkDraft(
-                chunk_id=make_chunk_id(project.id, "m_file", m_file.file_path),
+                chunk_id=make_chunk_id(project.id, "m_file", public_file_path),
                 project_id=project.id,
                 source_type="m_file",
-                file_path=m_file.file_path,
+                file_path=public_file_path,
                 symbol_name=None,
                 line_range=None,
                 block_id=None,
@@ -215,15 +217,16 @@ def _build_m_file_drafts(project: Project, settings: AppSettings) -> list[ChunkD
 def _build_m_script_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
     from ._m_script_parser import split_m_script
 
-    files_by_path = {_normalize_path(info.relative_path): info for info in project.files}
+    file_info_by_path = {_normalize_path(info.relative_path): info for info in project.files}
     drafts: list[ChunkDraft] = []
     for m_file in project.m_files:
         if m_file.functions or not m_file.raw_code:
             continue
 
-        file_info = _find_file_info(files_by_path, m_file.file_path)
-        if file_info is None:
+        public_file_path = _public_path_or_log(project, "m_file", m_file.file_path)
+        if public_file_path is None:
             continue
+        file_info = file_info_by_path[public_file_path]
 
         sections = split_m_script(m_file.raw_code, settings.chunking_max_chunks_per_m_script)
         total = len(sections)
@@ -241,15 +244,19 @@ def _build_m_script_drafts(project: Project, settings: AppSettings) -> list[Chun
                 section_title=section.title,
                 section_code=section.code,
                 code_max=settings.chunking_max_source_text_chars,
+                public_file_path=public_file_path,
             )
             drafts.append(
                 ChunkDraft(
                     chunk_id=make_chunk_id(
-                        project.id, "m_file", m_file.file_path, f"section_{section.index}"
+                        project.id,
+                        "m_file",
+                        public_file_path,
+                        f"section_{section.index}",
                     ),
                     project_id=project.id,
                     source_type="m_file",
-                    file_path=m_file.file_path,
+                    file_path=public_file_path,
                     symbol_name=section.title if section.title else f"section_{section.index}",
                     line_range=None,
                     block_id=None,
@@ -265,18 +272,24 @@ def _build_m_script_drafts(project: Project, settings: AppSettings) -> list[Chun
 def _build_m_function_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
     drafts: list[ChunkDraft] = []
     for m_file in project.m_files:
+        if not m_file.functions:
+            continue
+        public_file_path = _public_path_or_log(project, "m_function", m_file.file_path)
+        if public_file_path is None:
+            continue
         for func in m_file.functions:
             raw = build_m_function_source_text(
                 m_file,
                 func,
                 docstring_max=settings.chunking_docstring_max_chars,
+                public_file_path=public_file_path,
             )
             drafts.append(
                 ChunkDraft(
-                    chunk_id=make_chunk_id(project.id, "m_function", m_file.file_path, func.name),
+                    chunk_id=make_chunk_id(project.id, "m_function", public_file_path, func.name),
                     project_id=project.id,
                     source_type="m_function",
-                    file_path=m_file.file_path,
+                    file_path=public_file_path,
                     symbol_name=func.name,
                     line_range=func.line_range,
                     block_id=None,
@@ -293,6 +306,9 @@ def _build_slx_block_drafts(project: Project, settings: AppSettings) -> list[Chu
     workspace_literals = extract_workspace_literals(project.m_files)
     candidates: list[_SlxBlockCandidate] = []
     for model in project.slx_models:
+        public_file_path = _compute_public_file_path(model.file_path, project.files)
+        if public_file_path is None and is_public_file_path(_normalize_path(model.file_path)):
+            public_file_path = _normalize_path(model.file_path)
         for block in model.blocks:
             if _should_drop_block(block.block_type):
                 continue
@@ -300,14 +316,18 @@ def _build_slx_block_drafts(project: Project, settings: AppSettings) -> list[Chu
             meaningful = _meaningful_params(block.parameters)
             if not _has_block_engineering_value(block, meaningful):
                 continue
+            if public_file_path is None:
+                _log_public_path_unresolved(project, "slx_block", model.file_path)
+                break
 
             candidates.append(
                 _SlxBlockCandidate(
                     model=model,
                     block=block,
                     meaningful=meaningful,
+                    public_file_path=public_file_path,
                     group_key=_group_key(
-                        model.file_path,
+                        public_file_path,
                         block.parent_subsystem,
                         block.block_type,
                         meaningful,
@@ -342,14 +362,15 @@ def _build_slx_block_draft(
         max_params=settings.chunking_max_params_per_block,
         params_override=candidate.meaningful,
         workspace_literals=workspace_literals,
+        public_file_path=candidate.public_file_path,
     )
     return ChunkDraft(
         chunk_id=make_chunk_id(
-            project.id, "slx_block", candidate.model.file_path, candidate.block.block_id
+            project.id, "slx_block", candidate.public_file_path, candidate.block.block_id
         ),
         project_id=project.id,
         source_type="slx_block",
-        file_path=candidate.model.file_path,
+        file_path=candidate.public_file_path,
         symbol_name=candidate.block.name,
         line_range=None,
         block_id=candidate.block.block_id,
@@ -375,6 +396,7 @@ def _build_merged_slx_block_draft(
         max_params=settings.chunking_max_params_per_block,
         params_override=representative.meaningful,
         workspace_literals=workspace_literals,
+        public_file_path=representative.public_file_path,
     )
     raw = (
         f"{raw},合并同参数重复 block 总数 {len(group)},"
@@ -384,12 +406,12 @@ def _build_merged_slx_block_draft(
         chunk_id=make_chunk_id(
             project.id,
             "slx_block",
-            representative.model.file_path,
+            representative.public_file_path,
             representative.block.block_id,
         ),
         project_id=project.id,
         source_type="slx_block",
-        file_path=representative.model.file_path,
+        file_path=representative.public_file_path,
         symbol_name=representative.block.name,
         line_range=None,
         block_id=representative.block.block_id,
@@ -403,6 +425,14 @@ def _build_merged_slx_block_draft(
 def _build_slx_subsystem_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
     drafts: list[ChunkDraft] = []
     for model in project.slx_models:
+        if not model.subsystems:
+            continue
+        public_file_path = _compute_public_file_path(model.file_path, project.files)
+        if public_file_path is None and is_public_file_path(_normalize_path(model.file_path)):
+            public_file_path = _normalize_path(model.file_path)
+        if public_file_path is None:
+            _log_public_path_unresolved(project, "slx_subsystem", model.file_path)
+            continue
         block_id_to_name = {block.block_id: block.name for block in model.blocks}
         for subsystem_name, child_block_ids in model.subsystems.items():
             raw = build_slx_subsystem_source_text(
@@ -411,15 +441,16 @@ def _build_slx_subsystem_drafts(project: Project, settings: AppSettings) -> list
                 child_block_ids,
                 block_id_to_name,
                 settings.chunking_max_subsystem_child_block_names,
+                public_file_path=public_file_path,
             )
             drafts.append(
                 ChunkDraft(
                     chunk_id=make_chunk_id(
-                        project.id, "slx_subsystem", model.file_path, subsystem_name
+                        project.id, "slx_subsystem", public_file_path, subsystem_name
                     ),
                     project_id=project.id,
                     source_type="slx_subsystem",
-                    file_path=model.file_path,
+                    file_path=public_file_path,
                     symbol_name=subsystem_name,
                     line_range=None,
                     block_id=None,
@@ -435,14 +466,23 @@ def _build_slx_subsystem_drafts(project: Project, settings: AppSettings) -> list
 def _build_mat_variable_drafts(project: Project, settings: AppSettings) -> list[ChunkDraft]:
     drafts: list[ChunkDraft] = []
     for mat in project.mat_files:
+        if not mat.variables:
+            continue
+        public_file_path = _public_path_or_log(project, "mat_variable", mat.file_path)
+        if public_file_path is None:
+            continue
         for var in mat.variables:
-            raw = build_mat_variable_source_text(mat, var)
+            raw = build_mat_variable_source_text(
+                mat,
+                var,
+                public_file_path=public_file_path,
+            )
             drafts.append(
                 ChunkDraft(
-                    chunk_id=make_chunk_id(project.id, "mat_variable", mat.file_path, var.name),
+                    chunk_id=make_chunk_id(project.id, "mat_variable", public_file_path, var.name),
                     project_id=project.id,
                     source_type="mat_variable",
-                    file_path=mat.file_path,
+                    file_path=public_file_path,
                     symbol_name=var.name,
                     line_range=None,
                     block_id=None,
@@ -554,13 +594,37 @@ def _read_source_text(path: Path) -> str | None:
     return None
 
 
-def _find_file_info(files_by_path: dict[str, FileInfo], file_path: str) -> FileInfo | None:
-    normalized = _normalize_path(file_path)
-    if normalized in files_by_path:
-        return files_by_path[normalized]
-    matches = [info for path, info in files_by_path.items() if normalized.endswith(f"/{path}")]
-    return matches[0] if len(matches) == 1 else None
+def _compute_public_file_path(raw_path: str, project_files: Iterable[FileInfo]) -> str | None:
+    project_files = tuple(project_files)
+    matches = _public_path_matches(raw_path, project_files)
+    return matches[0] if len(matches) == 1 and is_public_file_path(matches[0]) else None
+
+
+def _public_path_or_log(project: Project, source_type: str, raw_path: str) -> str | None:
+    public_path = _compute_public_file_path(raw_path, project.files)
+    if public_path is None:
+        _log_public_path_unresolved(project, source_type, raw_path)
+    return public_path
+
+
+def _public_path_matches(raw_path: str, project_files: Iterable[FileInfo]) -> list[str]:
+    normalized = _normalize_path(raw_path)
+    public_paths = [_normalize_path(info.relative_path) for info in project_files]
+    exact = [path for path in public_paths if path == normalized]
+    if exact:
+        return exact
+    return [path for path in public_paths if normalized.endswith(f"/{path}")]
+
+
+def _log_public_path_unresolved(project: Project, source_type: str, raw_path: str) -> None:
+    match_count = len(_public_path_matches(raw_path, project.files))
+    logger.bind(
+        project_id=project.id,
+        source_type=source_type,
+        match_count=match_count,
+        reason="no_match" if match_count == 0 else "ambiguous",
+    ).warning("chunk_skipped_public_path_unresolved")
 
 
 def _normalize_path(path: str) -> str:
-    return str(PurePosixPath(path.replace("\\", "/"))).lstrip("./").rstrip("/")
+    return str(PurePosixPath(path.replace("\\", "/"))).rstrip("/").removeprefix("./")
