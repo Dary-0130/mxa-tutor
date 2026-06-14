@@ -8,7 +8,7 @@ import pytest
 from features.overview import InMemoryOverviewCache, OverviewCache
 
 if TYPE_CHECKING:
-    from features.overview.overview_schemas import ProjectOverview
+    from core.domain.project_overview import ProjectOverview
 
 
 def _overview(title: str = "demo") -> Any:

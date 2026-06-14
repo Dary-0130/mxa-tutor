@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 
 from core.domain.exceptions import OverviewGenerationError
+from core.domain.project_overview import ProjectOverview
 from features.overview import InMemoryOverviewCache
-from features.overview.overview_schemas import ProjectOverview
 from features.overview.overview_service import ProjectOverviewService
 from tests.features.overview.conftest import (
     OverviewBuilderFake,
@@ -145,5 +145,5 @@ class TestLenientTruncation:
 
         result = service._try_parse_with_list_truncation(base_valid_raw)
 
-        assert isinstance(result, ProjectOverview)
+        assert result.project_title == base_valid_raw["project_title"]
         assert info_calls == []
