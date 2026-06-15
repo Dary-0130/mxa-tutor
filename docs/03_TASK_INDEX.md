@@ -184,6 +184,7 @@ P2 v0.1 不承诺:
 | TASK-306 | 评测脚本 + 评测集运行 | ⏸ | Codex + PM | 304 |
 | TASK-307 | **Evidence Citation Enforcer(证据引用强制器)** ⭐ | ✅ | Codex | 304 |
 | TASK-308 | Simulation Explanation Pack(EvidenceBuilder + 讲解产物链) | ✅ | Codex + PM | 303, 307 |
+| TASK-310 | 架构债重构(ProjectOverview contract relocation + TeachingUnit 最小闭环) | ✅ | Codex | 203, 207, 308 |
 
 ### Week 3 验收
 
@@ -339,21 +340,41 @@ P2 v0.1 不承诺:
 Week 0:  [✅✅✅⬜]              3/4
 Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
-Week 3:  [✅✅✅✅✅✅⏸✅]  7/8
+Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⬜⬜⬜]           3/6
 
-总计: 30/34
+总计: 31/35
 ```
 
 ---
 
 ## 下一步
 
-**当前状态**:**TASK-208 v0.1.1 + chore PR 双完工**(2026-06-14;TASK-208 chat citations file_path 相对化,5 类文件型 chunk 三处同源 sanitize,squash commit `75d7514` / #87;反例累积同步 + 03 索引 TASK-208 ✅,本档 chore PR)。Week 4 主线剩 **TASK-404 激活码 / TASK-405 部署 / TASK-406 内测**;Week 2 完工(8/9 → 9/9,30/34)。**项目级里程碑**:TASK-208 经 GPT R0 conditional pass + 19 条全采纳 → GPT R1 conditional pass + 11 条全采纳 → Codex 完工 23 passed 0 skip → PM 真启动验收 fresh data PASS,**双 AI 互审 + Codex 实测 + PM 真启动 工艺协议正常工作**;**决策 12 沿用 v0.4 不升 v0.5**(§ 4.1.1 反思结论沿用:守门救场工艺有效但不充分,继续累积观察);Codex 工艺正向累积 13 次(本任 +4:chore PR #86 阶段 grep -c TASK-208 期望值凭印象 / P1.1.1 Stage 0 抓 chunk_record 表不存在 / P1.1.2 主动声明采样偏差 / Codex 完工主动声明 sentence_transformers 环境异常);PM 救场架构师 +1(累积 6,本任"看不懂"救场架构师 6 项决策清单冗余违反 PM "默认推荐一条"偏好)。**留 X2 观察任务**(本任未完成):待 m_function 召回出现的 chat 样本 → PM 实测 line_range 是否丢失;若丢失起 B2 修复;若无明确证据 X2 长期 reserved。
+**当前状态**:**TASK-310 v0.1 + PR #1 + PR #2 + chore PR 四件套完工**(2026-06-15;TASK-310 架构债重构 = ProjectOverview contract relocation(PR #1)+ TeachingUnit 最小闭环(PR #2);PR #1 squash commit `453f280` / #90;PR #2 squash commit `98ef3d9` / #91;反例累积同步 + 03 索引 TASK-310 ✅,本档 chore PR / #92)。Week 4 主线剩 **TASK-404 激活码 / TASK-405 部署 / TASK-406 内测**;Week 3 完工(7/8 → 8/9,30/34 → 31/35)。**项目级里程碑**:TASK-310 经 GPT R0 + R1 双轮 conditional pass(43 + 30 条全采纳)+ Codex P1.1 摸底 24 项实测 + Stage 0 Round 1-3 守门(含 K_28a 自抓 migrations 目录 / projects 表名 / overview_schemas 期望窄)+ PR #1 / PR #2 实施 + CI mypy + ruff format hotfix + chore PR 归档,**双 AI 互审 + Codex 实测 + PM 救场 工艺协议正常工作**;**决策 12 沿用 v0.4 不升 v0.5**(v0.5 协议候选累积至 5 项,详 § 反例累积段;待下任正式起 v0.5 协议升级 task)。**留 X 候选系列**(挂下任评估):X2(m_function line_range 观察,沿用)/ X6(prompt yaml 数量约束)/ X7(advanced V4-Pro + 202+polling)/ X8(ExplanationPack 抽 TeachingUnit 摘要)/ X10(Python 环境治理全套)/ TASK-311(TeachingUnit prompt 调权)。
 
-**决策 09 反例库**:90 → **108**(本任 TASK-208 累积 +18:K_28a 33→36 +3 / K_30 20→23 +3 / K_34 6→9 +3 / K_36 4→13 +9)。**K 总(剔除救场)= 87 ≥ 15**(本任 +18);**已立项 K 类**:K_28a / K_28b / K_30 / K_31 / K_34 / K_36 + **Codex 守门救场(累积 13,§ 4.1.1 反思结论沿用)** / **PM 救场架构师(累积 6,沿用触发独立阈值 ≥ 5)**。
+**决策 09 反例库**:108 → **162**(本任 TASK-310 累积 +54;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
+
+- K_28a 36 → **53**(+17):38 任 +13(R0 / R1 / Round 1 / Round 2 / D-E-F 五段)/ 39 任 +4(派单凭印象 migrations 目录 + projects 表名 + overview_schemas 期望窄 + 索引数字 32/34 凭印象)
+- K_28b 4 → **10**(+6):38 任 +5(起稿粒度反复)/ 39 任 +1(治标 vs 治本决策点漏明示)
+- K_30 23 → **31**(+8):38 任 +7(R0 / R1 / Round 1 / 派单 / freeze 跨段)/ 39 任 +1(派单验收 ruff format --check 漏列,PR #1 K_30 同款未消化)
+- K_31 2 → 2(沿用)
+- K_34 9 → 9(沿用)
+- K_36 13 → **21**(+8):38 任 +6(env 项目级归档 / 验收清单粒度)/ 39 任 +2(派单验收清单只补 mypy 漏 ruff format / 同类 CI step 拆条)
+- **K 总(剔除救场)= 87 → 126**(+39)
+- Codex 守门救场 13 → **22**(+9):38 任 +5(Round 1 命令本体错 / Round 2 派单 git 真值错 / Round 2 #7+#13 freeze 守门 / E 段找回 mxa env / F 段项目级归档补齐)/ 39 任 +4(PR #2 Stage 0 Round 3 #14 migrations 目录 + #3 overview_schemas 期望 + PR #1 CI mypy 自动化救场 + PR #2 CI ruff format 自动化救场)
+- PM 救场架构师 6 → **14**(+8):38 任 +5(D1-B / R0 / 修订工艺 / 单文件整合 / env 归档不全)/ 39 任 +3(PR #1 治标 vs 治本 / PR #2 "一次跑绿 CI" / chore PR 数字 "一来就错")
+- **反例库总计 = 126 + 22 + 14 = 162**
+
+**触发独立阈值**:K_28a ≥ 10 / K_28b ≥ 5 / K_30 ≥ 5 / K_31 ≥ 2 / K_34 ≥ 5 / K_36 ≥ 2 / Codex 守门救场 ≥ 5 / PM 救场架构师 ≥ 5 全部稳定触发。
+
+**v0.5 协议候选 5 项**(累积至本任,待下任正式起 v0.5 协议升级 task 立项):
+1. 架构师采纳 R 轮带数值反馈前必须 Codex 摸底实证(R6/R7 子规则;38 任 P0-1 反例)
+2. Stage 0 命令清单必须含 #0 baseline 健康检查(R7 子规则;38 任 D 段反例)
+3. 工具环境真值识别为项目级时归档项目级文档(K_36 子规则;38 任 F 段反例)
+4. 架构师起任何 git 操作前必须 `git log --oneline -10` 实测前任工作流(K_28a + K_36 子规则;38 任终任反例;本任 chore PR docs/04 § 1.4 已同步归档)
+5. 派单 prompt 验收硬清单必含 `make check` 全管道,禁拆 CI step 列(K_36 子规则;39 任 PR #1 mypy + PR #2 ruff format 同款两次)
 
 ---
 
 **版本**:v2.1(冻结)
-**最后更新**:2026-06-12
+**最后更新**:2026-06-15

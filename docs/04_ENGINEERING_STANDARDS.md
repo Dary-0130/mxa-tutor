@@ -31,6 +31,18 @@ chore/<purpose>           ← 杂项(依赖升级、配置等)
 3. 提 PR → review → 合并
 4. **合并后立即删除分支**
 
+### Git 工作流实操纪律(反例归档)
+
+**硬规则**(架构师起任何 git 操作前):
+
+1. 必须 `git log --oneline -10` 实测前任 commit history,确认工作流模式(PR # 编号 / squash merge / commit message 格式),**不许凭"通用直觉"假设**
+2. 任何 push 到 `main` 的尝试都应被 branch protection 拒推;若意外在 `main` 本地有 commit,立刻 `git reset --hard origin/main` + 重开 feature branch
+3. 架构师写派单 prompt 时,必须在前置约束段明示"分支:从 `<base-commit>` 开 `task/TASK-NNN-<slug>`;禁在 main 操作"
+
+**反例归档**(2026-06-14 / 第 38 任):后端架构师从 TASK-310 立项起全程在 main 直接 file 操作 + commit,push 被 GitHub branch protection 拒推时,凭印象写出"本项目 = single-developer 直推 main"反例自抓。PM 实测 `git log` 立即识破:前任所有 commit 都带 PR 号(#88 / #87 / ...),工作流是 feature branch + PR + squash merge。
+
+**预防协议**:决策 12 v0.4 KPI 14 自查清单加 v0.5 候选第 4 项(架构师起任何 git 操作前必须 `git log --oneline -10` 实测前任工作流;待下任正式起 v0.5 task 立项)。
+
 ---
 
 ## 2. Commit 规范(Conventional Commits)
