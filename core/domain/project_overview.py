@@ -1,7 +1,10 @@
 """Pure Python ProjectOverview domain contract."""
 
 from dataclasses import asdict, dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
 
 ProjectTypeValue = Literal[
     "control_system",
@@ -15,7 +18,7 @@ ProjectTypeValue = Literal[
 
 
 class _DataclassDumpMixin:
-    def model_dump(self) -> dict[str, object]:
+    def model_dump(self: "DataclassInstance") -> dict[str, Any]:
         return asdict(self)
 
 
