@@ -1,10 +1,7 @@
 """Pure Python ProjectOverview domain contract."""
 
-from dataclasses import asdict, dataclass
-from typing import TYPE_CHECKING, Any, Literal
-
-if TYPE_CHECKING:
-    from _typeshed import DataclassInstance
+from dataclasses import dataclass
+from typing import Literal
 
 ProjectTypeValue = Literal[
     "control_system",
@@ -16,32 +13,26 @@ ProjectTypeValue = Literal[
     "general",
 ]
 
-
-class _DataclassDumpMixin:
-    def model_dump(self: "DataclassInstance") -> dict[str, Any]:
-        return asdict(self)
-
-
 @dataclass(frozen=True)
-class EntryFileEntry(_DataclassDumpMixin):
+class EntryFileEntry:
     file_path: str
     role: str
 
 
 @dataclass(frozen=True)
-class SimulinkModelEntry(_DataclassDumpMixin):
+class SimulinkModelEntry:
     file_path: str
     summary: str
 
 
 @dataclass(frozen=True)
-class KeyFileEntry(_DataclassDumpMixin):
+class KeyFileEntry:
     file_path: str
     why_key: str
 
 
 @dataclass(frozen=True)
-class BlockEntry(_DataclassDumpMixin):
+class BlockEntry:
     block_name: str
     block_type: str
     location: str
@@ -49,14 +40,14 @@ class BlockEntry(_DataclassDumpMixin):
 
 
 @dataclass(frozen=True)
-class SourceRefEntry(_DataclassDumpMixin):
+class SourceRefEntry:
     file_path: str
     line_range: tuple[int, int] | None = None
     block_id: str | None = None
 
 
 @dataclass(frozen=True)
-class ProjectOverview(_DataclassDumpMixin):
+class ProjectOverview:
     project_title: str
     project_type: ProjectTypeValue
     one_sentence_summary: str

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from core.domain.m_file import MFile
 from core.domain.mat_metadata import MatMetadata
 from core.domain.project import Project
@@ -98,7 +100,7 @@ class EvidenceBuilder:
         fields = {
             "one_sentence_summary": overview.one_sentence_summary,
             "main_execution_flow": overview.main_execution_flow,
-            "key_blocks": [entry.model_dump() for entry in overview.key_blocks],
+            "key_blocks": [asdict(entry) for entry in overview.key_blocks],
             "beginner_reading_order": overview.beginner_reading_order,
             "likely_confusing_points": overview.likely_confusing_points,
         }
