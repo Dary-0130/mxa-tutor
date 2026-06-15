@@ -70,7 +70,9 @@ class ChatPromptBuilder:
         if self._teaching_unit_store is None:
             return []
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_list_ready_teaching_units, self._teaching_unit_store, project_id)
+            future = executor.submit(
+                _list_ready_teaching_units, self._teaching_unit_store, project_id
+            )
             try:
                 return future.result(timeout=self._context_timeout_seconds)
             except TimeoutError:
@@ -109,10 +111,7 @@ def _build_source_block(
             line = "\n".join(
                 [
                     line,
-                    *[
-                        f"  教学单元补充: {summary}"
-                        for summary in dict.fromkeys(summaries)
-                    ],
+                    *[f"  教学单元补充: {summary}" for summary in dict.fromkeys(summaries)],
                 ]
             )
         lines.append(line)

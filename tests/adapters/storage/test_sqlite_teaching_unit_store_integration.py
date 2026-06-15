@@ -37,9 +37,7 @@ def _unit(unit_id: str = "unit-1") -> TeachingUnit:
         "target_id": "model.slx#b1",
         "level": "normal",
         "summary": "说明 Gain 如何影响闭环控制量。",
-        "prerequisites": [
-            TeachingUnitRef(project_id="p1", teaching_unit_id="project-overview")
-        ],
+        "prerequisites": [TeachingUnitRef(project_id="p1", teaching_unit_id="project-overview")],
         "explanation_steps": ["先定位输入信号", "再说明增益参数", "最后观察输出"],
         "knowledge_points": ["闭环控制", "比例增益"],
         "source_refs": [
@@ -281,9 +279,7 @@ async def test_schema_migrates_v2_to_v3_and_preserves_existing_data(db_path: str
         message_count = await (
             await conn.execute("SELECT COUNT(*) AS count FROM chat_message")
         ).fetchone()
-        chunk_count = await (
-            await conn.execute("SELECT COUNT(*) AS count FROM chunks")
-        ).fetchone()
+        chunk_count = await (await conn.execute("SELECT COUNT(*) AS count FROM chunks")).fetchone()
 
     assert version is not None
     assert project_count is not None

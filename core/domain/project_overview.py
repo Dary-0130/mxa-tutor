@@ -13,6 +13,7 @@ ProjectTypeValue = Literal[
     "general",
 ]
 
+
 @dataclass(frozen=True)
 class EntryFileEntry:
     file_path: str

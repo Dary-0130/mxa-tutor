@@ -26,7 +26,9 @@ from features.overview._node_id import make_block_id
 
 
 class TeachingUnitProviderFake(TextProvider):
-    def __init__(self, payload: dict[str, object] | str | None = None, exc: Exception | None = None):
+    def __init__(
+        self, payload: dict[str, object] | str | None = None, exc: Exception | None = None
+    ):
         self.payload = payload or _payload()
         self.exc = exc
         self.calls = 0

@@ -208,9 +208,7 @@ async def test_get_or_generate_deduplicates_100_concurrent_requests(tmp_path: Pa
     builder = TeachingUnitBuilderFake(delay=0.01)
     service = _service(project_store, teaching_store, builder)
 
-    units = await asyncio.gather(
-        *[service.get_or_generate(_request()) for _index in range(100)]
-    )
+    units = await asyncio.gather(*[service.get_or_generate(_request()) for _index in range(100)])
 
     assert len({unit.id for unit in units}) == 1
     assert builder.calls == 1

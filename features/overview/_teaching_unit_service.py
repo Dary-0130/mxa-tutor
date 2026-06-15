@@ -188,10 +188,7 @@ class TeachingUnitService:
 
     async def _prerequisite_candidates(self, project_id: str) -> list[TeachingUnitRef]:
         units = await self._store.list_ready_by_project(project_id)
-        return [
-            TeachingUnitRef(project_id=project_id, teaching_unit_id=unit.id)
-            for unit in units
-        ]
+        return [TeachingUnitRef(project_id=project_id, teaching_unit_id=unit.id) for unit in units]
 
 
 def _find_target_node(

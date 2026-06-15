@@ -136,10 +136,7 @@ async def test_builder_removes_self_cycle_and_truncates_prerequisites() -> None:
     current_id = _teaching_unit_id("p1", "block", target.id)
     candidates = [
         TeachingUnitRef(project_id="p1", teaching_unit_id=current_id),
-        *[
-            TeachingUnitRef(project_id="p1", teaching_unit_id=f"pre-{index}")
-            for index in range(12)
-        ],
+        *[TeachingUnitRef(project_id="p1", teaching_unit_id=f"pre-{index}") for index in range(12)],
     ]
     builder = TeachingUnitBuilder(FakeTextProvider(_payload()))
     request = TeachingUnitBuildRequest(

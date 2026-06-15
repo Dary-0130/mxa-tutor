@@ -233,7 +233,9 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         ),
         (
             UnsupportedTeachingLevelError,
-            _make_handler(422, "unsupported_teaching_level", "advanced level 暂不开放,请使用 normal"),
+            _make_handler(
+                422, "unsupported_teaching_level", "advanced level 暂不开放,请使用 normal"
+            ),
         ),
         (
             TeachingUnitTargetNotFoundError,
