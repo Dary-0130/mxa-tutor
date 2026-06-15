@@ -53,6 +53,10 @@ from core.domain.exceptions import (
     QuotaExhaustedError,
     SlxParseError,
     StoreError,
+    TeachingUnitGenerationError,
+    TeachingUnitInProgressError,
+    TeachingUnitTargetNotFoundError,
+    UnsupportedTeachingLevelError,
     UploadError,
     ZipBombError,
     ZipSlipError,
@@ -226,6 +230,22 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         (
             ChatGenerationError,
             _make_handler(502, "chat_generation", "回答生成失败,请刷新重试"),
+        ),
+        (
+            UnsupportedTeachingLevelError,
+            _make_handler(422, "unsupported_teaching_level", "advanced level 暂不开放,请使用 normal"),
+        ),
+        (
+            TeachingUnitTargetNotFoundError,
+            _make_handler(404, "teaching_unit_target_not_found", "没有找到要讲解的对象"),
+        ),
+        (
+            TeachingUnitInProgressError,
+            _make_handler(503, "generating_in_progress", "教学单元正在生成,请稍后重试"),
+        ),
+        (
+            TeachingUnitGenerationError,
+            _make_handler(502, "teaching_unit_generation", "教学单元生成失败,请刷新重试"),
         ),
         (
             QuotaExhaustedError,

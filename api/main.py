@@ -24,12 +24,14 @@ from adapters.storage._connection import open_connection
 from adapters.storage.schema import init_schema
 from adapters.storage.sqlite_chat_store import SqliteChatStore
 from adapters.storage.sqlite_project_store import SqliteProjectStore
+from adapters.storage.sqlite_teaching_unit_store import SqliteTeachingUnitStore
 from adapters.storage.sqlite_vector_store import SqliteVectorStore
 from api.dependencies import get_settings
 from api.middleware.error_handler import register_error_handlers
 from api.routes.chat import router as chat_router
 from api.routes.health import router as health_router
 from api.routes.overview import router as overview_router
+from api.routes.teaching_unit import router as teaching_unit_router
 from api.routes.upload import router as upload_router
 from core.domain.exceptions import EmbeddingModelLoadError
 from features.chat import HybridRetriever, KeywordRetriever, VectorRetriever
@@ -67,8 +69,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await stack.enter_async_context(_bootstrap_db(settings.db_path))
         store = SqliteProjectStore(settings.db_path)
         chat_store = SqliteChatStore(settings.db_path)
+        teaching_unit_store = SqliteTeachingUnitStore(settings.db_path)
         app.state.project_store = store
         app.state.chat_store = chat_store
+        app.state.teaching_unit_store = teaching_unit_store
         try:
             embedder = await asyncio.to_thread(
                 SentenceTransformerEmbedder,
@@ -121,6 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         stack.push_async_callback(app.state.chunking_service.aclose)
         stack.push_async_callback(vector_store.aclose)
+        stack.push_async_callback(teaching_unit_store.aclose)
         stack.push_async_callback(chat_store.aclose)
         stack.push_async_callback(store.aclose)
 
@@ -160,6 +165,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(upload_router)
     app.include_router(overview_router)
+    app.include_router(teaching_unit_router)
     app.include_router(chat_router)
     return app
 

@@ -33,11 +33,15 @@ from core.interfaces.embedder import EmbeddingProvider
 from core.interfaces.llm_provider import TextProvider
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
+from core.interfaces.teaching_unit_store import TeachingUnitStore
 from core.interfaces.vector_store import VectorStore
 from features.chat.chat_service import ChatService
 from features.chunking import ChunkingService
 from features.ingest.upload_service import ExtractFn, UploadService
 from features.overview import OverviewCache
+from features.overview._teaching_level_policy import TeachingLevelPolicy
+from features.overview._teaching_unit_builder import TeachingUnitBuilder
+from features.overview._teaching_unit_service import TeachingUnitService
 from features.overview.overview_service import ProjectOverviewService
 
 
@@ -75,6 +79,14 @@ def get_vector_store(request: Request) -> VectorStore:
     if store is None:
         raise RuntimeError("VectorStore not initialized; lifespan misconfigured")
     return cast(VectorStore, store)
+
+
+def get_teaching_unit_store(request: Request) -> TeachingUnitStore:
+    """从 app.state.teaching_unit_store 取 TeachingUnitStore。"""
+    store = getattr(request.app.state, "teaching_unit_store", None)
+    if store is None:
+        raise RuntimeError("TeachingUnitStore not initialized; lifespan misconfigured")
+    return cast(TeachingUnitStore, store)
 
 
 def get_chunking_service(request: Request) -> ChunkingService:
@@ -120,6 +132,35 @@ def get_overview_cache(request: Request) -> OverviewCache:
 def get_project_type_resolver() -> ProjectTypeResolver:
     """返回 v0.1 project type resolver。"""
     return GeneralProjectTypeResolver()
+
+
+def get_teaching_level_policy() -> TeachingLevelPolicy:
+    """返回 TeachingUnit level policy。"""
+    return TeachingLevelPolicy()
+
+
+def get_teaching_unit_builder(
+    text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+) -> TeachingUnitBuilder:
+    """装配 TeachingUnitBuilder。"""
+    return TeachingUnitBuilder(text_provider)
+
+
+def get_teaching_unit_service(
+    project_store: Annotated[ProjectStore, Depends(get_project_store)],
+    teaching_unit_store: Annotated[TeachingUnitStore, Depends(get_teaching_unit_store)],
+    builder: Annotated[TeachingUnitBuilder, Depends(get_teaching_unit_builder)],
+    level_policy: Annotated[TeachingLevelPolicy, Depends(get_teaching_level_policy)],
+    text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+) -> TeachingUnitService:
+    """装配 TeachingUnitService。"""
+    return TeachingUnitService(
+        project_store=project_store,
+        teaching_unit_store=teaching_unit_store,
+        builder=builder,
+        level_policy=level_policy,
+        model_name=text_provider.capability().model_name,
+    )
 
 
 def get_overview_service(
