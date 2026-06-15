@@ -14,15 +14,16 @@ from core.domain.exceptions import (
     LLMTimeoutError,
     OverviewGenerationError,
 )
+from core.domain.project_overview import ProjectOverview
 from features.overview import InMemoryOverviewCache
 from features.overview import overview_service as service_module
 from features.overview._prompt_builder import build_messages
-from features.overview.overview_schemas import ProjectOverview
 from features.overview.overview_service import ProjectOverviewService
 from tests.features.overview.conftest import (
     OverviewBuilderFake,
     OverviewProviderFake,
     OverviewResolverFake,
+    make_domain_project_overview,
     make_overview_evidence,
     make_overview_file_entries,
     make_overview_graph,
@@ -188,7 +189,7 @@ async def test_get_or_generate_miss_uses_to_thread_twice(
 
 @pytest.mark.asyncio
 async def test_get_or_generate_cache_hit_skips_graph_and_llm(project: Any) -> None:
-    overview = ProjectOverview.model_validate(make_overview_payload())
+    overview = make_domain_project_overview()
     cache = InMemoryOverviewCache()
     await cache.put("p1", overview)
     provider = OverviewProviderFake(response=make_overview_response(make_overview_payload()))

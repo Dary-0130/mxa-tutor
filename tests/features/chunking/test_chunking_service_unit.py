@@ -16,8 +16,7 @@ from features.chunking._chunk_draft import ChunkDraft
 from features.chunking._chunk_id import make_chunk_id, make_overview_chunk_id
 from features.chunking._errors import ChunkingError
 from features.chunking.chunking_service import ChunkingService
-from features.overview.overview_schemas import ProjectOverview
-from tests.features.overview.conftest import make_overview_payload
+from tests.features.overview.conftest import make_domain_project_overview
 
 RUN_INTEGRATION = os.getenv("RUN_EMBEDDING_INTEGRATION") == "1"
 
@@ -263,7 +262,7 @@ async def test_embedding_count_mismatch_raises(rich_project, chunk_settings) -> 
 async def test_overview_chunk_is_independent_and_duplicate_noop(chunk_settings) -> None:
     vector_store = FakeVectorStore()
     service = _service(chunk_settings, vector_store=vector_store)
-    overview = ProjectOverview.model_validate(make_overview_payload())
+    overview = make_domain_project_overview()
 
     assert await service.build_embed_store_overview_chunk(overview, "p1") == 1
     assert await service.build_embed_store_overview_chunk(overview, "p1") == 0
@@ -316,7 +315,7 @@ async def test_real_embedder_overview_chunking_smoke(
     real_embedder: SentenceTransformerEmbedder,
 ) -> None:
     vector_store = FakeVectorStore()
-    overview = ProjectOverview.model_validate(make_overview_payload())
+    overview = make_domain_project_overview()
 
     count = await _service(
         chunk_settings,

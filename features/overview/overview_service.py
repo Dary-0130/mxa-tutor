@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from core.domain.exceptions import OverviewGenerationError
 from core.domain.project import Project
 from core.domain.project_graph import ProjectGraph
+from core.domain.project_overview import BlockEntry, ProjectOverview
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, TextProvider
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
@@ -22,7 +23,7 @@ from features.chunking import ChunkingService
 from ._overview_cache import OverviewCache
 from ._prompt_builder import build_messages
 from ._prompt_loader import load_prompt_template
-from .overview_schemas import BlockEntry, ProjectOverview
+from .overview_schemas import ProjectOverviewModel
 from .project_graph_builder import ProjectGraphBuilder
 
 DEFAULT_OVERVIEW_TIMEOUT_SECONDS = 60.0
@@ -152,7 +153,7 @@ class ProjectOverviewService:
             logger.error("Overview schema validation failed: error_type=payload_not_mapping")
             raise OverviewGenerationError("导览生成失败,请刷新重试") from None
 
-        overview = self._try_parse_with_list_truncation(payload)
+        overview = self._try_parse_with_list_truncation(payload).to_domain()
 
         try:
             _validate_file_paths(overview, project)
@@ -164,10 +165,10 @@ class ProjectOverviewService:
 
         return overview
 
-    def _try_parse_with_list_truncation(self, raw_dict: dict[str, Any]) -> ProjectOverview:
+    def _try_parse_with_list_truncation(self, raw_dict: dict[str, Any]) -> ProjectOverviewModel:
         """Parse ProjectOverview with graceful top-level list truncation."""
         try:
-            return ProjectOverview.model_validate(raw_dict)
+            return ProjectOverviewModel.model_validate(raw_dict)
         except ValidationError as exc:
             errors = exc.errors()
             truncations: list[tuple[str, int, int]] = []
@@ -190,7 +191,7 @@ class ProjectOverviewService:
                 raw_dict[field_name] = raw_dict[field_name][:max_length]
 
             try:
-                result = ProjectOverview.model_validate(raw_dict)
+                result = ProjectOverviewModel.model_validate(raw_dict)
             except ValidationError as retry_exc:
                 logger.error(
                     "overview_lenient_parse_failed_on_retry: error_type={} truncated_fields={}",

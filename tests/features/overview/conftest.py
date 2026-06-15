@@ -10,6 +10,14 @@ from core.domain.m_file import MFile, MFunction
 from core.domain.mat_metadata import MatMetadata, MatVariable
 from core.domain.project import FileInfo, Project, ProjectType
 from core.domain.project_graph import ProjectGraph
+from core.domain.project_overview import (
+    BlockEntry,
+    EntryFileEntry,
+    KeyFileEntry,
+    ProjectOverview,
+    SimulinkModelEntry,
+    SourceRefEntry,
+)
 from core.domain.slx_model import SlxBlock, SlxLine, SlxModel
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability
 
@@ -283,6 +291,64 @@ def make_overview_payload() -> dict[str, object]:
         "likely_confusing_points": ["未能确定 load_x", "Gain 的单位要结合参数看"],
         "evidence": make_overview_evidence("main.m", "helper.m", "model.slx", "b1"),
     }
+
+
+def make_domain_project_overview(payload: dict[str, object] | None = None) -> ProjectOverview:
+    raw = payload or make_overview_payload()
+    return ProjectOverview(
+        project_title=raw["project_title"],
+        project_type=raw["project_type"],
+        one_sentence_summary=raw["one_sentence_summary"],
+        main_entry_files=[
+            EntryFileEntry(
+                file_path=entry["file_path"],
+                role=entry["role"],
+            )
+            for entry in raw["main_entry_files"]
+        ],
+        main_simulink_models=[
+            SimulinkModelEntry(
+                file_path=entry["file_path"],
+                summary=entry["summary"],
+            )
+            for entry in raw["main_simulink_models"]
+        ],
+        main_execution_flow=list(raw["main_execution_flow"]),
+        key_files=[
+            KeyFileEntry(
+                file_path=entry["file_path"],
+                why_key=entry["why_key"],
+            )
+            for entry in raw["key_files"]
+        ],
+        key_blocks=[
+            BlockEntry(
+                block_name=entry["block_name"],
+                block_type=entry["block_type"],
+                location=entry["location"],
+                why_key=entry["why_key"],
+            )
+            for entry in raw["key_blocks"]
+        ],
+        knowledge_points=list(raw["knowledge_points"]),
+        beginner_reading_order=list(raw["beginner_reading_order"]),
+        likely_confusing_points=list(raw["likely_confusing_points"]),
+        evidence=[
+            SourceRefEntry(
+                file_path=entry["file_path"],
+                line_range=_line_range_tuple(entry.get("line_range")),
+                block_id=entry.get("block_id"),
+            )
+            for entry in raw["evidence"]
+        ],
+    )
+
+
+def _line_range_tuple(value: object) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    start, end = value
+    return int(start), int(end)
 
 
 def make_overview_response(payload) -> LLMResponse:

@@ -30,13 +30,14 @@ A 类 `ProjectOverview` schema 处于**契约级**。它不是一次 prompt 输�
 
 契约锚点:
 
-- 实现源:`features/overview/overview_schemas.py`
+- Domain 契约源:`core/domain/project_overview.py`
+- Pydantic wrapper / JSON Schema 源:`features/overview/overview_schemas.py`
 - JSON 导出:`schemas/project_overview.schema.json`
 - Freeze 测试:`tests/features/overview/test_schema_freeze.py`
 - Prompt 对齐:`core/prompts/project_overview.yaml`
 - Service 校验:`features/overview/overview_service.py` 五步校验
 
-任一 schema 修改必须按 § 7 的 D5 两层同源流程走。Freeze 测试失败不是“测试太严”,而是提醒 PR 作者同步契约、测试、导出 JSON 和下游说明。
+任一 schema 修改必须按 § 7 的 D1-B 三层同源流程走。Freeze 测试失败不是“测试太严”,而是提醒 PR 作者同步契约、wrapper、测试、导出 JSON 和下游说明。
 
 ---
 
@@ -47,7 +48,7 @@ A 类 `ProjectOverview` schema 处于**契约级**。它不是一次 prompt 输�
 | 字段 | 类型 | 约束 | 语义 | 教学要求 |
 |---|---|---|---|---|
 | `project_title` | string | 1-30 字 | 工程标题 | 学生首屏看到的卡片标题,短而具体 |
-| `project_type` | enum(7) | 见 § 3 | 工程分类 | 影响 UI 模板和知识点关联;契约源是 `features/overview/overview_schemas.py::ProjectTypeValue`,不是 `core/domain/project.py::ProjectType` |
+| `project_type` | enum(7) | 见 § 3 | 工程分类 | 影响 UI 模板和知识点关联;契约源是 `core/domain/project_overview.py::ProjectTypeValue`,不是 `core/domain/project.py::ProjectType` |
 | `one_sentence_summary` | string | 1-80 字 | 一句话讲清楚工程做什么 | 像老师介绍课题,不是百科定义 |
 | `main_entry_files` | array[`EntryFileEntry`] | 1-3 个 | 主入口脚本 / 首读文件 | 学生第一步该打开的文件 |
 | `main_simulink_models` | array[`SimulinkModelEntry`] | 0-5 个 | 顶层 Simulink 模型 | 纯 `.m` 工程可为空数组 |
@@ -111,7 +112,7 @@ A 类 `ProjectOverview` schema 处于**契约级**。它不是一次 prompt 输�
 
 ## 3. project_type 7 枚举值
 
-**契约源**:`features/overview/overview_schemas.py::ProjectTypeValue` 的 `Literal[7]` 字面。它不是 `core/domain/project.py::ProjectType`;后者服务内部分类逻辑,本文只冻结输出层词表。
+**契约源**:`core/domain/project_overview.py::ProjectTypeValue` 的 `Literal[7]` 字面。它不是 `core/domain/project.py::ProjectType`;后者服务内部分类逻辑,本文只冻结输出层词表。
 
 新增、删除或改名任何 `project_type` 时,必须走 § 7 第二层 6 同源流程。
 
@@ -201,19 +202,20 @@ A 类 `ProjectOverview` schema 处于**契约级**。它不是一次 prompt 输�
 
 ## 7. Schema 修订流程
 
-Schema 可以演进,但不能偷偷漂移。任何修订 PR 必须按 D5 两层同源处理。
+Schema 可以演进,但不能偷偷漂移。任何修订 PR 必须按 D1-B 三层同源处理。
 
-第一层:通用 schema 修订必改 4 处:
+第一层:通用 schema 修订必改 5 处:
 
-1. `features/overview/overview_schemas.py`
-2. `tests/features/overview/test_schema_freeze.py`
-3. `docs/06_OUTPUT_CONTRACTS.md`
-4. `schemas/project_overview.schema.json`(跑 `make export-schema` 重生)
+1. `core/domain/project_overview.py`
+2. `features/overview/overview_schemas.py`
+3. `tests/features/overview/test_schema_freeze.py`
+4. `docs/06_OUTPUT_CONTRACTS.md`
+5. `schemas/project_overview.schema.json`(跑 `make export-schema` 重生)
 
 第二层:若涉及 `project_type Literal[7]`,还必须同步 2 处:
 
-5. `core/prompts/project_overview.yaml`
-6. `docs/05_EXPLANATION_STYLE_GUIDE.md` § 2.A / 示例处
+6. `core/prompts/project_overview.yaml`
+7. `docs/05_EXPLANATION_STYLE_GUIDE.md` § 2.A / 示例处
 
 第三层:任何 schema 修订 PR 必须在 review checklist 显式回答:
 
@@ -302,7 +304,8 @@ make verify-schema
 |---|---|---|---|
 | 教学规范 | `docs/05_EXPLANATION_STYLE_GUIDE.md` | 规定 LLM 该怎么讲 | 本文引用 05,不复制全文 |
 | Prompt | `core/prompts/project_overview.yaml` | 约束 LLM 输出 12 字段和 7 类型 | `project_type` 修订必须同步 |
-| Schema 实现 | `features/overview/overview_schemas.py` | Pydantic 字段、类型、长度真值源 | 本文的实现源 |
+| Domain 契约 | `core/domain/project_overview.py` | 字段名、顺序、类型和 project_type Literal 真值源 | 本文的跨 feature 契约源 |
+| Schema wrapper | `features/overview/overview_schemas.py` | Pydantic 字段约束、API response_model、JSON Schema 导出源 | 包装 domain 契约并提供 `.to_domain()` / `.from_domain()` |
 | Service 校验 | `features/overview/overview_service.py` | 拦截编造文件、block、证据 | 本文 § 4 描述其语义 |
 | Freeze 测试 | `tests/features/overview/test_schema_freeze.py` | 锁字段名、类型、约束、Literal、extra | 防止无意漂移 |
 | JSON 导出 | `schemas/project_overview.schema.json` | 前端 / 第三方消费 reference | 由脚本生成后入仓 |

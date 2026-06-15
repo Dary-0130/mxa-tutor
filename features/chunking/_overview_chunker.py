@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from features.overview.overview_schemas import ProjectOverview
+from core.domain.project_overview import ProjectOverview
 
 from ._chunk_draft import ChunkDraft
 from ._chunk_id import make_overview_chunk_id

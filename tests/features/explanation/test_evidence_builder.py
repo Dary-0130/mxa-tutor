@@ -5,6 +5,7 @@ from datetime import datetime
 
 from core.domain.m_file import MFile, MFunction
 from core.domain.project import FileInfo, Project, ProjectType
+from core.domain.project_overview import ProjectOverview
 from core.domain.slx_model import SlxBlock, SlxLine, SlxModel
 from features.explanation import EvidenceBuilder
 from features.explanation._score import (
@@ -12,8 +13,8 @@ from features.explanation._score import (
     is_ambiguously_named,
     select_high_value_blocks,
 )
-from features.overview.overview_schemas import ProjectOverview
 from features.overview.project_graph_builder import ProjectGraphBuilder
+from tests.features.overview.conftest import make_domain_project_overview
 
 
 def test_d3_selection_scores_blocks_and_marks_ambiguous_names() -> None:
@@ -175,7 +176,7 @@ def _block(
 
 
 def _overview() -> ProjectOverview:
-    return ProjectOverview.model_validate(
+    return make_domain_project_overview(
         {
             "project_title": "测试工程",
             "project_type": "general",
