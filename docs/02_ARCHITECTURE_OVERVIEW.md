@@ -2,7 +2,7 @@
 
 > **前置阅读**:必须先读 `01_PROJECT_CONSTITUTION.md`
 > **目的**:让任何新接手的人 / AI 在 15 分钟内理解整个系统结构
-> **版本**:v2.1(冻结)
+> **版本**:v3.0(delta)
 
 ---
 
@@ -73,6 +73,26 @@ TeachingUnit
 最终输出(项目导览 / block 讲解 / 文件讲解 / 问答)
 ```
 
+### 资料入口数据流(v3.0 paper-to-model)
+
+```
+用户上传论文 / 报告(PDF·docx)
+   ↓
+文档安全沙箱(格式嗅探 / 解析器超时 / 不执行外链或宏)
+   ↓
+PaperParser
+   ↓
+PaperSpec
+   ↓
+PaperPlanService
+   ↓
+ModelGenerationPlan + TuningSuggestion
+   ↓
+用户据路线图在 MATLAB 中搭建 / 调参
+```
+
+资料入口的 EvidencePack 必须区分 `document_extracted` 与 `user_supplied` 两类来源:文档抽取的公式 / 参数 / 段落证据走 `document_extracted`,用户补充的缺失参数走 `user_supplied`,下游回答和调参建议不得把用户补充伪装成文档证据。
+
 ### 关键原则
 
 **不要让 LLM"猜工程",要让解析器"还原工程",再让 LLM"讲工程"**。
@@ -92,6 +112,12 @@ TeachingUnit
 | Prompt 模板 | `core/prompts/project_graph_build.yaml` / `teaching_unit_generate.yaml` |
 
 **注意:**不新增顶层 `features/understanding/`。决策见 `docs/decisions/20260601-04-understanding-not-top-level-feature.md`。
+
+### v3.0 paper feature 边界
+
+paper-to-model 新建 `features/paper/` 与 `core/domain/paper_*.py` 对等实现,复用 MCS 的治理机制和基础设施,不改造既有 `features/overview/` 私有结构。`features/paper/` 与 `features/overview/` 不互相 import 私有结构;跨 feature 共享只能放在 `core/` 公开 contract 层(沿用决策 21 boundary)。
+
+PaperGraph 方向拍板为**新建独立 `PaperGraph`**,不扩展 `ProjectGraph`。理由:`ProjectGraph` 的 `NodeType` / `EdgeType` 已绑定 .m / .slx / .mat 工程结构,并被 overview / chunking / chat / explanation 多处消费;独立 `PaperGraph` 可以复用节点-边-入口-流向的框架,同时避免论文节点污染既有 MCS 契约。
 
 ---
 
@@ -440,6 +466,14 @@ class TeachingUnit:
     confusion_points: list[str]  # 学生容易误解的地方
 ```
 
+#### v3.0 paper-to-model 占位签名(不冻结字段)
+
+- `PaperSpec`:论文结构化规格,输入 = 解析后的 PDF/docx,输出 = 摘要 / 公式 / 参数表 / 图表位置 / 伪代码的结构化表示;具体字段留 `06_OUTPUT_CONTRACTS.md` 与 TASK-501 落地。
+- `PaperGraph`:论文-模型对应图,输入 = `PaperSpec`,输出 = 段落 / 公式 / 参数 / 图表与模型搭建路线之间的引用 / 推导 / 对应关系;本 PR 拍板为独立结构,不扩展 `ProjectGraph`,具体字段留 06 与 TASK-501。
+- `ModelGenerationPlan`:模型搭建路线图,输入 = `PaperSpec` / `PaperGraph` / 用户补充参数,输出 = 库选型 / block 建议 / 参数对应 / 子系统拆分 / `.m` 骨架建议;具体字段留 06 与 TASK-501。
+- `TuningSuggestion`:调参建议,输入 = 用户场景 / 已知模型路线 / 参数证据,输出 = 调参方向与物理影响讲解;具体字段留 06 与 TASK-501。
+- `MissingParameterPrompt`:缺失参数补充提示,输入 = 文档中出现但未抽到数值或单位的参数线索,输出 = 用户待补充项及来源说明;具体字段留 06 与 TASK-501。
+
 ### 4.3 LLM 接口(ModelCapability 扩展版) ⭐
 
 ```python
@@ -785,5 +819,5 @@ class AppSettings(BaseSettings):
 
 ---
 
-**版本**:v2.1(冻结)
-**最后更新**:2026-06-01
+**版本**:v3.0(delta)
+**最后更新**:2026-06-15
