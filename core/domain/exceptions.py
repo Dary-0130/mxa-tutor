@@ -100,3 +100,19 @@ class VectorStoreError(StoreError):
 
 class ChatGenerationError(MxaError):
     """问答生成失败。"""
+
+
+class UnsupportedTeachingLevelError(MxaError):
+    """MCS 阶段不开放的 teaching level。"""
+
+
+class TeachingUnitGenerationError(MxaError):
+    """教学单元生成失败。"""
+
+
+class TeachingUnitInProgressError(MxaError):
+    """教学单元已有生成任务进行中。"""
+
+
+class TeachingUnitTargetNotFoundError(ProjectError):
+    """指定 TeachingUnit target 不存在。"""
