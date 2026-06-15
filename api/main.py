@@ -121,7 +121,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             chat_store=chat_store,
             text_provider=app.state.text_provider,
             retriever=app.state.hybrid_retriever,
-            prompt_builder=ChatPromptBuilder(),
+            prompt_builder=ChatPromptBuilder(teaching_unit_store=teaching_unit_store),
         )
         stack.push_async_callback(app.state.chunking_service.aclose)
         stack.push_async_callback(vector_store.aclose)

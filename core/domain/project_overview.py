@@ -1,6 +1,6 @@
 """Pure Python ProjectOverview domain contract."""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Literal
 
 ProjectTypeValue = Literal[
@@ -37,6 +37,9 @@ class BlockEntry:
     block_type: str
     location: str
     why_key: str
+
+    def model_dump(self) -> dict[str, object]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
