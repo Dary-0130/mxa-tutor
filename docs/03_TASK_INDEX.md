@@ -7,7 +7,7 @@
 > 4. `05_EXPLANATION_STYLE_GUIDE.md` — 教学输出风格
 >
 > 本文是 **MCS 阶段所有 Task 的总纲**(4 周交付可收费产品)。
-> **版本:v2.1(冻结)**
+> **版本:v3.0(delta)**
 
 ---
 
@@ -19,6 +19,7 @@
 - ✅ 已通过
 - ❌ 打回返工
 - ⏸ 暂停 / 冻结
+- ↪ 转交 / 移交他人负责
 
 ---
 
@@ -31,6 +32,12 @@ TASK-WNN
 ```
 
 例:`TASK-101` = Week 1 第 01 个 Task。
+
+### v3.0 编号分段(决策 22)
+
+- `TASK-001` - `TASK-499`:MCS 主线(已占用 001-310;311-499 为缓冲)
+- `TASK-501` - `TASK-999`:paper-to-model 主线(本次 pivot 后新增)
+- `TASK-1000+`:平台化(团队 / 私有部署等)
 
 ---
 
@@ -245,9 +252,9 @@ P2 v0.1 不承诺:
 | TASK-401 | 前端框架选型 + 项目搭建 | ✅ | Codex | Week 3 |
 | TASK-402 | 上传页 + 工程导览页 | ✅ | Codex | 401, 202, 203 |
 | TASK-403 | 问答对话页(展示 citations;v0.4 chat 页背景复用 PanoramaScene,commit 3bfa496 / #85) | ✅ | Codex | 401, 304, 307 |
-| TASK-404 | 激活码系统(手动发码模式) | 🔲 | Codex | 204 |
-| TASK-405 | 服务器部署 + HTTPS + 域名 | 🔲 | Codex + PM | 全部后端 |
-| TASK-406 | 内测发布 + 第一笔收钱 | 🔲 | PM | 405 |
+| TASK-404 | 激活码系统(手动发码模式;v3.0冻结:暂不收费,决策22§1.4) | ⏸ | Codex | 204 |
+| TASK-405 | 服务器部署 + HTTPS + 域名 | ↪ | 转交 | 全部后端 |
+| TASK-406 | 内测发布 + 第一笔收钱 | ↪ | 转交 | 405 |
 
 ### Week 4 验收
 
@@ -341,7 +348,7 @@ Week 0:  [✅✅✅⬜]              3/4
 Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
-Week 4:  [✅✅✅⬜⬜⬜]           3/6
+Week 4:  [✅✅✅⏸↪↪]           3/6
 
 总计: 31/35
 ```
@@ -350,7 +357,11 @@ Week 4:  [✅✅✅⬜⬜⬜]           3/6
 
 ## 下一步
 
-**当前状态**:**TASK-310 v0.1 + PR #1 + PR #2 + chore PR 四件套完工**(2026-06-15;TASK-310 架构债重构 = ProjectOverview contract relocation(PR #1)+ TeachingUnit 最小闭环(PR #2);PR #1 squash commit `453f280` / #90;PR #2 squash commit `98ef3d9` / #91;反例累积同步 + 03 索引 TASK-310 ✅,本档 chore PR / #92)。Week 4 主线剩 **TASK-404 激活码 / TASK-405 部署 / TASK-406 内测**;Week 3 完工(7/8 → 8/9,30/34 → 31/35)。**项目级里程碑**:TASK-310 经 GPT R0 + R1 双轮 conditional pass(43 + 30 条全采纳)+ Codex P1.1 摸底 24 项实测 + Stage 0 Round 1-3 守门(含 K_28a 自抓 migrations 目录 / projects 表名 / overview_schemas 期望窄)+ PR #1 / PR #2 实施 + CI mypy + ruff format hotfix + chore PR 归档,**双 AI 互审 + Codex 实测 + PM 救场 工艺协议正常工作**;**决策 12 沿用 v0.4 不升 v0.5**(v0.5 协议候选累积至 5 项,详 § 反例累积段;待下任正式起 v0.5 协议升级 task)。**留 X 候选系列**(挂下任评估):X2(m_function line_range 观察,沿用)/ X6(prompt yaml 数量约束)/ X7(advanced V4-Pro + 202+polling)/ X8(ExplanationPack 抽 TeachingUnit 摘要)/ X10(Python 环境治理全套)/ TASK-311(TeachingUnit prompt 调权)。
+**当前状态**:**TASK-310 v0.1 + PR #1 + PR #2 + chore PR 四件套完工**(2026-06-15;TASK-310 架构债重构 = ProjectOverview contract relocation(PR #1)+ TeachingUnit 最小闭环(PR #2);PR #1 squash commit `453f280` / #90;PR #2 squash commit `98ef3d9` / #91;反例累积同步 + 03 索引 TASK-310 ✅,本档 chore PR / #92)。Week 4 主线剩 **TASK-404 激活码 / TASK-405 部署 / TASK-406 内测**;Week 3 完工(7/8 → 8/9,30/34 → 31/35)。**项目级里程碑**:TASK-310 经 GPT R0 + R1 双轮 conditional pass(43 + 30 条全采纳)+ Codex P1.1 摸底 24 项实测 + Stage 0 Round 1-3 守门(含 K_28a 自抓 migrations 目录 / projects 表名 / overview_schemas 期望窄)+ PR #1 / PR #2 实施 + CI mypy + ruff format hotfix + chore PR 归档,**双 AI 互审 + Codex 实测 + PM 救场 工艺协议正常工作**;**决策 12 沿用 v0.4 不升 v0.5**(v0.5 协议候选累积至 6 项,详 § 反例累积段;待下任正式起 v0.5 协议升级 task)。**v3.0 pivot 同步**:方向 pivot 完成,宪法升 v3.0,paper-to-model 主线启动;Week 4 TASK-404 激活码冻结,TASK-405 部署 / TASK-406 内测转交,详 `docs/decisions/20260615-22-direction-pivot-paper-to-model.md`。**留 X 候选系列**(挂下任评估):X2(m_function line_range 观察,沿用)/ X6(prompt yaml 数量约束)/ X7(advanced V4-Pro + 202+polling)/ X8(ExplanationPack 抽 TeachingUnit 摘要)/ X10(Python 环境治理全套)/ TASK-311(TeachingUnit prompt 调权)。
+
+## Week 5+:paper-to-model 主线占位
+
+TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须先完成决策 22 § 10.4 的五项开门 chore:06 三套契约 / MissingParameterPrompt + EvidencePack 双源 / 文档上传安全 / 产品文案与对外口径 / 评测准入。五项全 ✅ 后,再进入文档解析 → PaperSpec → ModelGenerationPlan → 调参建议。
 
 **决策 09 反例库**:108 → **162**(本任 TASK-310 累积 +54;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
 
@@ -365,16 +376,19 @@ Week 4:  [✅✅✅⬜⬜⬜]           3/6
 - PM 救场架构师 6 → **14**(+8):38 任 +5(D1-B / R0 / 修订工艺 / 单文件整合 / env 归档不全)/ 39 任 +3(PR #1 治标 vs 治本 / PR #2 "一次跑绿 CI" / chore PR 数字 "一来就错")
 - **反例库总计 = 126 + 22 + 14 = 162**
 
+> **自 41 任(决策 22)起,反例库改趋势记账(不再逐位累加)**:本任高发区是 K_28a(架构师凭印象写宪法 / 契约级文档未核字面,单任约 7 次,GPT R1 + Codex R6 + GPT 联审三道各有斩获)。其余触发包括 K_30 跨段同步漏、K_34 语义记忆错位(含知识库 ≠ 仓库)、K_36 边界。三层审查(GPT 决策质量 / Codex 实测 / PM 兜底)正常工作,无漏入仓。详决策 22 § 9。
+
 **触发独立阈值**:K_28a ≥ 10 / K_28b ≥ 5 / K_30 ≥ 5 / K_31 ≥ 2 / K_34 ≥ 5 / K_36 ≥ 2 / Codex 守门救场 ≥ 5 / PM 救场架构师 ≥ 5 全部稳定触发。
 
-**v0.5 协议候选 5 项**(累积至本任,待下任正式起 v0.5 协议升级 task 立项):
+**v0.5 协议候选 6 项**(累积至本任,待后续正式起 v0.5 协议升级 task 立项):
 1. 架构师采纳 R 轮带数值反馈前必须 Codex 摸底实证(R6/R7 子规则;38 任 P0-1 反例)
 2. Stage 0 命令清单必须含 #0 baseline 健康检查(R7 子规则;38 任 D 段反例)
 3. 工具环境真值识别为项目级时归档项目级文档(K_36 子规则;38 任 F 段反例)
 4. 架构师起任何 git 操作前必须 `git log --oneline -10` 实测前任工作流(K_28a + K_36 子规则;38 任终任反例;本任 chore PR docs/04 § 1.4 已同步归档)
 5. 派单 prompt 验收硬清单必含 `make check` 全管道,禁拆 CI step 列(K_36 子规则;39 任 PR #1 mypy + PR #2 ruff format 同款两次)
+6. 架构师起稿宪法级 / 契约级文档时,必须 grep 现有 schema / contract / 治理流程 / 文件存在性 / 自身前序版本最终字面;不许凭概念名 / 知识库草案 / 历史印象假设(K_28a + K_34 子规则;41 任决策 22 反例)
 
 ---
 
-**版本**:v2.1(冻结)
+**版本**:v3.0(delta)
 **最后更新**:2026-06-15
