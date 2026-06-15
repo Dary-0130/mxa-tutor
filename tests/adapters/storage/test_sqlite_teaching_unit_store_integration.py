@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import fields
 from typing import Any, cast
 
 from adapters.storage._connection import open_connection
@@ -9,7 +8,7 @@ from adapters.storage.schema import CURRENT_SCHEMA_VERSION, init_schema
 from adapters.storage.sqlite_project_store import SqliteProjectStore
 from adapters.storage.sqlite_teaching_unit_store import SqliteTeachingUnitStore
 from core.domain.source_ref import SourceRef
-from core.domain.teaching_unit import TeachingUnit
+from core.domain.teaching_unit import TeachingUnit, TeachingUnitRef
 from core.interfaces.teaching_unit_store import CacheKey, TeachingUnitStore
 
 
@@ -31,7 +30,6 @@ def _cache_key(
 
 
 def _unit(unit_id: str = "unit-1") -> TeachingUnit:
-    field_names = {field.name for field in fields(TeachingUnit)}
     kwargs: dict[str, Any] = {
         "id": unit_id,
         "title": "Gain 模块讲解",
@@ -39,8 +37,11 @@ def _unit(unit_id: str = "unit-1") -> TeachingUnit:
         "target_id": "model.slx#b1",
         "level": "normal",
         "summary": "说明 Gain 如何影响闭环控制量。",
-        "prerequisites": ["project-overview"],
+        "prerequisites": [
+            TeachingUnitRef(project_id="p1", teaching_unit_id="project-overview")
+        ],
         "explanation_steps": ["先定位输入信号", "再说明增益参数", "最后观察输出"],
+        "knowledge_points": ["闭环控制", "比例增益"],
         "source_refs": [
             SourceRef(
                 file_path="model.slx",
@@ -51,10 +52,6 @@ def _unit(unit_id: str = "unit-1") -> TeachingUnit:
         ],
         "confusion_points": ["Gain 参数需要结合初始化脚本理解"],
     }
-    if "knowledge_points" in field_names:
-        kwargs["knowledge_points"] = ["闭环控制", "比例增益"]
-    else:
-        kwargs["related_concepts"] = ["闭环控制", "比例增益"]
     return TeachingUnit(**cast(Any, kwargs))
 
 

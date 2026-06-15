@@ -1,6 +1,18 @@
 from dataclasses import dataclass
+from typing import Literal
 
 from core.domain.source_ref import SourceRef
+
+TeachingTarget = Literal["file", "function", "block", "subsystem", "model", "project"]
+TeachingLevel = Literal["beginner", "normal", "advanced"]
+
+
+@dataclass(frozen=True)
+class TeachingUnitRef:
+    """Reference to another teaching unit; cross-project shape is reserved."""
+
+    project_id: str
+    teaching_unit_id: str
 
 
 @dataclass
@@ -9,12 +21,12 @@ class TeachingUnit:
 
     id: str
     title: str
-    target: str
+    target: TeachingTarget
     target_id: str
-    level: str
+    level: TeachingLevel
     summary: str
-    prerequisites: list[str]
+    prerequisites: list[TeachingUnitRef]
     explanation_steps: list[str]
-    related_concepts: list[str]
+    knowledge_points: list[str]
     source_refs: list[SourceRef]
     confusion_points: list[str]

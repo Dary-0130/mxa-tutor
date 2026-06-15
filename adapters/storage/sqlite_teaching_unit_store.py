@@ -14,7 +14,7 @@ from loguru import logger
 from adapters.storage._connection import open_connection
 from core.domain.exceptions import ProjectNotFoundError, StoreError
 from core.domain.source_ref import SourceRef
-from core.domain.teaching_unit import TeachingUnit
+from core.domain.teaching_unit import TeachingUnit, TeachingUnitRef
 from core.interfaces.teaching_unit_store import (
     CacheKey,
     CacheState,
@@ -275,9 +275,10 @@ def _record_from_row(row: aiosqlite.Row) -> TeachingUnitCacheRecord:
 
 def _unit_from_row(row: aiosqlite.Row) -> TeachingUnit:
     payload = _json_object(row["payload_json"])
-    prerequisites = _json_list(row["prerequisites_json"])
+    prerequisites = [
+        _teaching_unit_ref_from_json(item) for item in _json_list(row["prerequisites_json"])
+    ]
     source_refs = [_source_ref_from_json(item) for item in _json_list(row["source_refs_json"])]
-    unit_fields = getattr(TeachingUnit, "__dataclass_fields__", {})
     kwargs: dict[str, Any] = {
         "id": str(payload.get("id") or row["teaching_unit_id"]),
         "title": str(payload.get("title") or ""),
@@ -287,25 +288,20 @@ def _unit_from_row(row: aiosqlite.Row) -> TeachingUnit:
         "summary": str(payload.get("summary") or ""),
         "prerequisites": prerequisites,
         "explanation_steps": _string_list(payload.get("explanation_steps")),
+        "knowledge_points": _string_list(payload.get("knowledge_points")),
         "source_refs": source_refs,
         "confusion_points": _string_list(payload.get("confusion_points")),
     }
-    points = _string_list(payload.get("knowledge_points"))
-    if "knowledge_points" in unit_fields:
-        kwargs["knowledge_points"] = points
-    else:
-        kwargs["related_concepts"] = points
     return TeachingUnit(**kwargs)
 
 
 def _payload_from_unit(unit: TeachingUnit) -> dict[str, Any]:
-    points = getattr(unit, "knowledge_points", getattr(unit, "related_concepts", []))
     return {
         "id": unit.id,
         "title": unit.title,
         "summary": unit.summary,
         "explanation_steps": list(unit.explanation_steps),
-        "knowledge_points": list(points),
+        "knowledge_points": list(unit.knowledge_points),
         "confusion_points": list(unit.confusion_points),
     }
 
@@ -321,6 +317,15 @@ def _source_ref_from_json(value: object) -> SourceRef:
         block_name=_optional_str(value.get("block_name")),
         parent_subsystem=_optional_str(value.get("parent_subsystem")),
         parameter_name=_optional_str(value.get("parameter_name")),
+    )
+
+
+def _teaching_unit_ref_from_json(value: object) -> TeachingUnitRef:
+    if not isinstance(value, dict):
+        raise StoreError("invalid_prerequisite_json")
+    return TeachingUnitRef(
+        project_id=str(value.get("project_id") or ""),
+        teaching_unit_id=str(value.get("teaching_unit_id") or ""),
     )
 
 
