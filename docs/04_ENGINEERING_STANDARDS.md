@@ -471,6 +471,71 @@ def safe_extract(zip_bytes: bytes, dest_dir: Path, config: AppSettings) -> Path:
 
 每个都必须有对应的测试:**确认被正确拒绝**。
 
+### 8.6 文档上传安全(PDF / docx)
+
+paper-to-model 资料入口必须与工程 zip 入口分离。TASK-501 落地时新增独立路由
+`POST /api/v1/upload-document`,只接受文档资料;既有 `/upload` 继续服务 MCS 工程 zip。
+两个入口白名单不同,不得把 PDF / docx 分支塞进工程 zip 沙箱。
+
+**(a) 上传入口策略**
+
+- 工程入口:继续只接收工程压缩包,沿用 § 8.2 zip 沙箱。
+- 资料入口:新增 `POST /api/v1/upload-document`,只处理 `.pdf` / `.docx`。
+- 前端必须把“工程入口 / 资料入口”作为两个清晰入口,避免用户把资料误投到工程解析。
+- 本规范只定义边界;路由实现留 TASK-501。
+
+**(b) magic byte sniffing**
+
+- PDF:扩展名必须是 `.pdf`,内容头必须匹配 `%PDF-`(`0x25 50 44 46 2D`)。
+- docx:扩展名必须是 `.docx`,容器头必须匹配 `PK\x03\x04`,且包内必须存在
+  `[Content_Types].xml`。
+- 扩展名和内容头必须双重校验,任一不符直接拒绝。
+- MIME type 只能作为辅助信号,不得作为唯一依据。
+
+**(c) parser sandbox**
+
+- 文档解析必须在隔离子进程内运行;解析进程崩溃不得拖垮主进程。
+- 默认解析超时 30s,允许通过配置调整。
+- 默认内存上限 512MB,允许通过配置调整。
+- 子进程只拿临时文件路径和必要配置,不得继承可写项目目录权限。
+- 解析失败返回中文可理解错误,不得泄漏堆栈或本地绝对路径。
+
+**(d) 解析依赖审批**
+
+- TASK-500 不引入任何 PDF / docx 解析库。
+- 后续新增解析库必须走 § 6 依赖管理流程:在 PR 中说明必要性、替代方案和风险,
+  经 review 后写入 `requirements.txt` 或 `requirements-dev.txt`。
+- 禁止 Codex 本地 `pip install` 后把隐性依赖留在代码里。
+
+**(e) 恶意 fixtures 占位**
+
+`tests/fixtures/malicious_documents/` 是文档安全测试 fixture 目录。TASK-500 只放 README 占位;
+TASK-501 收集实际样本时至少覆盖:
+
+- 加密 PDF
+- 嵌入 JavaScript 的 PDF
+- 巨型 PDF
+- 含宏的 docx
+- zip bomb 风格 docx
+- 损坏 docx
+
+每类样本都必须有对应测试,确认资料入口正确拒绝或降级。
+
+**(f) 外链 / 嵌入对象 / 宏 / OCR 策略**
+
+- 解析器不得执行任何嵌入对象,包括 JavaScript、宏、OLE 对象和外部程序。
+- 解析器不得联网,不得请求文档中的 URL 或远程资源。
+- 不解析远程图像;本地嵌入图片仅作为位置和缺失参数线索处理。
+- OCR 在 v0.2 评估;v0.1 不接 OCR,图片中的关键参数走 MissingParameterPrompt 用户补充流程。
+
+**(g) raw 文档持久化与脱敏策略**
+
+- raw PDF / docx 原文不持久化。解析完成后,临时目录按 § 8.3 清理,默认 24h TTL 兜底删除。
+- 允许持久化结构化抽取结果 `PaperSpec`,但必须满足长度上限、字段级脱敏和
+  `source: document_extracted` 来源标注。
+- 日志只记录请求 ID、文件大小、hash、扩展名和拒绝原因,不得记录文档正文、图片内容或用户原始文件名。
+- 用户补充的缺失参数必须标 `source: user_supplied`,不得改写为文档抽取来源。
+
 ---
 
 ## 9. 日志规范

@@ -2,6 +2,22 @@
 
 不是从零学 MATLAB,而是把你手上的工程讲明白。拖一个工程进来,带你看懂、问答到底。
 
+## 产品口径
+
+mxa-tutor 是二合一工科仿真助教:工程入口继续提供工程导览与问答;资料入口面向论文 / 报告复现,
+提供**复现路线图**、**模型搭建副驾**和**参数对应说明**。
+
+paper-to-model v0.1 的三层承诺:
+
+- **稳交付**:论文摘要、公式 / 参数抽取、物理含义讲解、模型搭建路线图。
+- **尽力交付**:`.m` 脚本骨架。
+- **不承诺**:打开即跑的完整 `.slx` 成品、运行结果正确、最优调参。
+
+资料入口只接受具体领域:`control_system` / `signal_processing` / `power_electronics` /
+`communication` / `motor_control` / `new_energy`。`general` 不作为资料入口选项;无法判断领域时,
+提示用户选择具体类型。图片中的关键参数若无法从文本抽取,走 MissingParameterPrompt,由用户补充后
+以 `source: user_supplied` 标注。
+
 ## 开发环境对齐
 
 本项目 Python 环境必须用 conda 的 **mxa** env(Python 3.11),其他 Python 版本(3.13)numpy 1.26 wheel 缺失会导致 install fail。

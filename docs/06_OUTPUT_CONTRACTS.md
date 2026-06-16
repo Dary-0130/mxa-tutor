@@ -223,6 +223,18 @@ Schema 可以演进,但不能偷偷漂移。任何修订 PR 必须按 D1-B 三�
 - overview_service 五步校验是否需要同步:是 / 否 + 理由
 - 评测脚本 `eval/run_eval.py` 字段表是否需要同步:是 / 否 + 理由
 
+paper-to-model 输出契约新增或修订时,沿用 D1-B 三层同源流程,但真值源路径独立于
+`ProjectOverview`:
+
+1. `core/domain/paper_*.py` domain dataclass / contract
+2. `features/paper/paper_schemas.py` Pydantic wrapper
+3. `tests/features/paper/test_paper_schema_freeze.py`
+4. `docs/06_OUTPUT_CONTRACTS.md` § 12
+5. `schemas/paper_*.schema.json`
+
+以上路径是 TASK-501 落地占位名,实际文件名可在实施 PR 中微调;但任一字段、Literal 或
+证据不变量变更,必须在同一 PR 内同步 domain / wrapper / freeze test / JSON schema / 本文。
+
 推荐本地命令:
 
 ```bash
@@ -327,3 +339,202 @@ v0.1 - 2026-06-05 起 freeze,与 TASK-203 commit `871c8e2` 的 `ProjectOverview`
 - 所有 schema 层级的 `extra="forbid"`
 
 下一次修改以上任一项,必须按 § 7 修订流程走同 PR 同源。
+
+---
+
+## 12. paper-to-model 输出契约
+
+本节覆盖 C 类资料复现副驾输出:从论文 / 报告 / 文献中抽取结构化规格,给出模型搭建路线图,
+并在参数缺失时提示用户补充。它是 v0.1 草稿契约,字段未冻结;TASK-501 落地时必须按
+§ 7 的 D1-B 三层同源流程演进。
+
+本节不覆盖 `ProjectOverview`,也不改造既有 MCS 工程导览契约。`PaperGraph` 已在
+`02_ARCHITECTURE_OVERVIEW.md` § 4.2 v3.0 delta 中作为独立结构占位;本节仅引用该占位,
+不写 `PaperGraph` 字段表。
+
+### 12.1 资料入口领域枚举
+
+资料入口的 `domain` 只接受既有 `project_type` 中的 6 个具体工程领域,不接受 `general`。
+
+| 字面值 | 语义 |
+|---|---|
+| `control_system` | 控制系统资料 |
+| `signal_processing` | 信号处理资料 |
+| `power_electronics` | 电力电子资料 |
+| `communication` | 通信系统资料 |
+| `motor_control` | 电机控制资料 |
+| `new_energy` | 新能源资料 |
+
+`general` 只作为 MCS 工程入口的兜底分类存在。资料入口若无法归入以上 6 类,应拒绝并提示用户选择具体领域。
+
+### 12.2 EvidenceSource enum
+
+`EvidenceSource` 是 paper-to-model 参数和证据的双源标记。
+
+| 字面值 | 语义 | 使用场景 |
+|---|---|---|
+| `document_extracted` | 来自上传资料的文本 / 公式 / 图表位置 | PaperSpec 中抽到的参数、公式、段落证据 |
+| `user_supplied` | 用户在缺失参数流程中补充 | MissingParameterPrompt 回填后的参数 |
+
+任何参数来源都必须保留该标记。用户补充值不得伪装成文档证据。
+
+### 12.3 PaperEvidenceEntry schema
+
+`PaperEvidenceEntry` 是 paper-to-model 独立证据条目,与
+`features/explanation/_evidence_builder.py::EvidencePack` 无包含、继承或引用关系。后者服务
+.slx 工程解释语境;本条目服务论文 / 报告的段落、公式和图表语境。
+
+**状态**:v0.1 草稿,字段未冻结。
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `source` | `EvidenceSource` | 必填 | 证据来源 |
+| `paper_section_id` | string \| null | 见不变量 | 文档段落 / 小节 ID |
+| `equation_id` | string \| null | 见不变量 | 公式 ID |
+| `figure_id` | string \| null | 见不变量 | 图表 ID |
+| `excerpt` | string \| null | 见不变量 | 文档原文摘录 |
+| `missing_param_prompt_id` | string \| null | 见不变量 | 用户补充流程关联 ID |
+
+两套不变量:
+
+- `source = document_extracted`: `paper_section_id` / `equation_id` / `figure_id` 至少一个非
+  null;`excerpt` 必须是 1-300 字非空字符串;`missing_param_prompt_id` 必须为 null。
+- `source = user_supplied`: `paper_section_id` / `equation_id` / `figure_id` 全部为 null;
+  `excerpt` 必须为 null;`missing_param_prompt_id` 必填,并关联到
+  `MissingParameterPrompt.prompt_id`。
+
+Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / contract,以及
+`features/paper/paper_schemas.py` Pydantic wrapper。TASK-500 不落地 Python 实现。
+
+### 12.4 PaperSpec schema
+
+`PaperSpec` 描述论文 / 报告的结构化规格。
+
+**状态**:v0.1 草稿,字段未冻结。
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `paper_title` | string | 1-200 字 | 资料标题 |
+| `paper_type` | `Literal["paper", "report", "thesis"]` | 必填 | 资料类型 |
+| `domain` | 资料入口领域枚举 | 不含 `general` | 工程领域 |
+| `abstract` | string | 1-1000 字 | 摘要或任务陈述 |
+| `equations` | array[`EquationEntry`] | 0-N | 公式列表 |
+| `parameter_table` | array[`ParameterEntry`] | 0-N | 参数表 |
+| `figure_locations` | array[`FigureRef`] | 0-N | 图表位置 |
+| `pseudocode_blocks` | array[string] | 0-N | 伪代码 / 算法段 |
+| `evidence` | array[`PaperEvidenceEntry`] | 至少 1 个 | 结构化抽取证据 |
+
+子项草稿:
+
+| 子项 | 字段 |
+|---|---|
+| `EquationEntry` | `equation_id` / `latex_or_text` / `paper_section_id` |
+| `ParameterEntry` | `name` / `symbol` / `value` / `unit` / `source` |
+| `FigureRef` | `figure_id` / `caption` / `paper_section_id` |
+
+### 12.5 ModelGenerationPlan schema
+
+`ModelGenerationPlan` 描述模型搭建路线图,给会用 MATLAB / Simulink 的用户按步骤复现。
+
+**状态**:v0.1 草稿,字段未冻结。
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `plan_id` | string | 必填 | 路线图 ID |
+| `paper_spec_id` | string | 必填 | 关联 `PaperSpec` |
+| `library_choice` | string | 1-100 字 | 库选型建议,如 `SimPowerSystems` |
+| `block_recommendations` | array[`BlockRecommendation`] | 0-N | block 建议 |
+| `parameter_mapping` | array[`ParameterMapping`] | 0-N | 论文参数到模型参数的对应说明 |
+| `subsystem_breakdown` | array[string] | 3-10 步 | 子系统拆分建议 |
+| `m_script_skeleton` | string \| null | 可空 | 尽力交付的 `.m` 骨架 |
+| `evidence` | array[`PaperEvidenceEntry`] | 至少 1 个 | 路线图证据 |
+
+子项草稿:
+
+| 子项 | 字段 |
+|---|---|
+| `BlockRecommendation` | `block_type` / `purpose` / `paper_reference` |
+| `ParameterMapping` | `paper_param_name` / `model_param_name` / `value` / `unit` / `source` |
+
+### 12.6 TuningSuggestion schema
+
+`TuningSuggestion` 描述面向用户场景的调参方向。它给方向和物理影响,不承诺运行结果或最优调参。
+
+**状态**:v0.1 草稿,字段未冻结。
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `suggestion_id` | string | 必填 | 建议 ID |
+| `user_scenario` | string | 1-500 字 | 用户描述的调参场景 |
+| `parameter_directions` | array[`ParameterDirection`] | 1-N | 参数方向列表 |
+| `expected_effect` | string | 1-500 字 | 预期物理影响讲解 |
+| `confidence` | `Literal["high", "medium", "low"]` | 必填 | 建议置信度 |
+| `evidence` | array[`PaperEvidenceEntry`] | 至少 1 个 | 建议依据 |
+| `disclaimer` | string | 必填 | 固定提示:建议需用户在 MATLAB 中验证 |
+
+子项草稿:
+
+| 子项 | 字段 |
+|---|---|
+| `ParameterDirection` | `param_name` / `direction` / `physical_meaning` |
+
+`direction` 取值:`increase` / `decrease` / `tune_within_range`。
+
+### 12.7 MissingParameterPrompt schema
+
+`MissingParameterPrompt` 描述资料中出现线索但 v0.1 无法抽到值或单位的参数补充项。
+
+**状态**:v0.1 草稿,字段未冻结。
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `prompt_id` | string | 必填 | 缺失参数提示 ID |
+| `parameter_name` | string | 必填 | 待补充参数名 |
+| `paper_reference` | `PaperEvidenceEntry` | 必填 | 文档中出现该线索的位置 |
+| `suggested_unit` | string \| null | 可空 | 从上下文推断的单位建议 |
+| `user_supplied_value` | string \| null | 回填前为空 | 用户补充值 |
+| `user_supplied_unit` | string \| null | 回填前为空 | 用户补充单位 |
+| `source` | `Literal["user_supplied"]` | 恒定值 | 体现双源契约 |
+
+`paper_reference.source` 必须是 `document_extracted`,用于指出缺失线索来自哪里;用户回填后的参数证据
+另以 `source = user_supplied` 的 `PaperEvidenceEntry` 表示。
+
+### 12.8 反模式
+
+反模式 1:资料入口使用 `general`:
+
+```json
+{"domain": "general", "paper_title": "某仿真实验报告"}
+```
+
+反模式 2:用户补充证据伪装成文档证据:
+
+```json
+{
+  "source": "document_extracted",
+  "paper_section_id": "sec-5",
+  "equation_id": null,
+  "figure_id": null,
+  "excerpt": "用户补充 H = 3.5 s",
+  "missing_param_prompt_id": "mp-001"
+}
+```
+
+反模式 3:文档证据没有 locator 或摘录:
+
+```json
+{
+  "source": "document_extracted",
+  "paper_section_id": null,
+  "equation_id": null,
+  "figure_id": null,
+  "excerpt": null,
+  "missing_param_prompt_id": null
+}
+```
+
+反模式 4:把 `PaperEvidenceEntry` 当作 explanation 的 `EvidencePack` 子集消费:
+
+```json
+{"evidence_pack_kind": "parameter_context", "paper_section_id": "sec-2"}
+```

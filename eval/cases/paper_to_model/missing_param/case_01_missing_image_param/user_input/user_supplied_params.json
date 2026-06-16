@@ -1,0 +1,46 @@
+{
+  "user_supplied_responses": [
+    {
+      "prompt_id": "MISS-001",
+      "parameter_name": "同步发电机惯性时间常数 H",
+      "user_supplied_value": "3.5",
+      "user_supplied_unit": "s",
+      "user_supplied_note": "汽轮发电机典型值(200MW 等级);用户从论文图 FIG-01 标准同步发电机模型参数截图读出"
+    },
+    {
+      "prompt_id": "MISS-002",
+      "parameter_name": "同步发电机摩擦因数 F",
+      "user_supplied_value": "0",
+      "user_supplied_unit": "pu",
+      "user_supplied_note": "SimPowerSystems Synchronous Machine block 默认 F=0(不考虑摩擦);用户从论文图 FIG-01 读出"
+    },
+    {
+      "prompt_id": "MISS-003",
+      "parameter_name": "变压器变比(原边/副边电压比)",
+      "user_supplied_value": "13.8 / 230",
+      "user_supplied_unit": "kV / kV",
+      "user_supplied_note": "电厂出口升压变压器,200MW 机组接入 230 kV 高压输电网;用户从论文图 FIG-02 变压器参数截图读出"
+    },
+    {
+      "prompt_id": "MISS-004",
+      "parameter_name": "变压器漏阻抗 X_T",
+      "user_supplied_value": "0.12",
+      "user_supplied_unit": "pu",
+      "user_supplied_note": "200MW 等级升压变压器典型漏抗值;用户从论文图 FIG-02 读出"
+    },
+    {
+      "prompt_id": "MISS-005",
+      "parameter_name": "变压器接线方式(原边 / 副边连接组别)",
+      "user_supplied_value": "Yn / d11",
+      "user_supplied_unit": null,
+      "user_supplied_note": "原边中性点接地星形 / 副边三角形,30° 滞后(标准电厂升压变压器接线);用户从论文图 FIG-02 读出"
+    },
+    {
+      "prompt_id": "MISS-006",
+      "parameter_name": "电机初相角 α0",
+      "user_supplied_value": "1.5708",
+      "user_supplied_unit": "rad",
+      "user_supplied_note": "初相角约 π/2 (90°);依据论文文字 a 相滞后电压 -4.43°,但完整初始化结果需图 FIG-03 截图读出 α0 精确值;此处取 π/2 作为典型空载短路初值"
+    }
+  ]
+}

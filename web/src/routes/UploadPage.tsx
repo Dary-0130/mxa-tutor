@@ -128,7 +128,16 @@ export function UploadPage() {
       <section className="upload-content" aria-label="上传 MATLAB 工程">
         <div className="upload-copy">
           <h1 className="upload-hero-brand">MXA TUTOR</h1>
-          <p className="upload-hero-tagline">工科仿真 AI 助教</p>
+          <p className="upload-hero-tagline">工程导览 + 资料复现路线图</p>
+          <div className="upload-hero-note" aria-label="资料入口口径">
+            <p>资料入口提供模型搭建副驾与参数对应说明。</p>
+            <p>
+              稳交付:摘要、公式 / 参数、物理含义、模型搭建路线图;尽力交付:.m 脚本骨架;不承诺:打开即跑的完整 .slx 成品、运行结果正确或最优调参。
+            </p>
+            <p>
+              领域限 control_system / signal_processing / power_electronics / communication / motor_control / new_energy;general 资料入口拒绝,图片参数需用户补充。
+            </p>
+          </div>
         </div>
         {busy && state.file ? (
           <UploadStatusCard

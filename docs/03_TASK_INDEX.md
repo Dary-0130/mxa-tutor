@@ -363,6 +363,11 @@ Week 4:  [✅✅✅⏸↪↪]           3/6
 
 TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须先完成决策 22 § 10.4 的五项开门 chore:06 三套契约 / MissingParameterPrompt + EvidencePack 双源 / 文档上传安全 / 产品文案与对外口径 / 评测准入。五项全 ✅ 后,再进入文档解析 → PaperSpec → ModelGenerationPlan → 调参建议。
 
+| 编号 | 名称 | 状态 | 负责 | 备注 |
+|------|------|------|------|------|
+| TASK-500 | paper-to-model 开门 chore(5 项前置硬门槛一锅炖) | 🔍 | Codex | 5 项门槛交付已提交待验收 |
+| TASK-501 | PaperPlanService 与资料入口实现起点 | ⏸ | Codex | 封禁至 TASK-500 合并 ✅ |
+
 **决策 09 反例库**:108 → **162**(本任 TASK-310 累积 +54;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
 
 - K_28a 36 → **53**(+17):38 任 +13(R0 / R1 / Round 1 / Round 2 / D-E-F 五段)/ 39 任 +4(派单凭印象 migrations 目录 + projects 表名 + overview_schemas 期望窄 + 索引数字 32/34 凭印象)

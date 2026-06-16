@@ -1,0 +1,100 @@
+{
+  "missing_prompts": [
+    {
+      "prompt_id": "MISS-001",
+      "parameter_name": "同步发电机惯性时间常数 H",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S5",
+        "equation_id": null,
+        "figure_id": "FIG-01",
+        "excerpt": "标准同步发电机模型参数如下:",
+        "missing_param_prompt_id": null
+      },
+      "suggested_unit": "s",
+      "user_supplied_value": null,
+      "user_supplied_unit": null,
+      "source": "user_supplied"
+    },
+    {
+      "prompt_id": "MISS-002",
+      "parameter_name": "同步发电机摩擦因数 F",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S5",
+        "equation_id": null,
+        "figure_id": "FIG-01",
+        "excerpt": "标准同步发电机模型参数如下:",
+        "missing_param_prompt_id": null
+      },
+      "suggested_unit": "pu",
+      "user_supplied_value": null,
+      "user_supplied_unit": null,
+      "source": "user_supplied"
+    },
+    {
+      "prompt_id": "MISS-003",
+      "parameter_name": "变压器变比(原边/副边电压比)",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S5",
+        "equation_id": null,
+        "figure_id": "FIG-02",
+        "excerpt": "变压器参数如下:",
+        "missing_param_prompt_id": null
+      },
+      "suggested_unit": "kV / kV",
+      "user_supplied_value": null,
+      "user_supplied_unit": null,
+      "source": "user_supplied"
+    },
+    {
+      "prompt_id": "MISS-004",
+      "parameter_name": "变压器漏阻抗 X_T",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S5",
+        "equation_id": null,
+        "figure_id": "FIG-02",
+        "excerpt": "变压器参数如下:",
+        "missing_param_prompt_id": null
+      },
+      "suggested_unit": "pu",
+      "user_supplied_value": null,
+      "user_supplied_unit": null,
+      "source": "user_supplied"
+    },
+    {
+      "prompt_id": "MISS-005",
+      "parameter_name": "变压器接线方式(原边 / 副边连接组别)",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S5",
+        "equation_id": null,
+        "figure_id": "FIG-02",
+        "excerpt": "变压器参数如下:",
+        "missing_param_prompt_id": null
+      },
+      "suggested_unit": null,
+      "user_supplied_value": null,
+      "user_supplied_unit": null,
+      "source": "user_supplied"
+    },
+    {
+      "prompt_id": "MISS-006",
+      "parameter_name": "电机初相角 α0(初始化结果,论文文字仅给出 a 相滞后电压 -4.43°,完整 α0 需从初始化工具截图读出)",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S5",
+        "equation_id": null,
+        "figure_id": "FIG-03",
+        "excerpt": "根据电机初始化工具的截图可得,定子侧电流 a 相滞后电压 -4.43°",
+        "missing_param_prompt_id": null
+      },
+      "suggested_unit": "rad",
+      "user_supplied_value": null,
+      "user_supplied_unit": null,
+      "source": "user_supplied"
+    }
+  ]
+}

@@ -1,0 +1,162 @@
+{
+  "plan_id": "PLAN-001-MOTOR-SC",
+  "paper_spec_id": "PAPERSPEC-001-MOTOR-SC",
+  "library_choice": "SimPowerSystems(电机短路类工程的标准库;论文给出同步发电机 d/q 轴电抗 / 时间常数 / 阻尼参数,与 SimPowerSystems 的 Synchronous Machine pu Standard block 参数槽位直接对应,选 SimPowerSystems 而非基础 Simulink 是 SimPowerSystems 路线的工程惯例)",
+  "block_recommendations": [
+    {
+      "block_type": "powergui (Continuous)",
+      "purpose": "SimPowerSystems 模型的环境配置 block,所有 SimPowerSystems 工程必须包含一个 powergui 才能仿真;选 Continuous 模式以匹配 ode15s 变步长求解器。系统推断,论文未明示 powergui 但 SimPowerSystems 工程必备。",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S5",
+        "equation_id": null,
+        "figure_id": null,
+        "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
+        "missing_param_prompt_id": null
+      }
+    },
+    {
+      "block_type": "Synchronous Machine pu Standard",
+      "purpose": "同步发电机本体;采用 pu Standard 形式因为论文给出的电抗 / 时间常数全是 pu。本 block 的参数槽位与论文 12 项参数(xd / xq / xd' / xd'' / xq'' / r / xσf / xaD / xσQ / Td0' / TD / Tq0'')逐项对应。",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S2",
+        "equation_id": null,
+        "figure_id": null,
+        "excerpt": "假设一台有阻尼绕组同步发电机,PN=200MW,UN=13.8kV,fN=50Hz,xd=1.0,xq=0.6,xd'=0.3,xd''=0.21,xq''=0.31,r=0.005,xσf=0.18,xaD=0.1,xσQ=0.25,Td0'=5s,TD=2s,Tq0''=1.4s。",
+        "missing_param_prompt_id": null
+      }
+    },
+    {
+      "block_type": "Three-Phase Fault",
+      "purpose": "模拟端子突然发生三相短路故障的核心 block;故障类型设为三相对地 / 三相对中性点(系统推断,论文仅说'三相短路'未明示对地或对中性点)。",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S2",
+        "equation_id": null,
+        "figure_id": null,
+        "excerpt": "端子突然发生三相短路",
+        "missing_param_prompt_id": null
+      }
+    },
+    {
+      "block_type": "Three-Phase V-I Measurement",
+      "purpose": "测量定子端三相电压、电流,供 Scope 显示与 .m 计算结果对照;系统推断,论文未明示但为 SimPowerSystems 工程标准做法。",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S3",
+        "equation_id": null,
+        "figure_id": null,
+        "excerpt": "对以上公式采用 .m 文件进行数值计算和绘图。绘图包括发电机端突然三相短路时的 a 相定子电流,以及基频分量、倍频分量和非周期分量波形。",
+        "missing_param_prompt_id": null
+      }
+    },
+    {
+      "block_type": "Three-Phase Series RLC Load",
+      "purpose": "端口并联负荷模块;系统推断 5 MW 有功负荷(论文未在剥离版中明示该具体数值,sed v0.1 阶段需 PaperPlanService 推断或由用户补充)。",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S5",
+        "equation_id": null,
+        "figure_id": null,
+        "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
+        "missing_param_prompt_id": null
+      }
+    },
+    {
+      "block_type": "Three-Phase Transformer (Two Windings)",
+      "purpose": "变压器 block;论文涉及变压器参数(以图片形式给出),具体变比 / 漏抗 / 电阻参数需用户补充或 OCR 抽取(v0.1 走 MissingParameterPrompt);系统推断为标准两绕组变压器。",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S5",
+        "equation_id": null,
+        "figure_id": null,
+        "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
+        "missing_param_prompt_id": null
+      }
+    },
+    {
+      "block_type": "Scope",
+      "purpose": "示波器,显示三相定子电流波形;论文明示需要 .m 数值计算结果与 Simulink 仿真结果对照,Scope 是 Simulink 侧输出端。",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S4",
+        "equation_id": null,
+        "figure_id": null,
+        "excerpt": "非周期分量从短路电流初始值衰减至 0,倍频分量从短路电流初始值按指数规律衰减至 0。",
+        "missing_param_prompt_id": null
+      }
+    },
+    {
+      "block_type": "Mux / Demux",
+      "purpose": "处理 Synchronous Machine 输出端口的多信号总线(电流 / 电压 / 速度 / 励磁等),拆出三相定子电流用于显示。系统推断,SimPowerSystems 工程标准做法。",
+      "paper_reference": {
+        "source": "document_extracted",
+        "paper_section_id": "S3",
+        "equation_id": null,
+        "figure_id": null,
+        "excerpt": "绘图包括发电机端突然三相短路时的 a 相定子电流",
+        "missing_param_prompt_id": null
+      }
+    }
+  ],
+  "parameter_mapping": [
+    {"paper_param_name": "PN", "model_param_name": "Synchronous Machine.Pn (VA)", "value": "200e6", "unit": "VA", "source": "document_extracted"},
+    {"paper_param_name": "UN", "model_param_name": "Synchronous Machine.Vn (Vrms,line-line)", "value": "13.8e3", "unit": "V", "source": "document_extracted"},
+    {"paper_param_name": "fN", "model_param_name": "Synchronous Machine.fn (Hz)", "value": "50", "unit": "Hz", "source": "document_extracted"},
+    {"paper_param_name": "xd", "model_param_name": "Synchronous Machine.Xd (pu)", "value": "1.0", "unit": "pu", "source": "document_extracted"},
+    {"paper_param_name": "xq", "model_param_name": "Synchronous Machine.Xq (pu)", "value": "0.6", "unit": "pu", "source": "document_extracted"},
+    {"paper_param_name": "xd'", "model_param_name": "Synchronous Machine.Xd' (pu)", "value": "0.3", "unit": "pu", "source": "document_extracted"},
+    {"paper_param_name": "xd''", "model_param_name": "Synchronous Machine.Xd'' (pu)", "value": "0.21", "unit": "pu", "source": "document_extracted"},
+    {"paper_param_name": "xq''", "model_param_name": "Synchronous Machine.Xq'' (pu)", "value": "0.31", "unit": "pu", "source": "document_extracted"},
+    {"paper_param_name": "r", "model_param_name": "Synchronous Machine.Rs (pu)", "value": "0.005", "unit": "pu", "source": "document_extracted"},
+    {"paper_param_name": "xσf", "model_param_name": "Synchronous Machine.Xl_fd (pu)", "value": "0.18", "unit": "pu", "source": "document_extracted"},
+    {"paper_param_name": "xaD", "model_param_name": "Synchronous Machine.Xa_d (pu,d 轴阻尼绕组互漏抗,需根据本工程库版本定参数槽位)", "value": "0.1", "unit": "pu", "source": "document_extracted"},
+    {"paper_param_name": "xσQ", "model_param_name": "Synchronous Machine.Xl_kq (pu,q 轴阻尼绕组漏抗)", "value": "0.25", "unit": "pu", "source": "document_extracted"},
+    {"paper_param_name": "Td0'", "model_param_name": "Synchronous Machine.Td0' (s)", "value": "5", "unit": "s", "source": "document_extracted"},
+    {"paper_param_name": "TD", "model_param_name": "Synchronous Machine.Tkd / Td'' 相关时间常数槽位(具体名称按本机型版本查参数表)", "value": "2", "unit": "s", "source": "document_extracted"},
+    {"paper_param_name": "Tq0''", "model_param_name": "Synchronous Machine.Tq0'' (s)", "value": "1.4", "unit": "s", "source": "document_extracted"},
+    {"paper_param_name": "(工程推断) 负荷有功功率", "model_param_name": "Three-Phase Series RLC Load.Active Power (W)", "value": "5e6", "unit": "W", "source": "document_extracted"},
+    {"paper_param_name": "(工程推断) 同步机节点类型", "model_param_name": "Synchronous Machine.Mechanical input / 平衡节点设置 (Swing bus)", "value": "Swing bus(平衡节点;系统推断的工程决定,基于'空载 + 端电压为额定电压'工况)", "unit": "—", "source": "document_extracted"},
+    {"paper_param_name": "(工程推断) 故障起始时刻", "model_param_name": "Three-Phase Fault.Switching times (s)", "value": "[0.2]", "unit": "s", "source": "document_extracted"},
+    {"paper_param_name": "(工程推断) 求解器", "model_param_name": "Simulation > Configuration Parameters > Solver", "value": "ode15s(刚性方程求解器;电机短路含快速衰减分量,适合 ode15s)", "unit": "—", "source": "document_extracted"},
+    {"paper_param_name": "(工程推断) 仿真时长", "model_param_name": "Simulation > Configuration Parameters > Stop time (s)", "value": "1", "unit": "s", "source": "document_extracted"}
+  ],
+  "subsystem_breakdown": [
+    "第 1 步:放置 powergui(Continuous 模式),作为 SimPowerSystems 仿真环境根 block。",
+    "第 2 步:放置 Synchronous Machine pu Standard,按 parameter_mapping 表逐项填入 12 项电机参数(PN / UN / fN / xd / xq / xd' / xd'' / xq'' / r / xσf / xaD / xσQ / Td0' / TD / Tq0''),机械输入选 Swing bus(平衡节点工程决定)。",
+    "第 3 步:Synchronous Machine 输出 m 端口接 Demux / Bus Selector,拆出 Stator currents (is_a / is_b / is_c) 信号,接 Scope。",
+    "第 4 步:Synchronous Machine 三相输出端 A/B/C 接 Three-Phase V-I Measurement,再接 Three-Phase Fault block;Three-Phase Fault 的 Switching times 设为 [0.2],对应 0.2s 时刻三相短路。",
+    "第 5 步:Three-Phase V-I Measurement 输出端并联 Three-Phase Series RLC Load(5MW),模拟端口负荷。",
+    "第 6 步:Three-Phase Transformer (Two Windings) 视论文实际拓扑接入(变压器具体参数从论文图片或用户补充获取,本剥离版资料中变压器参数槽位空,标 user_supplied)。",
+    "第 7 步:在 Simulation > Configuration Parameters 中,Solver 选 ode15s(变步长刚性求解器),Stop time 设 1s。",
+    "第 8 步:同步运行配套 .m 文件(见 m_script_skeleton),计算定子 a 相电流闭式表达式 ia(t) 的基频 / 倍频 / 非周期分量;与 Simulink Scope 输出对照,验证模型搭建正确性。"
+  ],
+  "m_script_skeleton": "% 同步发电机突然三相短路 .m 数值计算骨架\n% 基于论文 EQ-01 定子 a 相电流闭式表达式\n% 注:本 .m 骨架为 v0.1 副驾尽力交付层,需用户在 MATLAB 中验证语法与数值正确性\n\nclear; clc;\n\n% --- 参数(由用户从 Simulink 工况或电机初始化结果填入)---\nomega = 2 * pi * 50;        % 角频率,fN = 50 Hz\nalpha0 = 0;                  % 初相角(α0)— 实际值需由电机初始化工具结果给出,本骨架取 0\nt = 0 : 1e-4 : 1;            % 时间序列,采样步长 0.1ms,总长 1s\n\n% --- 衰减时间常数(从论文 EQ-01 公式中读出)---\nlambda_freq_1 = -2.97;       % 基频衰减分量 1 的时间常数\nlambda_freq_2 = 0.608;       % 基频衰减分量 2 的时间常数(注:论文公式中此项为 +0.608 即增长项,实际仿真应按论文字面取值)\nlambda_dc = -6.3;            % 非周期 + 倍频衰减时间常数\n\n% --- a 相电流闭式表达式各分量 ---\ni_a_steady = -cos(omega .* t + alpha0);\ni_a_freq_decay_1 = -1.4 .* exp(lambda_freq_1 .* t) .* cos(omega .* t + alpha0);\ni_a_freq_decay_2 = -2.34 .* exp(lambda_freq_2 .* t) .* cos(omega .* t + alpha0);\ni_a_aperiodic = 4 .* exp(lambda_dc .* t) .* cos(-alpha0);\ni_a_double_freq = 0.77 .* exp(lambda_dc .* t) .* cos(2 * omega .* t + alpha0);\n\n% --- 总 a 相电流 ---\ni_a = i_a_steady + i_a_freq_decay_1 + i_a_freq_decay_2 + i_a_aperiodic + i_a_double_freq;\n\n% --- 分组绘图 ---\nfigure;\nsubplot(4, 1, 1); plot(t, i_a); title('a 相定子电流总波形'); xlabel('t (s)'); ylabel('i_a (pu)');\nsubplot(4, 1, 2); plot(t, i_a_steady + i_a_freq_decay_1 + i_a_freq_decay_2); title('基频分量'); xlabel('t (s)');\nsubplot(4, 1, 3); plot(t, i_a_double_freq); title('倍频分量'); xlabel('t (s)');\nsubplot(4, 1, 4); plot(t, i_a_aperiodic); title('非周期分量'); xlabel('t (s)');\n",
+  "evidence": [
+    {
+      "source": "document_extracted",
+      "paper_section_id": "S2",
+      "equation_id": null,
+      "figure_id": null,
+      "excerpt": "假设一台有阻尼绕组同步发电机,PN=200MW,UN=13.8kV,fN=50Hz,xd=1.0,xq=0.6,xd'=0.3,xd''=0.21,xq''=0.31,r=0.005,xσf=0.18,xaD=0.1,xσQ=0.25,Td0'=5s,TD=2s,Tq0''=1.4s。",
+      "missing_param_prompt_id": null
+    },
+    {
+      "source": "document_extracted",
+      "paper_section_id": "S3",
+      "equation_id": "EQ-01",
+      "figure_id": null,
+      "excerpt": "ia = -cos(ωt+α0) - 1.4·e^(-2.97t)·cos(ωt+α0) - 2.34·e^(0.608t)·cos(ωt+α0) + 4·e^(-6.3t)·cos(-α0) + 0.77·e^(-6.3t)·cos(2ωt+α0)",
+      "missing_param_prompt_id": null
+    },
+    {
+      "source": "document_extracted",
+      "paper_section_id": "S5",
+      "equation_id": null,
+      "figure_id": null,
+      "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
+      "missing_param_prompt_id": null
+    }
+  ]
+}
