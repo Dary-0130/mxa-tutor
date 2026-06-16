@@ -1,4 +1,5 @@
 from core.domain.exceptions import (
+    DocumentParseError,
     EmbeddingError,
     EmbeddingModelLoadError,
     EvidenceMissingError,
@@ -12,6 +13,7 @@ from core.domain.exceptions import (
     MParseError,
     MxaError,
     OverviewGenerationError,
+    PaperSpecGenerationError,
     ParseError,
     ProjectError,
     ProjectNotFoundError,
@@ -40,7 +42,7 @@ def test_llm_errors_inherit_from_llm_error_and_mxa_error() -> None:
 
 
 def test_parse_errors_inherit_from_parse_error_and_mxa_error() -> None:
-    for error_type in [SlxParseError, MParseError]:
+    for error_type in [SlxParseError, MParseError, DocumentParseError]:
         error = error_type("x")
         assert isinstance(error, ParseError)
         assert isinstance(error, MxaError)
@@ -70,6 +72,7 @@ def test_top_level_business_errors_inherit_from_mxa_error() -> None:
     assert isinstance(QuotaExhaustedError("x"), MxaError)
     assert isinstance(EvidenceMissingError("x"), MxaError)
     assert isinstance(OverviewGenerationError("x"), MxaError)
+    assert isinstance(PaperSpecGenerationError("x"), MxaError)
 
 
 def test_vector_store_error_inherits_from_store_error() -> None:

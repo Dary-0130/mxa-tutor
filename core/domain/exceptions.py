@@ -46,6 +46,10 @@ class MParseError(ParseError):
     """.m 文件解析失败。"""
 
 
+class DocumentParseError(ParseError):
+    """PDF / docx 文档解析失败。"""
+
+
 class ProjectError(MxaError):
     """工程相关异常的基类。"""
 
@@ -84,6 +88,10 @@ class EvidenceMissingError(MxaError):
 
 class OverviewGenerationError(MxaError):
     """项目导览生成失败。"""
+
+
+class PaperSpecGenerationError(MxaError):
+    """PaperSpec 生成失败。"""
 
 
 class ChatSessionNotFoundError(ProjectError):
