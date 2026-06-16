@@ -1,0 +1,68 @@
+{
+  "paper_title": "同步发电机突然三相短路暂态过程的数值计算方法与仿真方法",
+  "paper_type": "report",
+  "domain": "motor_control",
+  "abstract": "对一台有阻尼绕组同步发电机(PN=200MW、UN=13.8kV、fN=50Hz)在空载且端电压为额定电压、端子突然发生三相短路工况下的定子电流暂态过程,利用 MATLAB 进行数值计算与 Simulink 仿真。先通过定子 a 相电流闭式表达式利用 .m 文件作数值计算与波形绘制(基频分量 / 倍频分量 / 非周期分量),再搭建 Simulink 模型对短路过程进行仿真,二者结果相互对照。",
+  "equations": [
+    {
+      "equation_id": "EQ-01",
+      "latex_or_text": "ia = -cos(ωt+α0) - 1.4·e^(-2.97t)·cos(ωt+α0) - 2.34·e^(0.608t)·cos(ωt+α0) + 4·e^(-6.3t)·cos(-α0) + 0.77·e^(-6.3t)·cos(2ωt+α0)",
+      "paper_section_id": "S3"
+    }
+  ],
+  "parameter_table": [
+    {"name": "额定有功功率", "symbol": "PN", "value": "200", "unit": "MW", "source": "document_extracted"},
+    {"name": "额定电压", "symbol": "UN", "value": "13.8", "unit": "kV", "source": "document_extracted"},
+    {"name": "额定频率", "symbol": "fN", "value": "50", "unit": "Hz", "source": "document_extracted"},
+    {"name": "d 轴同步电抗", "symbol": "xd", "value": "1.0", "unit": "pu", "source": "document_extracted"},
+    {"name": "q 轴同步电抗", "symbol": "xq", "value": "0.6", "unit": "pu", "source": "document_extracted"},
+    {"name": "d 轴暂态电抗", "symbol": "xd'", "value": "0.3", "unit": "pu", "source": "document_extracted"},
+    {"name": "d 轴次暂态电抗", "symbol": "xd''", "value": "0.21", "unit": "pu", "source": "document_extracted"},
+    {"name": "q 轴次暂态电抗", "symbol": "xq''", "value": "0.31", "unit": "pu", "source": "document_extracted"},
+    {"name": "定子电阻", "symbol": "r", "value": "0.005", "unit": "pu", "source": "document_extracted"},
+    {"name": "励磁绕组漏抗", "symbol": "xσf", "value": "0.18", "unit": "pu", "source": "document_extracted"},
+    {"name": "d 轴阻尼绕组互漏抗", "symbol": "xaD", "value": "0.1", "unit": "pu", "source": "document_extracted"},
+    {"name": "q 轴阻尼绕组漏抗", "symbol": "xσQ", "value": "0.25", "unit": "pu", "source": "document_extracted"},
+    {"name": "d 轴开路暂态时间常数", "symbol": "Td0'", "value": "5", "unit": "s", "source": "document_extracted"},
+    {"name": "d 轴阻尼时间常数", "symbol": "TD", "value": "2", "unit": "s", "source": "document_extracted"},
+    {"name": "q 轴开路次暂态时间常数", "symbol": "Tq0''", "value": "1.4", "unit": "s", "source": "document_extracted"}
+  ],
+  "figure_locations": [],
+  "pseudocode_blocks": [
+    "在 [0, T_end] 时间范围内,基于 EQ-01 定子 a 相电流闭式表达式对时间采样并计算 ia(t);分别画出 a 相定子电流总波形、基频分量(包含 -cos(ωt+α0) 与 -1.4·e^(-2.97t)·cos(ωt+α0) 两项)、倍频分量(0.77·e^(-6.3t)·cos(2ωt+α0))、非周期分量(4·e^(-6.3t)·cos(-α0));α0 为初相角,从工程上下文或电机初始化结果给出。"
+  ],
+  "evidence": [
+    {
+      "source": "document_extracted",
+      "paper_section_id": "S2",
+      "equation_id": null,
+      "figure_id": null,
+      "excerpt": "假设一台有阻尼绕组同步发电机,PN=200MW,UN=13.8kV,fN=50Hz,xd=1.0,xq=0.6,xd'=0.3,xd''=0.21,xq''=0.31,r=0.005,xσf=0.18,xaD=0.1,xσQ=0.25,Td0'=5s,TD=2s,Tq0''=1.4s。若发电机空载,端电压为额定电压,端子突然发生三相短路。",
+      "missing_param_prompt_id": null
+    },
+    {
+      "source": "document_extracted",
+      "paper_section_id": "S3",
+      "equation_id": "EQ-01",
+      "figure_id": null,
+      "excerpt": "ia = -cos(ωt+α0) - 1.4·e^(-2.97t)·cos(ωt+α0) - 2.34·e^(0.608t)·cos(ωt+α0) + 4·e^(-6.3t)·cos(-α0) + 0.77·e^(-6.3t)·cos(2ωt+α0)",
+      "missing_param_prompt_id": null
+    },
+    {
+      "source": "document_extracted",
+      "paper_section_id": "S4",
+      "equation_id": null,
+      "figure_id": null,
+      "excerpt": "同步电机突然三相短路,基频周期分量从短路电流有效值衰减至稳态值。非周期分量从短路电流初始值衰减至 0,倍频分量从短路电流初始值按指数规律衰减至 0。",
+      "missing_param_prompt_id": null
+    },
+    {
+      "source": "document_extracted",
+      "paper_section_id": "S5",
+      "equation_id": null,
+      "figure_id": null,
+      "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
+      "missing_param_prompt_id": null
+    }
+  ]
+}

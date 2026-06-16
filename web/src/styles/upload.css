@@ -35,6 +35,19 @@
   letter-spacing: 0;
 }
 
+.upload-hero-note {
+  max-width: 620px;
+  margin-top: 22px;
+  color: var(--color-cold);
+  font-size: 0.96rem;
+  font-weight: 650;
+  line-height: 1.7;
+}
+
+.upload-hero-note p {
+  margin: 8px 0 0;
+}
+
 .upload-corner-tag {
   position: fixed;
   top: 28px;
