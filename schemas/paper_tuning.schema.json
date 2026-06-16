@@ -1,0 +1,184 @@
+{
+  "$defs": {
+    "EvidenceSource": {
+      "description": "Source marker for paper-to-model evidence.",
+      "enum": [
+        "document_extracted",
+        "user_supplied"
+      ],
+      "title": "EvidenceSource",
+      "type": "string"
+    },
+    "PaperEvidenceEntryModel": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/EvidenceSource"
+        },
+        "paper_section_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paper Section Id"
+        },
+        "equation_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Equation Id"
+        },
+        "figure_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Figure Id"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        },
+        "missing_param_prompt_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Missing Param Prompt Id"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "PaperEvidenceEntryModel",
+      "type": "object"
+    },
+    "ParameterDirectionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "param_name": {
+          "minLength": 1,
+          "title": "Param Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "increase",
+            "decrease",
+            "tune_within_range"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "physical_meaning": {
+          "minLength": 1,
+          "title": "Physical Meaning",
+          "type": "string"
+        }
+      },
+      "required": [
+        "param_name",
+        "direction",
+        "physical_meaning"
+      ],
+      "title": "ParameterDirectionModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "suggestion_id": {
+      "minLength": 1,
+      "title": "Suggestion Id",
+      "type": "string"
+    },
+    "user_scenario": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "User Scenario",
+      "type": "string"
+    },
+    "parameter_directions": {
+      "items": {
+        "$ref": "#/$defs/ParameterDirectionModel"
+      },
+      "minItems": 1,
+      "title": "Parameter Directions",
+      "type": "array"
+    },
+    "expected_effect": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Expected Effect",
+      "type": "string"
+    },
+    "confidence": {
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/PaperEvidenceEntryModel"
+      },
+      "minItems": 1,
+      "title": "Evidence",
+      "type": "array"
+    },
+    "disclaimer": {
+      "minLength": 1,
+      "title": "Disclaimer",
+      "type": "string"
+    }
+  },
+  "required": [
+    "suggestion_id",
+    "user_scenario",
+    "parameter_directions",
+    "expected_effect",
+    "confidence",
+    "evidence",
+    "disclaimer"
+  ],
+  "title": "TuningSuggestionModel",
+  "type": "object"
+}

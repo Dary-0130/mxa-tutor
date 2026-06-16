@@ -21,7 +21,7 @@ class ParameterMapping:
     paper_param_name: str
     model_param_name: str
     value: str
-    unit: str
+    unit: str | None
     source: EvidenceSource
 
 
