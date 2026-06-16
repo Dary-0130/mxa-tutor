@@ -19,7 +19,7 @@ def _clear_prompt_cache() -> None:
 def test_load_prompt_template_reads_paper_spec_yaml() -> None:
     template = load_prompt_template()
 
-    assert template.version == "v0.1"
+    assert template.version == "v0.3"
     assert "PaperSpec" in template.description
     assert "{raw_text}" in template.user
     assert "paper_title" in template.system

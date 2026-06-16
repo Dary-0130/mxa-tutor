@@ -1,4 +1,4 @@
-# TASK-501:paper-to-model 资料入口骨架 + PaperSpec 抽取(v0.3.2 — 终版 + Stage 2 微补丁)
+# TASK-501:paper-to-model 资料入口骨架 + PaperSpec 抽取(v0.3.4 — 终版 + 真启动 prompt 二轮微补丁)
 
 ## 状态
 
@@ -9,6 +9,8 @@
 - **R1 三审明示不需要四审**(除非 v0.3.1 改动 06 § 12 字段 / API 路由范围 / cache 语义 / sandbox 机制 — v0.3.1 7 项小修均不动这些)
 - **下一步**:PM 合并任务卡 → Codex Stage 0
 - **v0.3.2 微补丁**(2026-06-16,Stage 2 sample roundtrip 实测驱动):06 § 12.5 字段约束放宽(`library_choice` 1-100 → 1-300 字;`ParameterMapping.unit: str` → `str | None`);走 v0.3.1 § 输出 段预留的"若 06 § 12 字段在本卡实施期发现需要微调"通道;PM 拍板不走 R1 四审(修订性质 = 约束放宽,非语义变更)
+- **v0.3.3 真启动微补丁**(2026-06-16,R6 真启动 case_01 诊断驱动):prompt `paper_spec_extract.yaml` v0.1 → v0.2,补字段名硬约束 / 禁止字段名 / 一行示例;不改 schema / 06 字面 / service / sandbox / cache;对齐决策 15 diagnose before fix
+- **v0.3.4 真启动二轮微补丁**(2026-06-16,R6 真启动第二轮诊断驱动):prompt `paper_spec_extract.yaml` v0.2 → v0.3,补 `PaperSpec.ParameterEntry.unit` 标幺值必须填 `"pu"` 字面且禁 `""` / `null`;不改 schema / 06 字面 / service / sandbox / cache;明确 `PaperSpec.ParameterEntry.unit` 与 `ModelGenerationPlan.ParameterMapping.unit` 语义不同
 
 ## R2 公开 challenge 清单(决策 12 v0.4 R2 工艺,留档)
 
@@ -201,7 +203,7 @@ eval/cases/paper_to_model/
 | `features/paper/_paper_spec_cache.py` | ~100 | `PaperSpecCache` ABC + `InMemoryPaperSpecCache`(asyncio.Lock 保护;feature-private,对齐 TASK-203 OverviewCache 模式;自审补强)|
 | `features/paper/_paper_spec_extractor.py` | ~80 | LLM prompt 构造 + 输出解析(纯函数辅助层)|
 | `features/paper/paper_spec_service.py` | ~280 | `PaperSpecService`:`async def extract(file_path: Path, paper_id: str) -> PaperSpec`,五步校验 + cache + asyncio.to_thread(R1 P2-5 修订:签名统一)|
-| `core/prompts/paper_spec_extract.yaml` | ~160 | prompt v0.1(system 含 9 字段输出约定 + 双源契约 + 反幻觉指令 + locator 白名单注入,R1 P1-3 修订)|
+| `core/prompts/paper_spec_extract.yaml` | ~180 | prompt v0.3(system 含 9 字段输出约定 + 字段名硬约束 + `unit="pu"` 标幺值约束 + 双源契约 + 反幻觉指令 + locator 白名单注入,R1 P1-3 + v0.3.3/v0.3.4 真启动修订)|
 | `api/routes/paper_upload.py` | ~80 | **`POST /api/v1/upload-document`**(R1 P0-3 修订:删 `GET /api/v1/papers/{paper_id}/spec`)+ `UploadDocumentResponse` Pydantic model(自审补强)|
 | `schemas/paper_spec.schema.json` | ~150 | JSON Schema 导出(对应 PaperSpec Pydantic wrapper)|
 | `schemas/paper_evidence.schema.json` | ~60 | 对应 PaperEvidenceEntry |
@@ -365,7 +367,7 @@ eval/cases/paper_to_model/
 ### 阶段 4 — PaperSpecService + Prompt + 校验五步(2-3 commit)
 
 - 新增 `features/paper/_paper_spec_cache.py`(`InMemoryPaperSpecCache` 含 `asyncio.Lock` 保护,对齐 TASK-203 OverviewCache 模式;通过 `__init__.py` re-export,自审补强)
-- 新增 `core/prompts/paper_spec_extract.yaml`(v0.1 prompt 模板;含 locator 白名单注入,R1 P1-3 修订)
+- 新增 `core/prompts/paper_spec_extract.yaml`(v0.3 prompt 模板;含 locator 白名单注入 + 字段名硬约束 + 标幺值 `unit="pu"` 约束,v0.3.3/v0.3.4 真启动修订)
 - 新增 `features/paper/_paper_spec_extractor.py`(prompt 构造 + 输出解析辅助)
 - 新增 `features/paper/paper_spec_service.py`(`PaperSpecService` 类,五步校验 + cache + asyncio.to_thread)
 - service 单测(mock LLM + cache hit/miss + 五步校验各异常分支 + figure 反幻觉 + locator 白名单)
@@ -721,35 +723,41 @@ async def extract(self, file_path: Path, paper_id: str) -> PaperSpec
 
 ### 7.11 Prompt 模板(`core/prompts/paper_spec_extract.yaml`)— R1 P1-2 + P1-3 修订
 
-字段约定:`version: "v0.1"` / `description` / `system` / `user`。
+字段约定:`version: "v0.3"` / `description` / `system` / `user`。
 
 `user` 段含 `{raw_text}`(parser 抽到的全文本)/ `{figure_placeholders}`(图占位列表:`figure_id + caption + section_id`)/ `{table_placeholders}`(表占位)/ **`{section_ids}` / `{equation_ids}` / `{figure_ids}`**(R1 P1-3:locator 白名单)。
 
 **system 必须明示**(关键 invariant,对齐样本包反幻觉红线):
 
 1. 9 字段 JSON schema 字段约定(对齐 06 § 12.4)
-2. `domain` 只能从 6 个 `project_type` 选一个;`general` **禁止使用**(必须在 6 类中选一)
-3. `paper_type` ∈ `Literal["paper", "report", "thesis"]`
-4. **反幻觉硬约束**:
+2. **字段名硬约束**(v0.3.3/v0.3.4 真启动微补丁):
+   - `parameter_table[*]` 必须且只能使用 `name / symbol / value / unit / source`;禁止 `param_name / parameter_name / param_symbol / param_value / param_unit`
+   - `parameter_table[*].unit` 在 PaperSpec 阶段必须是非空字符串;标幺值参数(per unit)必须填 `"pu"` 字面;禁止 `""` / `null`(v0.3.4 真启动第二轮补丁,与 `ModelGenerationPlan.ParameterMapping.unit: str | None` 语义不同)
+   - `evidence[*]` 必须且只能使用 `source / paper_section_id / equation_id / figure_id / excerpt / missing_param_prompt_id`;禁止 `locator` 嵌套对象 / 单一 locator 字符串
+   - `pseudocode_blocks` 必须是 `list[str]`,禁止 `{"description": "...", "locator": {...}}` 形状
+   - 示例必须覆盖 4 类:`parameter_table` 物理单位项 / `parameter_table` 标幺值项 / `evidence` 一项 / `pseudocode_blocks` 一项,用于压制 LLM 自创字段名和值倾向
+3. `domain` 只能从 6 个 `project_type` 选一个;`general` **禁止使用**(必须在 6 类中选一)
+4. `paper_type` ∈ `Literal["paper", "report", "thesis"]`
+5. **反幻觉硬约束**:
    - `parameter_table` 只列资料原文显式给出的参数,**不编造**
    - `equations` 字面引用资料公式,**不改写**
    - `figure_locations`:**只有当 `{figure_placeholders}` 非空时**才输出对应条目;`{figure_placeholders}` 为空 → `figure_locations: []`(R1 P1-2)
    - **不编造资料未给的工程决定字段**(R1 三审 P2-2 修订:加条件,不一刀切禁词):
      - **剥离版资料未明示给出**`5MW 负荷 / 平衡节点 / 0.2s 故障 / ode15s / 1s` 时,**严禁输出**这些字段(否则即幻觉)
      - **若原文明确出现这些值**,只能作为 `document_extracted` 参数(进 `parameter_table[*]`)或 evidence(进 `evidence[*].excerpt`)抽取;**不得**扩展成 ModelGenerationPlan 的工程搭建决定(`subsystem_breakdown / library_choice / parameter_mapping`)— 这些是 TASK-502 范围
-5. **locator 白名单约束**(R1 P1-3,新增):
+6. **locator 白名单约束**(R1 P1-3,新增):
    - **`paper_section_id` 只能从 `{section_ids}` 列表中选**;不得自造 `S6 / S7`
    - **`equation_id` 只能从 `{equation_ids}` 列表中选**;不得自造 `EQ-99`
    - **`figure_id` 只能从 `{figure_ids}` 列表中选**;不得自造 `FIG-99`
    - 如果资料文本提到"如图 1 所示"但 `{figure_ids}` 中无对应 ID,**只能进 evidence.excerpt,不能进 `figure_locations`**
-6. **双源契约**:
+7. **双源契约**:
    - `parameter_table` 各项 `source` 全为 `document_extracted`(本卡 PaperSpec 抽取阶段无用户补充)
    - `evidence` 数组所有项 `source` 全为 `document_extracted`,严格遵守 06 § 12.3 第一套不变量(三 locator ≥ 1 + excerpt 1-300 字非空 + missing_param_prompt_id = None)
-7. **`abstract`** 1-1000 字,基于资料"任务陈述 / 摘要 / 物理含义"段综合(不简单 copy 第一段)
-8. **`pseudocode_blocks`** 0-N 项,基于资料公式 + 计算方法描述综合(每项 ≤ 500 字)
-9. 教学口吻(05 § 8)
+8. **`abstract`** 1-1000 字,基于资料"任务陈述 / 摘要 / 物理含义"段综合(不简单 copy 第一段)
+9. **`pseudocode_blocks`** 0-N 项,基于资料公式 + 计算方法描述综合(每项 ≤ 500 字)
+10. 教学口吻(05 § 8)
 
-版本号(05 § 9.2):本卡起 v0.1;后续 prompt 修改必须升版本 + 跑评测 + PR review。
+版本号(05 § 9.2):本卡起 v0.1;v0.3.3 真启动微补丁升 prompt v0.2;v0.3.4 真启动二轮微补丁升 prompt v0.3;后续 prompt 修改必须升版本 + 跑评测 + PR review。
 
 ### 7.12 API 路由(`api/routes/paper_upload.py`)— R1 P0-3 + P1-5 + P2-7 修订
 
@@ -1265,7 +1273,17 @@ async def upload_document(
 - Codex Stage 2 抓 PM/架构师反例 +1(sample roundtrip 实测抓出 06 字面 vs 样本包冲突,工艺规则有效)
 - **R6 Stage 2 工艺胜利**:决策 12 v0.4 R6 完工实测层在 Stage 2 实施期生效(继 Stage 0 入口生效后第二次),实证"R6 不只是完工后实测,在每阶段实施期都该实测"
 
-**累计本任(v0.1 → v0.3.2)**:架构师 K_28a +3 / K_30 +38 / 架构师抓 R1 反例 +1 / R1 自身 K_28a +1 / Codex 抓 PM+架构师反例 +1(Stage 0 入口 base hash + Stage 2 实施期 sample × schema 冲突)
+**TASK-501 R6 真启动实施期(v0.3.2 → v0.3.3 prompt 微补丁)**:
+- 架构师 K_28a +0 / K_30 +1(prompt v0.1 字段名约束不严,真启动 case_01 触发 ValidationError 502:`param_name` / `locator` 嵌套 / `pseudocode_blocks` dict)
+- Codex Stage 0 / Stage 2 / 真启动三连抓 PM/架构师反例 +1(R6 实测层第三次生效)
+- **v0.5 协议候选第 15 项挂账**:prompt yaml 起稿期必须含精确字段名清单 + 禁止字段名 + 一行示例(K_30 子规则)
+
+**TASK-501 R6 真启动第二轮(v0.3.3 → v0.3.4 prompt 微补丁)**:
+- 架构师 K_28a +0 / K_30 +1(prompt v0.2 未明示标幺值参数 `unit` 必须填 `"pu"` 字面,真启动 case_01 触发 ValidationError 502:`parameter_table[*].unit` 空字符串)
+- Codex Stage 0 / Stage 2 / 真启动第一轮 / 真启动第二轮四连抓 PM/架构师反例 +1(R6 实测层第四次生效)
+- **v0.5 协议候选第 16 项挂账**:prompt yaml 一行示例必须覆盖关键字段非常见取值(如 unit 标幺值 / source enum / value 多形式)
+
+**累计本任(v0.1 → v0.3.4)**:架构师 K_28a +3 / K_30 +40 / 架构师抓 R1 反例 +1 / R1 自身 K_28a +1 / Codex 抓 PM+架构师反例 +1(Stage 0 入口 base hash + Stage 2 实施期 sample × schema 冲突 + 真启动 prompt 字段名冲突 + 真启动 unit `"pu"` 冲突)
 
 - **K_31 +0**:本卡无降级压力,沿用决策 22 § 10.4 五项门槛全 ✅ 前提
 - **K_34 +0**:本卡引用字面 = 直接查源文件而非凭语义记忆(架构师 v0.2 起规规矩矩 grep,但 R1 二审仍出 K_28a)
@@ -1362,7 +1380,7 @@ async def upload_document(
 
 ---
 
-**版本**:v0.3.2(2026-06-16,**终版 + Stage 2 微补丁**;R1 三审 conditional pass 0 P0 + 5 P1 + 2 P2 全采纳 + 0 challenge;Stage 2 sample roundtrip 实测驱动 06 § 12.5 约束微调;PM 已拍 C1 / C2 / R2-C3;架构师第 45 任修订)
+**版本**:v0.3.4(2026-06-16,**终版 + 真启动 prompt 二轮微补丁**;R1 三审 conditional pass 0 P0 + 5 P1 + 2 P2 全采纳 + 0 challenge;Stage 2 sample roundtrip 实测驱动 06 § 12.5 约束微调;R6 真启动 case_01 实测驱动 prompt v0.2 字段名硬约束 + prompt v0.3 标幺值 `unit="pu"` 约束;PM 已拍 C1 / C2 / R2-C3;架构师第 45 任修订)
 
 **日期**:2026-06-16
 
@@ -1477,15 +1495,25 @@ async def upload_document(
   - **K_30 反例账目 +2**:06 起稿期 library_choice 约束过紧 + ParameterMapping.unit 未明示;架构师起稿期未跑 sample roundtrip dry run
   - **v0.5 协议候选第 12 项挂账**:契约 schema 字段约束必须由样本数据实测驱动,起稿期 + 修订期都跑 sample roundtrip dry run
   - **v0.5 协议候选第 8 项落地补丁**(R1 二审挂账的具体应用场景):R1 brief 须含 "对每个 sample × 06 字段约束跑 sanity check"实测命令(本次 R1 三轮均凭 v0.3.x 任务卡描述判,没跑样本 × schema sanity check;若跑过会在 R1 一审就抓出此 K_30 反例)
+- v0.3.3(2026-06-16,R6 真启动 prompt 微补丁):**架构师裁定方向 A,只改 prompt,不改 schema / 06 / service**;Codex 真启动 case_01 抓出 prompt v0.1 字段名约束不严:
+  - LLM 输出 `parameter_table[*].param_name` 并合并 name/symbol,漏 `symbol` / `unit`;输出 `evidence[*].locator` 嵌套对象;输出 `pseudocode_blocks[*]` dict 而非 string
+  - 修订 `paper_spec_extract.yaml` v0.1 → v0.2:精确字段名清单 + 禁止字段名 + `parameter_table` / `evidence` / `pseudocode_blocks` 一行示例
+  - **K_30 反例账目 +1**:prompt 字段名约束未由真启动 LLM 行为校准;R6 实测层第三次生效(Stage 0 base hash / Stage 2 sample × schema / 真启动 ValidationError)
+  - **v0.5 协议候选第 15 项挂账**:prompt yaml 起稿期必须含精确字段名清单 + 禁止字段名 + 一行示例(K_30 子规则)
+- v0.3.4(2026-06-16,R6 真启动 prompt 二轮微补丁):**架构师裁定方向 A,继续只改 prompt,不改 schema / 06 / service**;Codex 真启动第二轮 case_01 抓出 prompt v0.2 `unit` 字段值约束不严:
+  - golden 9 项标幺值参数 `unit` 字面 = `"pu"`;LLM v0.2 输出 `unit=""`,触发 schema `string_too_short`
+  - 修订 `paper_spec_extract.yaml` v0.2 → v0.3:标幺值参数(per unit)必须填 `"pu"` 字面;禁止 `unit=""` / `unit=null`;补标幺值一行示例
+  - **K_30 反例账目 +1**:prompt v0.2 未教标幺值 `unit` 字面;R6 实测层第四次生效(Stage 0 base hash / Stage 2 sample × schema / 真启动字段名 / 真启动 unit `"pu"`)
+  - **v0.5 协议候选第 16 项挂账**:prompt yaml 一行示例必须覆盖关键字段非常见取值(如 unit 标幺值 / source enum / value 多形式)
 
-**累计本任(v0.1 → v0.3.2)**:
+**累计本任(v0.1 → v0.3.4)**:
 - 架构师 K_28a +3(v0.1 自抓 1 / R1 一审 2 / R1 二审 0 / R1 三审 0)
-- K_30 +38(R1 一审 17 / 二审 12 / 三审 7 / Stage 2 实施期 2)
+- K_30 +40(R1 一审 17 / 二审 12 / 三审 7 / Stage 2 实施期 2 / R6 真启动 2)
 - 架构师抓 R1 反例 +1(R2-C3,首次)
 - R1 自身 K_28a +1(一/二审 P0-1 连环,三审自己确认错)
-- Codex 抓 PM+架构师反例 +1(Stage 2 sample × schema 冲突)
+- Codex 抓 PM+架构师反例 +1(Stage 0 base hash + Stage 2 sample × schema 冲突 + 真启动 prompt 字段名冲突 + 真启动 unit `"pu"` 冲突)
 - R 轮采纳率:一审 100% / 二审 92.9% / 三审 100%(三轮均在健康区间;二审有反 challenge 是工艺正常)
-- **v0.5 协议候选 3 项挂账**(详 § 工艺):第 7 / 8 / 9 项
+- **v0.5 协议候选 5 项挂账**(详 § 工艺):第 7 / 8 / 9 / 15 / 16 项
 
 **R1 三审已确认消化的修订**:
 - `expected_missing_prompts.json` 顶层 dict + Stage 0 实地验证 ✅
