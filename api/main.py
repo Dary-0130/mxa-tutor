@@ -18,7 +18,6 @@ from pathlib import Path
 from fastapi import FastAPI
 from loguru import logger
 
-from adapters.embedding.sentence_transformer import SentenceTransformerEmbedder
 from adapters.llm import DeepSeekTextProvider
 from adapters.storage._connection import open_connection
 from adapters.storage.schema import init_schema
@@ -31,6 +30,7 @@ from api.middleware.error_handler import register_error_handlers
 from api.routes.chat import router as chat_router
 from api.routes.health import router as health_router
 from api.routes.overview import router as overview_router
+from api.routes.paper_upload import router as paper_upload_router
 from api.routes.teaching_unit import router as teaching_unit_router
 from api.routes.upload import router as upload_router
 from core.domain.exceptions import EmbeddingModelLoadError
@@ -41,6 +41,16 @@ from features.chunking import ChunkingService
 from features.ingest.cleanup_worker import CleanupWorker
 from features.overview import InMemoryOverviewCache
 from features.overview.project_graph_builder import ProjectGraphBuilder
+from features.paper import InMemoryPaperSpecCache
+
+
+class SentenceTransformerEmbedder:
+    """Lazy proxy so importing the API app does not import ML runtimes."""
+
+    def __new__(cls, *args: object, **kwargs: object) -> object:
+        from adapters.embedding.sentence_transformer import SentenceTransformerEmbedder as _Impl
+
+        return _Impl(*args, **kwargs)
 
 
 @asynccontextmanager
@@ -128,6 +138,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         stack.push_async_callback(teaching_unit_store.aclose)
         stack.push_async_callback(chat_store.aclose)
         stack.push_async_callback(store.aclose)
+        app.state.paper_spec_cache = InMemoryPaperSpecCache()
 
         worker = CleanupWorker(
             store=store,
@@ -164,6 +175,7 @@ def create_app() -> FastAPI:
     register_error_handlers(app, settings)
     app.include_router(health_router)
     app.include_router(upload_router)
+    app.include_router(paper_upload_router)
     app.include_router(overview_router)
     app.include_router(teaching_unit_router)
     app.include_router(chat_router)

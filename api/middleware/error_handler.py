@@ -1,6 +1,6 @@
 """API 层异常 handler 挂载点(不是 ASGI middleware,命名沿用历史目录结构)。
 
-本模块实现 22 个业务 handler,覆盖上传 / 工程 / LLM / 解析 / 导览 /
+本模块实现 24 个业务 handler,覆盖上传 / 工程 / LLM / 解析 / 导览 /
 问答异常树 + ``MxaError`` final fallback,并补 2 个 FastAPI 默认 handler 兜底。
 
 响应体 shape ``{"error": "<machine_code>", "message": "<中文文案>"}`` 由本
@@ -36,6 +36,7 @@ from app.config import AppSettings
 from core.domain.exceptions import (
     ChatGenerationError,
     ChatSessionNotFoundError,
+    DocumentParseError,
     EmbeddingModelLoadError,
     EvidenceMissingError,
     FileTypeNotAllowedError,
@@ -47,6 +48,7 @@ from core.domain.exceptions import (
     MParseError,
     MxaError,
     OverviewGenerationError,
+    PaperSpecGenerationError,
     ProjectError,
     ProjectNotFoundError,
     ProjectTooLargeError,
@@ -112,7 +114,7 @@ def _make_project_too_large_handler(settings: AppSettings) -> ExceptionHandler:
 
 
 def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
-    """注册 22 个业务 handler + 2 个 FastAPI 默认 handler 兜底。
+    """注册 24 个业务 handler + 2 个 FastAPI 默认 handler 兜底。
 
     注册顺序不影响 FastAPI 行为(FastAPI 按 MRO 查找最具体 handler),
     现有 tuple 顺序保持不重组,仅在末尾追加 3 个 leaf handler。
@@ -216,8 +218,20 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
             _make_handler(400, "m_parse", ".m 文件解析失败,请检查文件编码"),
         ),
         (
+            DocumentParseError,
+            _make_handler(
+                400,
+                "document_parse_failed",
+                "文档解析失败,请检查文件是否损坏或超过 512MB",
+            ),
+        ),
+        (
             OverviewGenerationError,
             _make_handler(502, "overview_generation", "导览生成失败,请刷新重试"),
+        ),
+        (
+            PaperSpecGenerationError,
+            _make_handler(502, "paper_spec_generation_failed", "资料理解失败,请刷新重试"),
         ),
         (
             ChatSessionNotFoundError,

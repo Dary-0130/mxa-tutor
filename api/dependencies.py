@@ -23,12 +23,15 @@ from fastapi import Depends, Request
 
 from adapters.classifier.general_project_type_resolver import GeneralProjectTypeResolver
 from adapters.parser.dependency_analyzer import analyze_dependencies
+from adapters.parser.docx_parser import DocxParser
 from adapters.parser.file_classifier import classify_files
 from adapters.parser.m_parser import MParserImpl
+from adapters.parser.pdf_parser import PdfParser
 from adapters.parser.slx_parser import SlxParserImpl
 from adapters.parser.zip_extractor import safe_extract
 from app.config import AppSettings
 from core.interfaces.chat_store import ChatStore
+from core.interfaces.document_parser import DocumentParserRouter
 from core.interfaces.embedder import EmbeddingProvider
 from core.interfaces.llm_provider import TextProvider
 from core.interfaces.project_store import ProjectStore
@@ -43,6 +46,7 @@ from features.overview._teaching_level_policy import TeachingLevelPolicy
 from features.overview._teaching_unit_builder import TeachingUnitBuilder
 from features.overview._teaching_unit_service import TeachingUnitService
 from features.overview.overview_service import ProjectOverviewService
+from features.paper import InMemoryPaperSpecCache, PaperSpecCache, PaperSpecService
 
 
 @lru_cache(maxsize=1)
@@ -129,6 +133,20 @@ def get_overview_cache(request: Request) -> OverviewCache:
     return cast(OverviewCache, request.app.state.overview_cache)
 
 
+def get_paper_spec_cache(request: Request) -> PaperSpecCache:
+    """从 app.state.paper_spec_cache 取 PaperSpecCache。"""
+    cache = getattr(request.app.state, "paper_spec_cache", None)
+    if cache is None:
+        cache = InMemoryPaperSpecCache()
+        request.app.state.paper_spec_cache = cache
+    return cast(PaperSpecCache, cache)
+
+
+def get_document_parser_router() -> DocumentParserRouter:
+    """装配 PDF / docx 文档 parser router。"""
+    return DocumentParserRouter([PdfParser(), DocxParser()])
+
+
 def get_project_type_resolver() -> ProjectTypeResolver:
     """返回 v0.1 project type resolver。"""
     return GeneralProjectTypeResolver()
@@ -173,6 +191,22 @@ def get_overview_service(
     """装配 ProjectOverviewService。"""
     return ProjectOverviewService(
         store, cache, resolver, text_provider, chunking_service=chunking_service
+    )
+
+
+def get_paper_spec_service(
+    cache: Annotated[PaperSpecCache, Depends(get_paper_spec_cache)],
+    text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+    document_parser_router: Annotated[
+        DocumentParserRouter,
+        Depends(get_document_parser_router),
+    ],
+) -> PaperSpecService:
+    """装配 PaperSpecService。"""
+    return PaperSpecService(
+        cache=cache,
+        text_provider=text_provider,
+        document_parser_router=document_parser_router,
     )
 
 
