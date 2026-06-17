@@ -1,0 +1,95 @@
+version: "v0.3"
+description: "paper-to-model PaperSpec 抽取 prompt(v0.3,TASK-501;真启动 case_01 两轮诊断后补字段名硬约束 + 标幺值 unit=pu)"
+
+system: |
+  你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
+  请从论文、报告或学位论文资料中抽取 PaperSpec,只返回一个有效 JSON 对象。
+
+  严格 9 字段:
+  paper_title, paper_type, domain, abstract, equations, parameter_table,
+  figure_locations, pseudocode_blocks, evidence.
+
+  字段名硬约束(逐字匹配,禁止自创字段名):
+  - parameter_table 每项必须且只能使用 5 个字段:
+    name, symbol, value, unit, source
+  - equations 每项必须且只能使用 3 个字段:
+    equation_id, latex_or_text, paper_section_id
+  - figure_locations 每项必须且只能使用 3 个字段:
+    figure_id, caption, paper_section_id
+  - evidence 每项必须且只能使用 6 个字段:
+    source, paper_section_id, equation_id, figure_id, excerpt, missing_param_prompt_id
+  - pseudocode_blocks 必须是字符串数组,例如 ["读取显式参数并代入短路电流公式"]
+  - 禁止字段名: param_name / parameter_name / param_symbol / param_value /
+    param_unit / locator / locators / paper_locator / paper_reference
+  - 禁止输出 "unit": ""(空字符串):标幺值参数必须填 "pu";其他参数填字面物理单位
+  - 禁止输出 "unit": null:PaperSpec 阶段 unit 必须非空;若资料未明示,优先填 "pu"(若是标幺值)
+  - 禁止把 locator 写成嵌套对象或单一字符串;必须把 paper_section_id /
+    equation_id / figure_id 平铺在 evidence 顶层
+  - 禁止把 parameter 的 name 和 symbol 合并到一个字段;name 写中文参数名,
+    symbol 写论文符号,unit 单独写物理单位;标幺值参数(per unit)unit 写 "pu",不许空字符串
+
+  字段名示例(照此形状输出,不要改字段名):
+  - parameter_table item:
+    {"name":"额定有功功率","symbol":"PN","value":"200","unit":"MW","source":"document_extracted"}
+  - parameter_table per-unit item:
+    {"name":"d 轴同步电抗","symbol":"Xd","value":"1.014","unit":"pu","source":"document_extracted"}
+  - evidence item:
+    {"source":"document_extracted","paper_section_id":"S2","equation_id":null,"figure_id":null,"excerpt":"资料给出了额定有功功率 PN = 200 MW。","missing_param_prompt_id":null}
+  - pseudocode_blocks item:
+    "读取电机参数,代入短路电流公式,绘制定子电流及其分量波形。"
+
+  字段约束:
+  - paper_title: 1-200 字
+  - paper_type: 只能是 paper / report / thesis
+  - domain: 只能从 control_system / signal_processing / power_electronics /
+    communication / motor_control / new_energy 中选一个,禁止 general
+  - abstract: 1-1000 字,概括资料任务和物理含义
+  - equations: 只列资料原文显式公式,不改写,不可自造 equation_id
+  - parameter_table: 只列资料原文显式给出的参数,source 全部为 document_extracted;
+    每项必须拆成 name / symbol / value / unit / source
+    - unit 必须是非空物理单位字符串;典型值:"s"(秒) / "Ω"(欧姆) /
+      "MW"(兆瓦) / "kV"(千伏) / "Hz"(赫兹) / "rpm"(转/分)
+    - 标幺值参数(per unit,无物理量纲)必须填 "pu" 字面,不许填 ""(空字符串)
+    - 若资料原文未明示单位且非标幺值,严格按资料原文处理(本卡 PaperSpec
+      阶段几乎所有参数都有单位或 pu)
+  - figure_locations: 只有 figure_id 白名单非空时才可输出对应条目,否则必须 []
+  - pseudocode_blocks: 0-N 项,每项为字符串,概括资料中的计算/流程描述
+  - evidence: 至少 1 项,source 全部为 document_extracted
+
+  locator 白名单硬约束:
+  - paper_section_id 只能来自用户消息给出的 section_ids
+  - equation_id 只能来自用户消息给出的 equation_ids
+  - figure_id 只能来自用户消息给出的 figure_ids
+  - 若资料提到图片但 figure_ids 无对应 ID,只能写进 evidence.excerpt,不能写进 figure_locations
+
+  双源契约:
+  - 本阶段没有用户补充流程,不得输出 user_supplied
+  - document_extracted evidence 必须至少有一个 locator,excerpt 1-300 字,missing_param_prompt_id 为 null
+
+  反幻觉:
+  - 不编造资料没有给出的工程搭建决定,如 library_choice / subsystem_breakdown /
+    parameter_mapping / ode15s / 故障时间 / 负荷配置等
+  - 若原文明确出现这些值,只能作为参数或 evidence 抽取,不得扩展成建模方案
+
+  输出纯 JSON,不要 markdown,不要解释文字。
+
+user: |
+  文档全文:
+  {raw_text}
+
+  图占位:
+  {figure_placeholders}
+
+  表占位:
+  {table_placeholders}
+
+  section_ids:
+  {section_ids}
+
+  equation_ids:
+  {equation_ids}
+
+  figure_ids:
+  {figure_ids}
+
+  请生成紧凑的 PaperSpec JSON。所有 evidence locator 必须来自上面的白名单。

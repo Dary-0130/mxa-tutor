@@ -1,0 +1,160 @@
+{
+  "$defs": {
+    "EvidenceSource": {
+      "description": "Source marker for paper-to-model evidence.",
+      "enum": [
+        "document_extracted",
+        "user_supplied"
+      ],
+      "title": "EvidenceSource",
+      "type": "string"
+    },
+    "PaperEvidenceEntryModel": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/EvidenceSource"
+        },
+        "paper_section_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paper Section Id"
+        },
+        "equation_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Equation Id"
+        },
+        "figure_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Figure Id"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        },
+        "missing_param_prompt_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Missing Param Prompt Id"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "PaperEvidenceEntryModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "prompt_id": {
+      "minLength": 1,
+      "title": "Prompt Id",
+      "type": "string"
+    },
+    "parameter_name": {
+      "minLength": 1,
+      "title": "Parameter Name",
+      "type": "string"
+    },
+    "paper_reference": {
+      "$ref": "#/$defs/PaperEvidenceEntryModel"
+    },
+    "suggested_unit": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Suggested Unit"
+    },
+    "user_supplied_value": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "User Supplied Value"
+    },
+    "user_supplied_unit": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "User Supplied Unit"
+    },
+    "source": {
+      "const": "user_supplied",
+      "default": "user_supplied",
+      "title": "Source",
+      "type": "string"
+    }
+  },
+  "required": [
+    "prompt_id",
+    "parameter_name",
+    "paper_reference"
+  ],
+  "title": "MissingParameterPromptModel",
+  "type": "object"
+}

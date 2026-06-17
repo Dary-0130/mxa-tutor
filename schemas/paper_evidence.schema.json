@@ -1,0 +1,90 @@
+{
+  "$defs": {
+    "EvidenceSource": {
+      "description": "Source marker for paper-to-model evidence.",
+      "enum": [
+        "document_extracted",
+        "user_supplied"
+      ],
+      "title": "EvidenceSource",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "source": {
+      "$ref": "#/$defs/EvidenceSource"
+    },
+    "paper_section_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Paper Section Id"
+    },
+    "equation_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Equation Id"
+    },
+    "figure_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Figure Id"
+    },
+    "excerpt": {
+      "anyOf": [
+        {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Excerpt"
+    },
+    "missing_param_prompt_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Missing Param Prompt Id"
+    }
+  },
+  "required": [
+    "source"
+  ],
+  "title": "PaperEvidenceEntryModel",
+  "type": "object"
+}

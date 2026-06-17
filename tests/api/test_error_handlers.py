@@ -18,6 +18,7 @@ from app.config import AppSettings
 from core.domain.exceptions import (
     ChatGenerationError,
     ChatSessionNotFoundError,
+    DocumentParseError,
     EmbeddingModelLoadError,
     EvidenceMissingError,
     FileTypeNotAllowedError,
@@ -29,6 +30,7 @@ from core.domain.exceptions import (
     MParseError,
     MxaError,
     OverviewGenerationError,
+    PaperSpecGenerationError,
     ProjectError,
     ProjectNotFoundError,
     ProjectTooLargeError,
@@ -72,7 +74,19 @@ HANDLER_CASES: list[HandlerCase] = [
     (LLMServerError, 502, "llm_server", "AI 服务暂不稳定,请刷新重试"),
     (SlxParseError, 400, "slx_parse", "Simulink 模型解析失败,可能版本过老或损坏"),
     (MParseError, 400, "m_parse", ".m 文件解析失败,请检查文件编码"),
+    (
+        DocumentParseError,
+        400,
+        "document_parse_failed",
+        "文档解析失败,请检查文件是否损坏或超过 512MB",
+    ),
     (OverviewGenerationError, 502, "overview_generation", "导览生成失败,请刷新重试"),
+    (
+        PaperSpecGenerationError,
+        502,
+        "paper_spec_generation_failed",
+        "资料理解失败,请刷新重试",
+    ),
     (ChatSessionNotFoundError, 404, "chat_session_not_found", "对话不存在"),
     (StoreError, 500, "store_error", "系统暂时不可用,请稍后重试"),
     (ChatGenerationError, 502, "chat_generation", "回答生成失败,请刷新重试"),
@@ -245,7 +259,7 @@ class TestDocstring:
         source = Path("api/middleware/error_handler.py").read_text(encoding="utf-8")
 
         assert re.search(r"minimal ERROR_MAP[^\d]*\b8\b|注册\s*\b8\s*个", source) is None
-        assert "22 个业务 handler" in source
+        assert "24 个业务 handler" in source
         assert "2 个 FastAPI 默认 handler 兜底" in source
 
 

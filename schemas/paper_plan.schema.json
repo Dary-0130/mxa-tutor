@@ -1,0 +1,232 @@
+{
+  "$defs": {
+    "BlockRecommendationModel": {
+      "additionalProperties": false,
+      "properties": {
+        "block_type": {
+          "minLength": 1,
+          "title": "Block Type",
+          "type": "string"
+        },
+        "purpose": {
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "paper_reference": {
+          "$ref": "#/$defs/PaperEvidenceEntryModel"
+        }
+      },
+      "required": [
+        "block_type",
+        "purpose",
+        "paper_reference"
+      ],
+      "title": "BlockRecommendationModel",
+      "type": "object"
+    },
+    "EvidenceSource": {
+      "description": "Source marker for paper-to-model evidence.",
+      "enum": [
+        "document_extracted",
+        "user_supplied"
+      ],
+      "title": "EvidenceSource",
+      "type": "string"
+    },
+    "PaperEvidenceEntryModel": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/EvidenceSource"
+        },
+        "paper_section_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paper Section Id"
+        },
+        "equation_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Equation Id"
+        },
+        "figure_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Figure Id"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        },
+        "missing_param_prompt_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Missing Param Prompt Id"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "PaperEvidenceEntryModel",
+      "type": "object"
+    },
+    "ParameterMappingModel": {
+      "additionalProperties": false,
+      "properties": {
+        "paper_param_name": {
+          "minLength": 1,
+          "title": "Paper Param Name",
+          "type": "string"
+        },
+        "model_param_name": {
+          "minLength": 1,
+          "title": "Model Param Name",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "source": {
+          "$ref": "#/$defs/EvidenceSource"
+        }
+      },
+      "required": [
+        "paper_param_name",
+        "model_param_name",
+        "value",
+        "source"
+      ],
+      "title": "ParameterMappingModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {
+      "minLength": 1,
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "paper_spec_id": {
+      "minLength": 1,
+      "title": "Paper Spec Id",
+      "type": "string"
+    },
+    "library_choice": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Library Choice",
+      "type": "string"
+    },
+    "block_recommendations": {
+      "items": {
+        "$ref": "#/$defs/BlockRecommendationModel"
+      },
+      "title": "Block Recommendations",
+      "type": "array"
+    },
+    "parameter_mapping": {
+      "items": {
+        "$ref": "#/$defs/ParameterMappingModel"
+      },
+      "title": "Parameter Mapping",
+      "type": "array"
+    },
+    "subsystem_breakdown": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "minItems": 3,
+      "title": "Subsystem Breakdown",
+      "type": "array"
+    },
+    "m_script_skeleton": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "M Script Skeleton"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/PaperEvidenceEntryModel"
+      },
+      "minItems": 1,
+      "title": "Evidence",
+      "type": "array"
+    }
+  },
+  "required": [
+    "plan_id",
+    "paper_spec_id",
+    "library_choice",
+    "subsystem_breakdown",
+    "evidence"
+  ],
+  "title": "ModelGenerationPlanModel",
+  "type": "object"
+}

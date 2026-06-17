@@ -1,0 +1,264 @@
+{
+  "$defs": {
+    "EquationEntryModel": {
+      "additionalProperties": false,
+      "properties": {
+        "equation_id": {
+          "minLength": 1,
+          "title": "Equation Id",
+          "type": "string"
+        },
+        "latex_or_text": {
+          "minLength": 1,
+          "title": "Latex Or Text",
+          "type": "string"
+        },
+        "paper_section_id": {
+          "minLength": 1,
+          "title": "Paper Section Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "equation_id",
+        "latex_or_text",
+        "paper_section_id"
+      ],
+      "title": "EquationEntryModel",
+      "type": "object"
+    },
+    "EvidenceSource": {
+      "description": "Source marker for paper-to-model evidence.",
+      "enum": [
+        "document_extracted",
+        "user_supplied"
+      ],
+      "title": "EvidenceSource",
+      "type": "string"
+    },
+    "FigureRefModel": {
+      "additionalProperties": false,
+      "properties": {
+        "figure_id": {
+          "minLength": 1,
+          "title": "Figure Id",
+          "type": "string"
+        },
+        "caption": {
+          "minLength": 1,
+          "title": "Caption",
+          "type": "string"
+        },
+        "paper_section_id": {
+          "minLength": 1,
+          "title": "Paper Section Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "figure_id",
+        "caption",
+        "paper_section_id"
+      ],
+      "title": "FigureRefModel",
+      "type": "object"
+    },
+    "PaperEvidenceEntryModel": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/EvidenceSource"
+        },
+        "paper_section_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paper Section Id"
+        },
+        "equation_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Equation Id"
+        },
+        "figure_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Figure Id"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        },
+        "missing_param_prompt_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Missing Param Prompt Id"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "PaperEvidenceEntryModel",
+      "type": "object"
+    },
+    "ParameterEntryModel": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "symbol": {
+          "minLength": 1,
+          "title": "Symbol",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "unit": {
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/EvidenceSource"
+        }
+      },
+      "required": [
+        "name",
+        "symbol",
+        "value",
+        "unit",
+        "source"
+      ],
+      "title": "ParameterEntryModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "paper_title": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Paper Title",
+      "type": "string"
+    },
+    "paper_type": {
+      "enum": [
+        "paper",
+        "report",
+        "thesis"
+      ],
+      "title": "Paper Type",
+      "type": "string"
+    },
+    "domain": {
+      "enum": [
+        "control_system",
+        "signal_processing",
+        "power_electronics",
+        "communication",
+        "motor_control",
+        "new_energy"
+      ],
+      "title": "Domain",
+      "type": "string"
+    },
+    "abstract": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Abstract",
+      "type": "string"
+    },
+    "equations": {
+      "items": {
+        "$ref": "#/$defs/EquationEntryModel"
+      },
+      "title": "Equations",
+      "type": "array"
+    },
+    "parameter_table": {
+      "items": {
+        "$ref": "#/$defs/ParameterEntryModel"
+      },
+      "title": "Parameter Table",
+      "type": "array"
+    },
+    "figure_locations": {
+      "items": {
+        "$ref": "#/$defs/FigureRefModel"
+      },
+      "title": "Figure Locations",
+      "type": "array"
+    },
+    "pseudocode_blocks": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Pseudocode Blocks",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/PaperEvidenceEntryModel"
+      },
+      "minItems": 1,
+      "title": "Evidence",
+      "type": "array"
+    }
+  },
+  "required": [
+    "paper_title",
+    "paper_type",
+    "domain",
+    "abstract",
+    "evidence"
+  ],
+  "title": "PaperSpecModel",
+  "type": "object"
+}

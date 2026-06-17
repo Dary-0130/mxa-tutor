@@ -442,7 +442,7 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 |---|---|---|---|
 | `plan_id` | string | 必填 | 路线图 ID |
 | `paper_spec_id` | string | 必填 | 关联 `PaperSpec` |
-| `library_choice` | string | 1-100 字 | 库选型建议,如 `SimPowerSystems` |
+| `library_choice` | string | 1-300 字 | 库选型建议 + 选型理由(如 `SimPowerSystems(电机短路类工程标准库;论文 d/q 轴电抗 / 时间常数 / 阻尼参数与 SimPowerSystems 的 Synchronous Machine pu Standard block 参数槽位直接对应)`) |
 | `block_recommendations` | array[`BlockRecommendation`] | 0-N | block 建议 |
 | `parameter_mapping` | array[`ParameterMapping`] | 0-N | 论文参数到模型参数的对应说明 |
 | `subsystem_breakdown` | array[string] | 3-10 步 | 子系统拆分建议 |
@@ -455,6 +455,14 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 |---|---|
 | `BlockRecommendation` | `block_type` / `purpose` / `paper_reference` |
 | `ParameterMapping` | `paper_param_name` / `model_param_name` / `value` / `unit` / `source` |
+
+**子项约束补充**(v0.3.2 微补丁,基于样本包实测驱动):
+
+- `ParameterMapping.unit` 允许为 `null`:配置参数如接线方式 `Yn / d11` / 模式选择 / 布尔配置等无物理单位的情况(实测样本包 `expected_updated_plan.json` 第 19 项变压器接线为此场景)
+- `ParameterMapping.value` 类型为 `string`(允许带单位文字描述,不强制 numeric)
+- `EquationEntry.equation_text` / `PaperEvidenceEntry.excerpt` 等已含字面约束的字段保持不变
+
+**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)
 
 ### 12.6 TuningSuggestion schema
 
