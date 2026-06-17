@@ -54,6 +54,7 @@ from features.paper import (
     PaperSpecService,
     UserSupplyService,
 )
+from features.paper.paper_plan_service import PaperPlanService
 
 
 @lru_cache(maxsize=1)
@@ -224,6 +225,13 @@ def get_paper_spec_service(
         text_provider=text_provider,
         document_parser_router=document_parser_router,
     )
+
+
+def get_paper_plan_service(
+    text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+) -> PaperPlanService:
+    """装配 PaperPlanService。"""
+    return PaperPlanService(text_provider=text_provider)
 
 
 def get_paper_user_supply_service(
