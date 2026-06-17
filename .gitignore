@@ -20,3 +20,4 @@ build/
 # Temporary diagnostic / inspection scripts (per project handoff § 6)
 /tools_*.py
 /diag_*.py
+eval/ad_hoc/
