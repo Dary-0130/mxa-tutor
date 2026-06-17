@@ -13,7 +13,9 @@ from core.domain.exceptions import (
     MParseError,
     MxaError,
     OverviewGenerationError,
+    PaperPlanGenerationError,
     PaperSpecGenerationError,
+    PaperUserSupplyError,
     ParseError,
     ProjectError,
     ProjectNotFoundError,
@@ -73,6 +75,8 @@ def test_top_level_business_errors_inherit_from_mxa_error() -> None:
     assert isinstance(EvidenceMissingError("x"), MxaError)
     assert isinstance(OverviewGenerationError("x"), MxaError)
     assert isinstance(PaperSpecGenerationError("x"), MxaError)
+    assert isinstance(PaperPlanGenerationError("x"), MxaError)
+    assert isinstance(PaperUserSupplyError("x"), MxaError)
 
 
 def test_vector_store_error_inherits_from_store_error() -> None:
