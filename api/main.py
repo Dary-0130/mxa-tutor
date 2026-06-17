@@ -31,6 +31,7 @@ from api.routes.chat import router as chat_router
 from api.routes.health import router as health_router
 from api.routes.overview import router as overview_router
 from api.routes.paper_upload import router as paper_upload_router
+from api.routes.paper_user_supply import router as paper_user_supply_router
 from api.routes.teaching_unit import router as teaching_unit_router
 from api.routes.upload import router as upload_router
 from app.config import AppSettings
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(upload_router)
     app.include_router(paper_upload_router)
+    app.include_router(paper_user_supply_router)
     app.include_router(overview_router)
     app.include_router(teaching_unit_router)
     app.include_router(chat_router)
