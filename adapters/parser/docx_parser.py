@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import zipfile
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol
 
 from docx import Document
 from docx.opc.exceptions import PackageNotFoundError
@@ -22,6 +24,10 @@ DOCX_MAGIC = b"PK\x03\x04"
 CONTENT_TYPES = "[Content_Types].xml"
 DEFAULT_MAX_DOCX_BYTES = 50 * 1024 * 1024
 DEFAULT_MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+
+
+class _ParagraphLike(Protocol):
+    text: str
 
 
 class DocxParser(DocumentParser):
@@ -113,7 +119,7 @@ def _scan_docx_package(file_path: Path, max_uncompressed_bytes: int) -> None:
         raise DocumentParseError("docx_parse_failed") from None
 
 
-def _nonempty_paragraphs(paragraphs: object) -> list[str]:
+def _nonempty_paragraphs(paragraphs: Iterable[_ParagraphLike]) -> list[str]:
     return [paragraph.text.strip() for paragraph in paragraphs if paragraph.text.strip()]
 
 

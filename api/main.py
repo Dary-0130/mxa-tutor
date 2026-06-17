@@ -33,7 +33,9 @@ from api.routes.overview import router as overview_router
 from api.routes.paper_upload import router as paper_upload_router
 from api.routes.teaching_unit import router as teaching_unit_router
 from api.routes.upload import router as upload_router
+from app.config import AppSettings
 from core.domain.exceptions import EmbeddingModelLoadError
+from core.interfaces.embedder import EmbeddingProvider
 from features.chat import HybridRetriever, KeywordRetriever, VectorRetriever
 from features.chat._prompt_builder import ChatPromptBuilder
 from features.chat.chat_service import ChatService
@@ -44,13 +46,28 @@ from features.overview.project_graph_builder import ProjectGraphBuilder
 from features.paper import InMemoryPaperSpecCache
 
 
-class SentenceTransformerEmbedder:
-    """Lazy proxy so importing the API app does not import ML runtimes."""
+def SentenceTransformerEmbedder(
+    model_name: str,
+    device: str,
+    normalize: bool,
+) -> EmbeddingProvider:
+    """Typed lazy factory kept patchable for lifespan tests."""
+    from adapters.embedding.sentence_transformer import SentenceTransformerEmbedder
 
-    def __new__(cls, *args: object, **kwargs: object) -> object:
-        from adapters.embedding.sentence_transformer import SentenceTransformerEmbedder as _Impl
+    return SentenceTransformerEmbedder(
+        model_name=model_name,
+        device=device,
+        normalize=normalize,
+    )
 
-        return _Impl(*args, **kwargs)
+
+def _build_embedder(settings: AppSettings) -> EmbeddingProvider:
+    """Build the configured embedder lazily so importing the API app stays lightweight."""
+    return SentenceTransformerEmbedder(
+        model_name=settings.embedding_model_name,
+        device=settings.embedding_device,
+        normalize=settings.embedding_normalize,
+    )
 
 
 @asynccontextmanager
@@ -84,12 +101,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.chat_store = chat_store
         app.state.teaching_unit_store = teaching_unit_store
         try:
-            embedder = await asyncio.to_thread(
-                SentenceTransformerEmbedder,
-                settings.embedding_model_name,
-                settings.embedding_device,
-                settings.embedding_normalize,
-            )
+            embedder: EmbeddingProvider = await asyncio.to_thread(_build_embedder, settings)
         except Exception as exc:
             logger.error(
                 "Embedding model load failed: model_name={} device={} exception={}",
@@ -116,7 +128,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         app.state.keyword_retriever = KeywordRetriever(graph_provider=app.state.graph_provider)
         app.state.vector_retriever = VectorRetriever(
-            embedder=app.state.embedder,
+            embedder=embedder,
             vector_store=app.state.vector_store,
             min_score=settings.vector_min_score,
         )
