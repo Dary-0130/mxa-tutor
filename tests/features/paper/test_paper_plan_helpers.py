@@ -24,6 +24,42 @@ class ResponseStub:
         self.prompt_id = prompt_id
 
 
+def _document_evidence(
+    *,
+    paper_section_id: str | None = "S1",
+    equation_id: str | None = None,
+    figure_id: str | None = None,
+    excerpt: str | None = "The report states the machine parameter.",
+    missing_param_prompt_id: str | None = None,
+) -> PaperEvidenceEntry:
+    return PaperEvidenceEntry(
+        source=EvidenceSource.DOCUMENT_EXTRACTED,
+        paper_section_id=paper_section_id,
+        equation_id=equation_id,
+        figure_id=figure_id,
+        excerpt=excerpt,
+        missing_param_prompt_id=missing_param_prompt_id,
+    )
+
+
+def _user_evidence(
+    *,
+    paper_section_id: str | None = None,
+    equation_id: str | None = None,
+    figure_id: str | None = None,
+    excerpt: str | None = None,
+    missing_param_prompt_id: str | None = "MISS-1",
+) -> PaperEvidenceEntry:
+    return PaperEvidenceEntry(
+        source=EvidenceSource.USER_SUPPLIED,
+        paper_section_id=paper_section_id,
+        equation_id=equation_id,
+        figure_id=figure_id,
+        excerpt=excerpt,
+        missing_param_prompt_id=missing_param_prompt_id,
+    )
+
+
 def test_missing_value_sentinel_literal_is_frozen() -> None:
     assert MISSING_VALUE_SENTINEL == "null"
     assert isinstance(MISSING_VALUE_SENTINEL, str)
@@ -221,40 +257,4 @@ def _missing_prompt() -> MissingParameterPrompt:
         suggested_unit="s",
         user_supplied_value=None,
         user_supplied_unit=None,
-    )
-
-
-def _document_evidence(
-    *,
-    paper_section_id: str | None = "S1",
-    equation_id: str | None = None,
-    figure_id: str | None = None,
-    excerpt: str | None = "The report states the machine parameter.",
-    missing_param_prompt_id: str | None = None,
-) -> PaperEvidenceEntry:
-    return PaperEvidenceEntry(
-        source=EvidenceSource.DOCUMENT_EXTRACTED,
-        paper_section_id=paper_section_id,
-        equation_id=equation_id,
-        figure_id=figure_id,
-        excerpt=excerpt,
-        missing_param_prompt_id=missing_param_prompt_id,
-    )
-
-
-def _user_evidence(
-    *,
-    paper_section_id: str | None = None,
-    equation_id: str | None = None,
-    figure_id: str | None = None,
-    excerpt: str | None = None,
-    missing_param_prompt_id: str | None = "MISS-1",
-) -> PaperEvidenceEntry:
-    return PaperEvidenceEntry(
-        source=EvidenceSource.USER_SUPPLIED,
-        paper_section_id=paper_section_id,
-        equation_id=equation_id,
-        figure_id=figure_id,
-        excerpt=excerpt,
-        missing_param_prompt_id=missing_param_prompt_id,
     )
