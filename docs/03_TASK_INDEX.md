@@ -366,7 +366,8 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | 编号 | 名称 | 状态 | 负责 | 备注 |
 |------|------|------|------|------|
 | TASK-500 | paper-to-model 开门 chore(5 项前置硬门槛一锅炖) | ✅ | Codex | 5 项门槛全部入仓,paper-to-model 主线解封 |
-| TASK-501 | PaperPlanService 与资料入口实现起点 | 🔲 | Codex | TASK-500 已合并,可派单 |
+| TASK-501 | PaperPlanService 与资料入口实现起点 | ✅ | Codex | TASK-500 已合并,可派单 |
+| TASK-502 | PaperPlanService + 9-component prompt + MissingDetector + UserSupplyMerger | 🔲 | Codex | TASK-501 已合并,可派单 |
 
 **决策 09 反例库**:108 → **162**(本任 TASK-310 累积 +54;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
 
