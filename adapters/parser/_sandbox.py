@@ -19,6 +19,8 @@ from core.interfaces.document_parser import DocumentParser, ParsedDocument
 DEFAULT_PARSER_TIMEOUT_SECONDS = 30.0
 DEFAULT_MEM_LIMIT_BYTES = 512 * 1024 * 1024
 SANDBOX_TEMP_PREFIX = "mxa_paper_parse_"
+# Keep sandbox children from inheriting parent memory under Linux's default fork.
+_SANDBOX_MP_CONTEXT = mp.get_context("spawn")
 _ENV_ALLOWLIST = {
     "COMSPEC",
     "PATH",
@@ -68,9 +70,11 @@ def run_in_sandbox(
 
 
 def _run_child(request: _SandboxChildRequest, timeout_seconds: float) -> ParsedDocument:
-    ctx = mp.get_context()
-    result_queue: Any = ctx.Queue(maxsize=1)
-    process = ctx.Process(target=_sandbox_child_main, args=(request, result_queue))
+    result_queue: Any = _SANDBOX_MP_CONTEXT.Queue(maxsize=1)
+    process = _SANDBOX_MP_CONTEXT.Process(
+        target=_sandbox_child_main,
+        args=(request, result_queue),
+    )
     process.start()
     process.join(timeout_seconds)
 
