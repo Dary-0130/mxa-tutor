@@ -46,7 +46,15 @@ from features.overview._teaching_level_policy import TeachingLevelPolicy
 from features.overview._teaching_unit_builder import TeachingUnitBuilder
 from features.overview._teaching_unit_service import TeachingUnitService
 from features.overview.overview_service import ProjectOverviewService
-from features.paper import InMemoryPaperSpecCache, PaperSpecCache, PaperSpecService
+from features.paper import (
+    InMemoryPaperPlanCache,
+    InMemoryPaperSpecCache,
+    PaperPlanCache,
+    PaperSpecCache,
+    PaperSpecService,
+    UserSupplyService,
+)
+from features.paper.paper_plan_service import PaperPlanService
 
 
 @lru_cache(maxsize=1)
@@ -142,6 +150,15 @@ def get_paper_spec_cache(request: Request) -> PaperSpecCache:
     return cast(PaperSpecCache, cache)
 
 
+def get_paper_plan_cache(request: Request) -> PaperPlanCache:
+    """从 app.state.paper_plan_cache 取 PaperPlanCache。"""
+    cache = getattr(request.app.state, "paper_plan_cache", None)
+    if cache is None:
+        cache = InMemoryPaperPlanCache()
+        request.app.state.paper_plan_cache = cache
+    return cast(PaperPlanCache, cache)
+
+
 def get_document_parser_router() -> DocumentParserRouter:
     """装配 PDF / docx 文档 parser router。"""
     return DocumentParserRouter([PdfParser(), DocxParser()])
@@ -208,6 +225,20 @@ def get_paper_spec_service(
         text_provider=text_provider,
         document_parser_router=document_parser_router,
     )
+
+
+def get_paper_plan_service(
+    text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+) -> PaperPlanService:
+    """装配 PaperPlanService。"""
+    return PaperPlanService(text_provider=text_provider)
+
+
+def get_paper_user_supply_service(
+    cache: Annotated[PaperPlanCache, Depends(get_paper_plan_cache)],
+) -> UserSupplyService:
+    """装配 UserSupplyService。"""
+    return UserSupplyService(cache=cache)
 
 
 def get_chat_service(request: Request) -> ChatService:

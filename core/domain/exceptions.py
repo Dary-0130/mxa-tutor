@@ -94,6 +94,14 @@ class PaperSpecGenerationError(MxaError):
     """PaperSpec 生成失败。"""
 
 
+class PaperPlanGenerationError(MxaError):
+    """Paper plan 生成失败。"""
+
+
+class PaperUserSupplyError(MxaError):
+    """用户补充 paper plan 参数失败。"""
+
+
 class ChatSessionNotFoundError(ProjectError):
     """指定对话会话不存在。"""
 

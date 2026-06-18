@@ -14,10 +14,21 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
-from api.dependencies import get_paper_spec_service, get_settings
+from api.dependencies import (
+    get_paper_plan_cache,
+    get_paper_plan_service,
+    get_paper_spec_service,
+    get_settings,
+)
 from app.config import AppSettings
 from core.domain.exceptions import DocumentParseError
-from features.paper.paper_schemas import PaperSpecModel
+from features.paper.paper_plan_cache import PaperPlanCache, PaperPlanRecord
+from features.paper.paper_plan_service import PaperPlanService
+from features.paper.paper_schemas import (
+    MissingParameterPromptModel,
+    ModelGenerationPlanModel,
+    PaperSpecModel,
+)
 from features.paper.paper_spec_service import PaperSpecService
 
 PDF_MAGIC = b"%PDF-"
@@ -32,6 +43,8 @@ class UploadDocumentResponse(BaseModel):
 
     paper_id: str
     spec: PaperSpecModel
+    plan: ModelGenerationPlanModel
+    missing_prompts: list[MissingParameterPromptModel]
     model_config = ConfigDict(extra="forbid")
 
 
@@ -39,9 +52,11 @@ class UploadDocumentResponse(BaseModel):
 async def upload_document(
     file: Annotated[UploadFile, File(...)],
     service: Annotated[PaperSpecService, Depends(get_paper_spec_service)],
+    plan_service: Annotated[PaperPlanService, Depends(get_paper_plan_service)],
+    plan_cache: Annotated[PaperPlanCache, Depends(get_paper_plan_cache)],
     settings: Annotated[AppSettings, Depends(get_settings)],
 ) -> UploadDocumentResponse:
-    """Upload a PDF/docx paper and return a generated PaperSpec."""
+    """Upload a PDF/docx paper and return generated PaperSpec + baseline plan."""
     max_upload_bytes = settings.max_upload_size_mb * 1024 * 1024
     _validate_declared_size(file.size, max_upload_bytes)
     sandbox_dir = await asyncio.to_thread(_create_sandbox_dir_sync)
@@ -66,7 +81,25 @@ async def upload_document(
         )
         paper_id = str(uuid.uuid4())
         spec = await service.extract(saved_path, paper_id)
-        return UploadDocumentResponse(paper_id=paper_id, spec=PaperSpecModel.from_domain(spec))
+        plan, missing_prompts, missing_bindings = await plan_service.generate(spec, paper_id)
+        await plan_cache.set(
+            paper_id,
+            PaperPlanRecord(
+                paper_id=paper_id,
+                spec=spec,
+                plan=plan,
+                missing_prompts=missing_prompts,
+                missing_bindings=missing_bindings,
+            ),
+        )
+        return UploadDocumentResponse(
+            paper_id=paper_id,
+            spec=PaperSpecModel.from_domain(spec),
+            plan=ModelGenerationPlanModel.from_domain(plan),
+            missing_prompts=[
+                MissingParameterPromptModel.from_domain(prompt) for prompt in missing_prompts
+            ],
+        )
     finally:
         await asyncio.to_thread(_cleanup_sandbox_dir_sync, sandbox_dir)
 

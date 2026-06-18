@@ -21,3 +21,4 @@ build/
 /tools_*.py
 /diag_*.py
 eval/ad_hoc/
+eval/out/
