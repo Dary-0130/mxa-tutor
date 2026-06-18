@@ -41,7 +41,7 @@ def test_load_paper_plan_missing_detector_yaml() -> None:
 def test_load_paper_plan_composer_yaml() -> None:
     template = load_prompt_template("paper_plan_composer.yaml")
 
-    assert template.version == "v0.1"
+    assert template.version == "v0.2"
     assert "PlanComposer" in template.system
     assert "{plan_id}" in template.user
 

@@ -296,8 +296,8 @@ async def test_paper_spec_id_equals_paper_id() -> None:
 @pytest.mark.asyncio
 async def test_llm_returned_plan_id_is_overridden_by_python_injection() -> None:
     payloads = _payloads()
-    payloads["plan_composer"]["plan_id"] = "PLAN-XXX"
-    payloads["plan_composer"]["paper_spec_id"] = "PAPER-XXX"
+    payloads["plan_composer"]["plan_id"] = "PLAN-PLACEHOLDER"
+    payloads["plan_composer"]["paper_spec_id"] = "PAPER-PLACEHOLDER"
 
     plan, _, _ = await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 

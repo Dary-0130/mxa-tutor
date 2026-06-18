@@ -330,7 +330,7 @@ tests/eval/
         evidence_tagger: EvidenceTagger | None = None,
         plan_assembler: PlanAssembler | None = None,
         timeout: float = DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS,  # 120.0
-        max_tokens: int = DEFAULT_PAPER_PLAN_MAX_TOKENS,       # 4000
+        max_tokens: int = DEFAULT_PAPER_PLAN_MAX_TOKENS,       # 8000
     ) -> None
     ```
   - 主入口(R1 P0-2 加 paper_id 参数;R1 P0-1 返回值加 bindings):
@@ -451,7 +451,7 @@ tests/eval/
 # features/paper/paper_plan_service.py
 
 DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS = 120.0
-DEFAULT_PAPER_PLAN_MAX_TOKENS = 4000
+DEFAULT_PAPER_PLAN_MAX_TOKENS = 8000  # R6 真启动调参,对齐 DeepSeek V3 8192 上限
 
 
 class PaperPlanService:
@@ -839,6 +839,8 @@ subsystem_breakdown 留空数组 [];m_script_skeleton 留 null(后续 LLM call �
 - ❌ plan_id / paper_spec_id 不等于系统注入值(必须逐字照抄)
 - ❌ parameter_mapping 项含 missing_param_prompt_id 字段(违反 ParameterMapping 5 字段 schema)
 ```
+
+v0.2 R6 真启动微补丁(2026-06-18):paper_reference 嵌套 dict 6 字段硬约束 + 字面正反例(LLM 易把字段输出为字符串描述,v0.2 显式约束;对齐 TASK-501 v0.3 真启动 prompt 微补丁套路)。
 
 ### 7.8 SubsystemPlanner prompt v0.1 角色特有字段
 
