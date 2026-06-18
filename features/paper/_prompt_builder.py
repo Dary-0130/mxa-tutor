@@ -77,7 +77,7 @@ def _shared_paper_plan_constraints() -> str:
 - 不得伪造 evidence(凭空生成 locator / excerpt)
 - 不得把 user_supplied 标成 document_extracted(反例 2,06 § 12.8)
 - 不得让 document_extracted 缺 locator + excerpt(反例 3)
-- 不得把 PaperEvidenceEntry 当作 explanation EvidencePack 子集消费(反例 4)
+- 不得把 PaperEvidenceEntry 当作其他模块的 evidence 包结构子集消费(反例 4)
 
 【反幻觉】:
 - 不输出 PaperSpec / 资料没给的参数 / 公式 / 图占位
