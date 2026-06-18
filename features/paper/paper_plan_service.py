@@ -33,7 +33,7 @@ from features.paper.paper_schemas import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS = 120.0
-DEFAULT_PAPER_PLAN_MAX_TOKENS = 4000
+DEFAULT_PAPER_PLAN_MAX_TOKENS = 8000  # R6 真启动调参,对齐 DeepSeek V3 8192 上限
 
 
 class PaperPlanService:
