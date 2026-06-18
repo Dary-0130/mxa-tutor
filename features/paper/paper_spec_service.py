@@ -22,7 +22,8 @@ from ._prompt_builder import build_messages
 from ._prompt_loader import load_prompt_template
 
 DEFAULT_PAPER_SPEC_TIMEOUT_SECONDS = 60.0
-DEFAULT_PAPER_SPEC_MAX_TOKENS = 4000
+# R6 后置调参,对齐 PaperPlanService 已升 8000 + DeepSeek V3 8192 上限
+DEFAULT_PAPER_SPEC_MAX_TOKENS = 8000
 MAX_PAPER_RAW_TEXT_CHARS = 80_000
 _GENERATION_ERROR_MESSAGE = "PaperSpec 生成失败,请刷新重试"
 
