@@ -401,7 +401,7 @@ tests/eval/
   - 自动:结构层 schema validation + 双源不变量 + Layer 2 数值维度(A1 字段命中率 / B1 recall / B2 precision / C2 block 命中 / C3 参数映射命中 / **D1 m_script_skeleton shape 校验(R1 P2-2 降级:只评 shape,不评 MATLAB 语法可运行)** / E1 / E2)
   - **R1 P1-4 sentinel:`value == MISSING_VALUE_SENTINEL` 不算参数命中**(C3 计算时排除 sentinel 项)
   - 半自动 / 人工:输出 Layer 1 O1/O2 + A2 / C1 / [Origin/Inherited] 空槽 CSV,留人工填
-  - 整体门槛 5 判定:两 case 各 ✅/🟡 + 0 E1/E2 一票否决
+  - R6.1 重跑获真实数字,以 TASK-502.1 完工 CSV 为准;不预设任一 case ✅/🟡
 - 新增 `eval/_paper_eval_metrics.py`:
   - `compute_a1_field_coverage(actual_spec, golden_spec) -> float`
   - `compute_b1_b2(actual_prompts, golden_prompts) -> (recall, precision)`
@@ -964,15 +964,15 @@ async def submit_user_supply(
 
 ### 评测验收线(对齐 scoring_template.md 三层栈)
 
-**TASK-502 是 paper-to-model 主线首个能跑完整整体门槛 5 的 task**(整体门槛 5 = `scoring_template.md` § 6.1):
+**TASK-502 的完整整体门槛 5 仍按 `scoring_template.md` § 6.1 判定;R6 后置修复已重跑真实 evaluator,数字以 TASK-502.1 完工 CSV 为准,不预设 ✅/🟡。**
 
 | 评测维度 | TASK-502 验收要求 |
 |---|---|
 | 结构层(Pydantic schema + 双源不变量自动校验)| **必过**(任一不过 = R6.1 Fail) |
-| Layer 2 自动维度(A1 / B1 / B2 / C2 / C3 / D1 / E1 / E2)| 两 case 各自 ≥ Partial 档;E1 / E2 必 Pass(一票否决) |
+| Layer 2 自动维度(A1 / B1 / B2 / C2 / C3 / D1 / E1 / E2)| 以 TASK-502.1 完工 CSV 真实数字为准;`blocked_known_defect` 时不可评维度写 `N/A`,不得判 ✅/🟡 |
 | Layer 2 半自动 / 人工(A2 / C1 / [Origin/Inherited] 标签)| 人工填卡;不阻塞自动跑(D6 归因诚实) |
 | Layer 1 Outcome(O1 / O2)| 人工填卡:material_to_plan O1 + missing_param O1+O2 |
-| **整体门槛 5** | 两 case 各自 ✅ 或 🟡 + 0 E1 / E2 一票否决 |
+| **整体门槛 5** | 只有两 case 均 `succeeded` 且各自 ✅ 或 🟡 + 0 E1 / E2 一票否决才通过;`blocked_known_defect` = 产品门槛 Fail |
 
 ### R6.1 完工实测命令(D7 显式 mypy + 决策 11 grep + 决策 21 boundary + 红线 15 项)
 
@@ -1060,14 +1060,15 @@ pytest tests/api/test_paper_plan_error_handler.py -v
 #     - test_user_supply_failed_batch_does_not_mutate_cached_plan(深拷贝 + atomic)
 
 # 10. 真启动验收(PM 配 .env DEEPSEEK_API_KEY)
+# - R6.1 数字已由 R6 后置修复重新验证;两 case 真跑数字以 TASK-502.1 完工 CSV 为准
 # - material_to_plan/case_01 剥离版 docx:期望 plan 含 SimPowerSystems + 8 block + 20 parameter_mapping + 8 subsystem 步;missing_prompts 为 0(剥离版无图);plan_id="PLAN-PAPER-<uuid>";paper_spec_id="PAPER-<uuid>"
 # - missing_param/case_01:期望 missing_prompts 6 项(MISS-001..006);用户补充后 plan 更新含 6 个 user_supplied 项;`/user-supply` 入参不传 plan/missing,只传 batch
 # - 双源 + locator 白名单人工验证(R1 P1-1)
 
 # 11. evaluator 跑两 case
-python eval/run_paper_eval.py --case material_to_plan/case_01_motor_short_circuit
-python eval/run_paper_eval.py --case missing_param/case_01_missing_image_param
-# 期望:两 case 各 ✅ 或 🟡 + 0 E1/E2 一票否决
+python eval/run_paper_eval.py --case material_to_plan/case_01_motor_short_circuit --output-dir /d/tmp/task-502-1-r6
+python eval/run_paper_eval.py --case missing_param/case_01_missing_image_param --output-dir /d/tmp/task-502-1-r6
+# 期望:R6 后置修复 CSV 给出真实 succeeded / blocked_known_defect;blocked 不得 conditional pass
 ```
 
 ---
@@ -1202,8 +1203,8 @@ python eval/run_paper_eval.py --case missing_param/case_01_missing_image_param
 
 - [ ] § 验收清单全过
 - [ ] § R6.1 完工实测命令全过 + 输出贴 PR(D7 含 mypy + 决策 11 grep + 决策 21 boundary + 红线 15 项 + 样本未改 + 隐私 grep + 对外口径 grep)
-- [ ] 真启动两 case 全过(material_to_plan + missing_param;PM 配 `.env` DEEPSEEK_API_KEY)
-- [ ] evaluator 两 case 各 ✅ 或 🟡 + 0 E1 / E2 一票否决
+- [ ] 真启动两 case 真实数字以 TASK-502.1 CSV 为准(material_to_plan + missing_param;PM 配 `.env` DEEPSEEK_API_KEY)
+- [ ] evaluator 仅在两 case 均 `succeeded` 且各自 ✅ 或 🟡 + 0 E1 / E2 一票否决时通过;`blocked_known_defect` 不得 conditional pass
 - [ ] commit subject 单行无 body(反例 17)
 - [ ] 完工三件套(决策 08)
 - [ ] 03 索引字节级修订(TASK-502 🔲 → 🔍,LF/CRLF 双试)
@@ -1342,3 +1343,52 @@ python eval/run_paper_eval.py --case missing_param/case_01_missing_image_param
 ---
 
 🚀 **TASK-502 v0.1.3 完工(派 Codex 终版,4 轮 R 收敛),等 PM 拍板入仓路径 + 派 Codex 阶段 1。**
+
+## 阶段 6 — R6 后置 defect 修复(evaluator true run)
+
+### § 6.1 主裁决 A + 条件穿透裁决 D
+
+- **主裁决 A(evaluator 自比)**:原 evaluator 将 golden JSON 当 actual,无法证明真实能力。R6 后置修复后,actual 只来自 `PaperSpecService` / `PaperPlanService` / `UserSupplyService` 返回值;golden 只从 fixture JSON 读取;CSV 与 4 个 actual JSON 独立落盘。
+- **条件穿透裁决 D(blocked 诚实口径)**:known defect 仅 `missing_binding_not_found` 可记录为 `blocked_known_defect`;`missing_binding_ambiguous` 与其他 `PaperPlanGenerationError` 必须 re-raise。blocked case 的 B1/B2/C2/C3/D1/E1/E2 写 `N/A`,TASK-502 产品整体门槛 Fail,不得 conditional pass。
+
+### § 6.2 设计字面 — v0.1.4 § IV D1-D11
+
+| # | 决策 | 字面 |
+|---|---|---|
+| D1 | actual 真跑 | actual 只来自 service return;golden 只来自 fixture JSON;任一 `golden_* or actual_*` 禁止 |
+| D2 | parser | sync ABC;7 字段;精确支持 material `S1-S5/EQ-01` 与 missing `S1-S5/EQ-01/FIG-01..05`;`datetime.UTC` 别名 |
+| D3 | provider | `DeepSeekTextProvider(api_key=settings.deepseek_api_key, base_url=settings.deepseek_base_url)` |
+| D4 | known failure | known set 仅 `missing_binding_not_found`;其他 `PaperPlanGenerationError` re-raise |
+| D5 | blocked 诚实口径 | service 异常不返回 prompts;blocked 的 B1/B2/C2/C3/D1/E1/E2 均按不可评写 `N/A`;整体门槛 Fail |
+| D6 | 入仓工艺 | v0.1.4 D6 原为 chore/task 合一;本次按 PM 工艺修订覆盖:不创建 v0.1.4 任务卡,decision-22 不动,只更新索引子行 + TASK-502 主卡 |
+| D7 | serialization | 直接使用三类已实证 schema wrapper;wrapper 失败向上抛;禁宽 catch / fallback / `str(value)` |
+| D8 | E1/E2 | E1 自动反映生产 invariant + wrapper validation;E2 比较完整 prompt/response 集合与全部 user-supplied mapping,不是一项即可 Pass |
+| D9 | outputs | 每 case 输出 4 个 actual JSON + 1 个 CSV;blocked 时 4 JSON 用 `null` 表示不可得;人工 A2/C1/O1/O2 有真实审阅对象 |
+| D10 | git workflow | Stage 0 / R6 同时支持 Git Bash 与 PowerShell;同步 main 后必须创建 `task/TASK-502-1-evaluator-true-run` feature branch;禁在 main 修改 |
+| D11 | task vs product gate | TASK-502.1 可在诚实记录 blocked 后完成;TASK-502 整体门槛不得因此 conditional pass |
+
+### § 6.3 反向 grep 守门
+
+1. 历史 phantom / 错 factory / `.code`:`actual_spec = golden_spec|golden_prompts = actual_prompts|build_paper_(spec|plan)_service|compute_layer2_metrics|\.code`
+2. actual/golden self fallback:`actual_[a-z_]+ *= *golden_|golden_[a-z_]+ +or +actual_`
+3. 错 LocatorIndex:`(?<!Parsed)LocatorIndex`
+4. 错 import:`from adapters\.text_provider|from core\.config`
+5. 已删除猜测/fallback/waiver:`_SCHEMA_WRAPPERS_AVAILABLE|except Exception: *$|return str\(value\)|scoped waiver|golden_spec or actual_spec|user_input\.get\(`
+6. ruff UP017 反向:`datetime\.now\(timezone\.utc\)`
+
+### § 6.4 工艺反例账目(5 条关键实例)
+
+1. **K_30**(R1 一审抓):evaluator `actual_spec = golden_spec or {}` self-比较 fallback
+2. **K_28a**(R1 二审抓):import 路径凭印象错(`adapters.text_provider` / `core.config` → 真实 `adapters.llm` / `app.config`)
+3. **K_30**(R1 三审 GPT/Codex 共抓):任务卡新增合法 helper 与反向 grep 守门词同名自撞(`_compute_layer2_metrics` → 改名 `_compute_case_layer_metrics`)
+4. **K_30**(R1 三审 Codex 抓):main 已有 `UserSuppliedResponseBatch` Pydantic batch wrapper,任务卡骨架仍逐项 `.get(..., [])` → 改 `batch.model_validate`
+5. **K_30**(R1 三审 Codex P0 抓,本任末轮):任务卡 parser 用 `datetime.now(timezone.utc)`,触发 ruff UP017 必失败 → 改 `from datetime import UTC, datetime` + `datetime.now(UTC)`
+
+### § 6.5 R6 真启动结果
+
+外置产物目录:`D:\tmp\task-502-1-r6`(不入 repo)。每 case 1 个 CSV + 4 个 actual JSON。
+
+| case | execution_status | failure | 真实自动结果 |
+|---|---|---|---|
+| `material_to_plan/case_01_motor_short_circuit` | `blocked_known_defect` | `missing_binding_not_found` | A1=`1.0000`;B1/B2/C2/C3/D1/E1/E2=`N/A`;产品整体门槛 Fail |
+| `missing_param/case_01_missing_image_param` | `blocked_known_defect` | `missing_binding_not_found` | A1/B1/B2/C2/C3/D1/E1/E2=`N/A`;产品整体门槛 Fail |
