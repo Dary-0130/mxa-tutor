@@ -8,8 +8,13 @@ from fastapi.testclient import TestClient
 
 from adapters.storage._connection import open_connection
 from adapters.storage.schema import init_schema
-from adapters.storage.sqlite_paper_cache import SqlitePaperBundleStore
-from api.dependencies import get_paper_bundle_store, get_settings
+from adapters.storage.sqlite_paper_cache import SqlitePaperBundleStore, SqlitePaperPlanCacheView
+from api.dependencies import (
+    get_paper_bundle_store,
+    get_paper_plan_cache,
+    get_paper_tuning_service,
+    get_settings,
+)
 from api.main import create_app
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
@@ -20,6 +25,31 @@ from core.domain.paper_plan import (
     ParameterMapping,
 )
 from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
+from core.domain.paper_tuning import ParameterDirection, TuningSuggestion
+from features.paper.paper_tuning_service import TUNING_DISCLAIMER
+
+
+class RecordingTuningService:
+    def __init__(self) -> None:
+        self.records: list[PaperPlanRecord] = []
+
+    async def suggest(self, record: PaperPlanRecord, user_scenario: str) -> TuningSuggestion:
+        self.records.append(record)
+        return TuningSuggestion(
+            suggestion_id="TUNE-paper-1-test",
+            user_scenario=user_scenario,
+            parameter_directions=[
+                ParameterDirection(
+                    param_name="H",
+                    direction="increase",
+                    physical_meaning="Higher inertia slows current transients.",
+                )
+            ],
+            expected_effect="Short-circuit current changes more slowly.",
+            confidence="medium",
+            evidence=[_document_evidence()],
+            disclaimer=TUNING_DISCLAIMER,
+        )
 
 
 def test_get_paper_spec_returns_persisted_spec(tmp_path: Path) -> None:
@@ -99,6 +129,49 @@ def test_get_paper_plan_plan_only_surfaces_store_error(tmp_path: Path) -> None:
 
     assert response.status_code == 500
     assert response.json()["error"] == "store_error"
+
+
+def test_user_supply_updates_sqlite_view_then_get_and_tuning_read_updated_record(
+    tmp_path: Path,
+) -> None:
+    store = _initialized_store(tmp_path)
+    asyncio.run(store.save_ready_bundle(_record()))
+    tuning_service = RecordingTuningService()
+    app = _create_app(store)
+    app.dependency_overrides[get_paper_plan_cache] = lambda: SqlitePaperPlanCacheView(store)
+    app.dependency_overrides[get_paper_tuning_service] = lambda: tuning_service
+
+    with TestClient(app) as client:
+        supply_response = client.post(
+            "/api/v1/papers/paper-1/user-supply",
+            json={
+                "user_supplied_responses": [
+                    {
+                        "prompt_id": "MISS-1",
+                        "parameter_name": "H",
+                        "user_supplied_value": "3.5",
+                        "user_supplied_unit": "s",
+                    }
+                ]
+            },
+        )
+        plan_response = client.get("/api/v1/papers/paper-1/plan")
+        tuning_response = client.post(
+            "/api/v1/papers/paper-1/tuning-suggest",
+            json={"user_scenario": "Need stronger damping"},
+        )
+
+    assert supply_response.status_code == 200
+    assert plan_response.status_code == 200
+    assert tuning_response.status_code == 200
+    assert [prompt["prompt_id"] for prompt in plan_response.json()["remaining_missing_prompts"]] == [
+        "MISS-2"
+    ]
+    assert tuning_service.records
+    mapping = tuning_service.records[0].plan.parameter_mapping[0]
+    assert mapping.paper_param_name == "H"
+    assert mapping.value == "3.5"
+    assert mapping.source is EvidenceSource.USER_SUPPLIED
 
 
 def _create_app(store: SqlitePaperBundleStore) -> Any:

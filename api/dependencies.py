@@ -48,8 +48,6 @@ from features.overview._teaching_unit_builder import TeachingUnitBuilder
 from features.overview._teaching_unit_service import TeachingUnitService
 from features.overview.overview_service import ProjectOverviewService
 from features.paper import (
-    InMemoryPaperPlanCache,
-    InMemoryPaperSpecCache,
     PaperPlanCache,
     PaperSpecCache,
     PaperSpecService,
@@ -147,8 +145,7 @@ def get_paper_spec_cache(request: Request) -> PaperSpecCache:
     """从 app.state.paper_spec_cache 取 PaperSpecCache。"""
     cache = getattr(request.app.state, "paper_spec_cache", None)
     if cache is None:
-        cache = InMemoryPaperSpecCache()
-        request.app.state.paper_spec_cache = cache
+        raise RuntimeError("PaperSpecCache not initialized; lifespan misconfigured")
     return cast(PaperSpecCache, cache)
 
 
@@ -156,8 +153,7 @@ def get_paper_plan_cache(request: Request) -> PaperPlanCache:
     """从 app.state.paper_plan_cache 取 PaperPlanCache。"""
     cache = getattr(request.app.state, "paper_plan_cache", None)
     if cache is None:
-        cache = InMemoryPaperPlanCache()
-        request.app.state.paper_plan_cache = cache
+        raise RuntimeError("PaperPlanCache not initialized; lifespan misconfigured")
     return cast(PaperPlanCache, cache)
 
 
