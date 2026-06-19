@@ -128,10 +128,10 @@ async def test_generate_happy_path_returns_plan_missing_bindings() -> None:
         plan.m_script_skeleton
         == "clear; clc;\n% 参数区\nfigure; subplot(1,1,1); title('短路电流');"
     )
-    assert [prompt.prompt_id for prompt in missing_prompts] == ["MISS-PAPER-001-001"]
+    assert [prompt.prompt_id for prompt in missing_prompts] == ["MISS-001"]
     assert missing_bindings == [
         MissingBindingModel(
-            prompt_id="MISS-PAPER-001-001",
+            prompt_id="MISS-001",
             paper_param_name="H",
             model_param_name="Synchronous Machine.H",
         )

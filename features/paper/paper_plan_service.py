@@ -145,7 +145,7 @@ class PaperPlanService:
         for index, draft in enumerate(drafts, start=1):
             prompts.append(
                 MissingParameterPrompt(
-                    prompt_id=f"MISS-{paper_id}-{index:03d}",
+                    prompt_id=f"MISS-{index:03d}",
                     parameter_name=draft.parameter_name,
                     paper_reference=draft.paper_reference.to_domain(),
                     suggested_unit=draft.suggested_unit,
