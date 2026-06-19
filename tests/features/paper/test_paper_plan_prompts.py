@@ -5,9 +5,8 @@ from pathlib import Path
 import pytest
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
-from core.domain.paper_plan import BlockRecommendation
+from core.domain.paper_plan import BlockRecommendation, ParameterMapping
 from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
-from core.interfaces.document_parser import FigurePlaceholder
 from features.paper._prompt_builder import (
     _shared_paper_plan_constraints,
     build_messages_for_missing_detect,
@@ -33,15 +32,16 @@ def _clear_prompt_cache() -> None:
 def test_load_paper_plan_missing_detector_yaml() -> None:
     template = load_prompt_template("paper_plan_missing_detector.yaml")
 
-    assert template.version == "v0.1"
+    assert template.version == "v0.2"
     assert "MissingDetector" in template.system
     assert "{paper_spec_json}" in template.user
+    assert "{sentinel_mappings_json}" in template.user
 
 
 def test_load_paper_plan_composer_yaml() -> None:
     template = load_prompt_template("paper_plan_composer.yaml")
 
-    assert template.version == "v0.2"
+    assert template.version == "v0.3"
     assert "PlanComposer" in template.system
     assert "{plan_id}" in template.user
 
@@ -112,7 +112,7 @@ def test_shared_snippet_contains_plan_id_injection_rule() -> None:
 
 def test_4_role_systems_all_inject_shared_snippet() -> None:
     systems = [
-        build_messages_for_missing_detect(_spec(), [_figure_placeholder()])[0].content,
+        build_messages_for_missing_detect(_spec(), [_sentinel_mapping()])[0].content,
         build_messages_for_plan_compose(_spec(), "PLAN-PAPER-001", "PAPER-001")[0].content,
         build_messages_for_subsystem_plan([_block_recommendation()], [_document_evidence()])[
             0
@@ -141,17 +141,16 @@ def test_build_messages_for_plan_compose_substitutes_plan_id() -> None:
 def test_missing_detector_system_specifies_prompt_fields() -> None:
     system = load_prompt_template("paper_plan_missing_detector.yaml").system
 
-    assert "MissingParameterPrompt 7 字段硬约束" in system
+    assert "draft 字段硬约束" in system
     for field_name in (
-        "prompt_id",
         "parameter_name",
         "paper_reference",
         "suggested_unit",
-        "user_supplied_value",
-        "user_supplied_unit",
         "source",
     ):
         assert field_name in system
+    assert "禁止输出 prompt_id" in system
+    assert "Python 按 sentinel 顺序注入" in system
 
 
 def test_composer_system_specifies_subsystem_breakdown_empty_and_mscript_null() -> None:
@@ -224,11 +223,13 @@ def _block_recommendation() -> BlockRecommendation:
     )
 
 
-def _figure_placeholder() -> FigurePlaceholder:
-    return FigurePlaceholder(
-        figure_id="FIG-01",
-        caption="Machine parameters",
-        paper_section_id="S1",
+def _sentinel_mapping() -> ParameterMapping:
+    return ParameterMapping(
+        paper_param_name="H 惯性时间常数",
+        model_param_name="Synchronous Machine.H",
+        value="null",
+        unit="s",
+        source=EvidenceSource.DOCUMENT_EXTRACTED,
     )
 
 

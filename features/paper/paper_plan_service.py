@@ -5,16 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Annotated, Any, NoReturn
+from collections import Counter
+from typing import Annotated, Any, Literal, NoReturn
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from core.domain.exceptions import PaperPlanGenerationError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
-from core.domain.paper_plan import BlockRecommendation, ModelGenerationPlan
+from core.domain.paper_plan import BlockRecommendation, ModelGenerationPlan, ParameterMapping
 from core.domain.paper_spec import PaperSpec
-from core.interfaces.document_parser import FigurePlaceholder
 from core.interfaces.llm_provider import LLMMessage, TextProvider
 from features.paper._prompt_builder import (
     build_messages_for_missing_detect,
@@ -22,10 +22,14 @@ from features.paper._prompt_builder import (
     build_messages_for_plan_compose,
     build_messages_for_subsystem_plan,
 )
-from features.paper.paper_plan_helpers import EvidenceTagger, MissingBindingModel, PlanAssembler
+from features.paper.paper_plan_helpers import (
+    MISSING_VALUE_SENTINEL,
+    EvidenceTagger,
+    MissingBindingModel,
+    PlanAssembler,
+)
 from features.paper.paper_schemas import (
     BlockRecommendationModel,
-    MissingParameterPromptModel,
     PaperEvidenceEntryModel,
     ParameterMappingModel,
 )
@@ -61,14 +65,17 @@ class PaperPlanService:
         plan_id = f"PLAN-{paper_id}"
         paper_spec_id = paper_id
 
-        missing_prompts, plan_composer_output, mscript = await asyncio.gather(
-            self._llm_missing_detect(spec),
+        plan_composer_output, mscript = await asyncio.gather(
             self._llm_plan_compose(spec, plan_id, paper_spec_id),
             self._llm_mscript_draft(spec),
         )
-        subsystem_steps = await self._llm_subsystem_plan(
-            plan_composer_output.block_recommendations,
-            spec.evidence,
+        sentinel_mappings = self._sentinel_mappings(plan_composer_output.parameter_mapping)
+        missing_prompts, subsystem_steps = await asyncio.gather(
+            self._llm_missing_detect(spec, paper_id, sentinel_mappings),
+            self._llm_subsystem_plan(
+                plan_composer_output.block_recommendations,
+                spec.evidence,
+            ),
         )
 
         assembled_plan, missing_bindings = self._plan_assembler.merge(
@@ -118,28 +125,35 @@ class PaperPlanService:
             self._raise_generation_error(role_name, "json_top_level_must_be_object")
         return payload
 
-    async def _llm_missing_detect(self, spec: PaperSpec) -> list[MissingParameterPrompt]:
+    async def _llm_missing_detect(
+        self,
+        spec: PaperSpec,
+        paper_id: str,
+        sentinel_mappings: list[ParameterMapping],
+    ) -> list[MissingParameterPrompt]:
         role_name = "missing_detector"
-        messages = build_messages_for_missing_detect(
-            spec,
-            [
-                FigurePlaceholder(
-                    figure_id=figure.figure_id,
-                    caption=figure.caption,
-                    paper_section_id=figure.paper_section_id,
-                )
-                for figure in spec.figure_locations
-            ],
-        )
+        messages = build_messages_for_missing_detect(spec, sentinel_mappings)
         data = await self._call_llm_json(messages, role_name)
         prompts_payload = self._require_list_field(data, "missing_prompts", role_name)
         try:
-            prompts = [
-                MissingParameterPromptModel.model_validate(item).to_domain()
-                for item in prompts_payload
-            ]
+            drafts = [_MissingPromptDraftModel.model_validate(item) for item in prompts_payload]
         except ValidationError as exc:
             self._raise_validation_error(role_name, exc)
+
+        self._validate_missing_detector_cardinality(drafts, sentinel_mappings, role_name)
+        prompts: list[MissingParameterPrompt] = []
+        for index, draft in enumerate(drafts, start=1):
+            prompts.append(
+                MissingParameterPrompt(
+                    prompt_id=f"MISS-{paper_id}-{index:03d}",
+                    parameter_name=draft.parameter_name,
+                    paper_reference=draft.paper_reference.to_domain(),
+                    suggested_unit=draft.suggested_unit,
+                    user_supplied_value=None,
+                    user_supplied_unit=None,
+                    source=EvidenceSource.USER_SUPPLIED,
+                )
+            )
 
         for prompt in prompts:
             if prompt.source is not EvidenceSource.USER_SUPPLIED:
@@ -186,7 +200,9 @@ class PaperPlanService:
             model = _PlanComposerOutputModel.model_validate(data)
         except ValidationError as exc:
             self._raise_validation_error(role_name, exc)
-        return model.to_domain()
+        plan = model.to_domain()
+        self._validate_plan_composer_mappings(plan.parameter_mapping, role_name)
+        return plan
 
     async def _llm_subsystem_plan(
         self,
@@ -241,6 +257,39 @@ class PaperPlanService:
         logger.error("paper_plan_generation_failed role=%s reason=%s", role_name, reason)
         raise PaperPlanGenerationError(f"role={role_name}: {reason}") from None
 
+    def _sentinel_mappings(self, mappings: list[ParameterMapping]) -> list[ParameterMapping]:
+        return [mapping for mapping in mappings if mapping.value == MISSING_VALUE_SENTINEL]
+
+    def _validate_plan_composer_mappings(
+        self,
+        mappings: list[ParameterMapping],
+        role_name: str,
+    ) -> None:
+        name_counts = Counter(mapping.paper_param_name for mapping in mappings)
+        if any(count != 1 for count in name_counts.values()):
+            self._raise_generation_error(role_name, "paper_param_name_duplicate")
+        for mapping in self._sentinel_mappings(mappings):
+            if mapping.source is not EvidenceSource.DOCUMENT_EXTRACTED:
+                self._raise_generation_error(role_name, "sentinel_source_must_be_document")
+
+    def _validate_missing_detector_cardinality(
+        self,
+        drafts: list[_MissingPromptDraftModel],
+        sentinel_mappings: list[ParameterMapping],
+        role_name: str,
+    ) -> None:
+        sentinel_names = [mapping.paper_param_name for mapping in sentinel_mappings]
+        draft_names = [draft.parameter_name for draft in drafts]
+        if any(count != 1 for count in Counter(sentinel_names).values()):
+            self._raise_generation_error(role_name, "sentinel_parameter_duplicate")
+        if any(count != 1 for count in Counter(draft_names).values()):
+            self._raise_generation_error(role_name, "missing_prompt_duplicate")
+        if len(drafts) != len(sentinel_mappings):
+            self._raise_generation_error(role_name, "missing_prompt_cardinality_mismatch")
+        for draft_name, sentinel_name in zip(draft_names, sentinel_names, strict=True):
+            if draft_name != sentinel_name:
+                self._raise_generation_error(role_name, "missing_prompt_parameter_mismatch")
+
 
 class _PlanComposerOutputModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -268,3 +317,12 @@ class _PlanComposerOutputModel(BaseModel):
             m_script_skeleton=self.m_script_skeleton,
             evidence=[entry.to_domain() for entry in self.evidence],
         )
+
+
+class _MissingPromptDraftModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parameter_name: str = Field(min_length=1)
+    paper_reference: PaperEvidenceEntryModel
+    suggested_unit: str | None = Field(default=None, min_length=1)
+    source: Literal["user_supplied"] = "user_supplied"

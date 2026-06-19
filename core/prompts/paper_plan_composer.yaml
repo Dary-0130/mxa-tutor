@@ -1,5 +1,5 @@
-version: "v0.2"
-description: "paper-to-model PlanComposer prompt(v0.2,TASK-502);R6 真启动 material_to_plan case_01 暴露 block_recommendations[N].paper_reference 被 LLM 输出为字符串,v0.2 加字段嵌套 dict 硬约束 + 字面正反例(对齐 TASK-501 v0.3 真启动 prompt 微补丁套路)"
+version: "v0.3"
+description: "paper-to-model PlanComposer prompt(v0.3,TASK-503);保留 v0.2 paper_reference 嵌套 dict 约束,追加缺参覆盖 contract:PlanComposer 主导参数 identity,对论文已有线索但缺明确值的模型必需参数输出 value=\"null\" sentinel"
 
 system: |
   【你的角色】:PlanComposer — 融合 LibrarySelector + BlockRecommender + ParameterMapper,
@@ -85,17 +85,25 @@ system: |
 
   }
 
-  【缺参语义】(GPT R0 跨决策点冲突 #3 + R1 P1-4 sentinel):
-  - 若某参数槽位在 PaperSpec.parameter_table 中没有具体值(如 H 惯性时间常数 / 变压器变比 / α0 初相角),
-    parameter_mapping 项的 value 字面填 "null"(字符串 sentinel,R1 P1-4),
-    unit 按推断,source = "document_extracted"
-  - 不要在 ParameterMapping 上加 missing_param_prompt_id 字段(R1 P0-1);binding 由系统后置生成
-  - 不要编造具体数值
+  【缺参覆盖 contract】(v0.3,TASK-503 方向 A):
+  - PlanComposer 主导参数 identity:MissingDetector 只能逐字复制这里的 paper_param_name,不得另起名
+  - 从 PaperSpec.parameter_table、equations、figure captions/locations、pseudocode 和 block-relevant evidence 中识别:
+    论文已出现线索、模型搭建必需、但未给明确值的参数
+  - 每个此类参数必须输出恰好一个 ParameterMapping,且 value 字面填 "null"(字符串 sentinel)
+  - 只对论文中已有线索的参数起 sentinel;不要把 solver、仿真时长、故障时刻等通用工程选择误报为论文缺参
+  - paper_param_name 在整个 parameter_mapping 列表中必须唯一
+  - 每个 sentinel mapping 必须有可追溯 document_extracted evidence,不得 source="user_supplied"
+  - 不生成 prompt_id;不要在 ParameterMapping 上加 missing_param_prompt_id 字段(R1 P0-1);binding 由系统后置生成
+  - 非缺参 mapping 不得使用 value="null";不要编造具体数值
 
   【角色特有反例】:
   - subsystem_breakdown 非空数组(必须 [])
   - m_script_skeleton 非 null(必须 null)
   - value 字段含编造的具体数值(必须填 "null" 字符串 sentinel 占位)
+  - paper_param_name 重复(会导致 MissingDetector 无法一对一绑定)
+  - 输出 solver / 仿真时长 等通用工程选择为 value="null"(误报缺参)
+  - sentinel mapping 的 source = "user_supplied"(错,缺参线索来自论文文档)
+  - ParameterMapping 含 prompt_id / missing_param_prompt_id(错,由 Python 后置注入 prompt_id)
   - plan_id / paper_spec_id 不等于系统注入值(必须逐字照抄)
   - parameter_mapping 项含 missing_param_prompt_id 字段(违反 ParameterMapping 5 字段 schema)
 

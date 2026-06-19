@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 
 from core.domain.paper_evidence import PaperEvidenceEntry
-from core.domain.paper_plan import BlockRecommendation
+from core.domain.paper_plan import BlockRecommendation, ParameterMapping
 from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterEntry
 from core.interfaces.document_parser import FigurePlaceholder, ParsedDocument
 from core.interfaces.llm_provider import LLMMessage
@@ -16,6 +15,7 @@ from features.paper.paper_schemas import (
     PaperEvidenceEntryModel,
     PaperSpecModel,
     ParameterEntryModel,
+    ParameterMappingModel,
 )
 
 from ._prompt_loader import load_prompt_template
@@ -90,7 +90,7 @@ def _shared_paper_plan_constraints() -> str:
 
 def build_messages_for_missing_detect(
     spec: PaperSpec,
-    figure_placeholders: list[FigurePlaceholder],
+    sentinel_mappings: list[ParameterMapping],
 ) -> list[LLMMessage]:
     """Build MissingDetector messages."""
 
@@ -99,7 +99,12 @@ def build_messages_for_missing_detect(
         template.user,
         {
             "paper_spec_json": _paper_spec_json(spec),
-            "figure_placeholders": _json_dumps([asdict(figure) for figure in figure_placeholders]),
+            "sentinel_mappings_json": _json_dumps(
+                [
+                    ParameterMappingModel.from_domain(mapping).model_dump(mode="json")
+                    for mapping in sentinel_mappings
+                ]
+            ),
         },
     )
     return _role_messages(template.system, user)
