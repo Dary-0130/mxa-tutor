@@ -56,6 +56,7 @@ from features.paper import (
     UserSupplyService,
 )
 from features.paper.paper_plan_service import PaperPlanService
+from features.paper.paper_tuning_service import TuningSuggestionService
 
 
 @lru_cache(maxsize=1)
@@ -248,6 +249,13 @@ def get_paper_user_supply_service(
 ) -> UserSupplyService:
     """装配 UserSupplyService。"""
     return UserSupplyService(cache=cache)
+
+
+def get_paper_tuning_service(
+    text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+) -> TuningSuggestionService:
+    """装配 TuningSuggestionService。"""
+    return TuningSuggestionService(text_provider=text_provider)
 
 
 def get_chat_service(request: Request) -> ChatService:
