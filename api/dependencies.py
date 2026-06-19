@@ -34,6 +34,7 @@ from core.interfaces.chat_store import ChatStore
 from core.interfaces.document_parser import DocumentParserRouter
 from core.interfaces.embedder import EmbeddingProvider
 from core.interfaces.llm_provider import TextProvider
+from core.interfaces.paper_cache import PaperBundleStore
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
 from core.interfaces.teaching_unit_store import TeachingUnitStore
@@ -157,6 +158,14 @@ def get_paper_plan_cache(request: Request) -> PaperPlanCache:
         cache = InMemoryPaperPlanCache()
         request.app.state.paper_plan_cache = cache
     return cast(PaperPlanCache, cache)
+
+
+def get_paper_bundle_store(request: Request) -> PaperBundleStore:
+    """从 app.state.paper_bundle_store 取 PaperBundleStore。"""
+    store = getattr(request.app.state, "paper_bundle_store", None)
+    if store is None:
+        raise RuntimeError("PaperBundleStore not initialized; lifespan misconfigured")
+    return cast(PaperBundleStore, store)
 
 
 def get_document_parser_router() -> DocumentParserRouter:
