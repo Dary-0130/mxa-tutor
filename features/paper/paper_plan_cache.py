@@ -3,43 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
-from core.domain.paper_missing import MissingParameterPrompt
-from core.domain.paper_plan import ModelGenerationPlan
-from core.domain.paper_spec import PaperSpec
-from features.paper.paper_plan_helpers import MissingBindingModel
-
-
-@dataclass(frozen=True)
-class PaperPlanRecord:
-    """Single-process cache record for paper plan state."""
-
-    paper_id: str
-    spec: PaperSpec
-    plan: ModelGenerationPlan
-    missing_prompts: list[MissingParameterPrompt]
-    missing_bindings: list[MissingBindingModel]
-
-
-class PaperPlanCache(ABC):
-    """Async cache boundary for paper plan state."""
-
-    @abstractmethod
-    async def get(self, paper_id: str) -> PaperPlanRecord | None:
-        """Return cached plan state for ``paper_id`` when present."""
-        ...
-
-    @abstractmethod
-    async def set(self, paper_id: str, record: PaperPlanRecord) -> None:
-        """Store ``record`` for ``paper_id``."""
-        ...
-
-    @abstractmethod
-    async def delete(self, paper_id: str) -> None:
-        """Remove cached plan state for ``paper_id`` if present."""
-        ...
+from core.domain.paper_plan import PaperPlanRecord
+from core.interfaces.paper_cache import PaperPlanCache
 
 
 class InMemoryPaperPlanCache(PaperPlanCache):

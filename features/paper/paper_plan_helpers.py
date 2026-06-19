@@ -2,25 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from typing import Protocol
 
 from core.domain.exceptions import PaperPlanGenerationError, PaperUserSupplyError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
-from core.domain.paper_missing import MissingParameterPrompt
+from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
 from core.domain.paper_plan import ModelGenerationPlan, ParameterMapping
 from core.domain.paper_spec import PaperSpec
 
 MISSING_VALUE_SENTINEL: str = "null"
-
-
-@dataclass(frozen=True)
-class MissingBindingModel:
-    """Private binding from a missing prompt to one parameter mapping."""
-
-    prompt_id: str
-    paper_param_name: str
-    model_param_name: str
+MissingBindingModel = MissingParameterBinding
 
 
 class _UserSuppliedResponseLike(Protocol):
