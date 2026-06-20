@@ -7,6 +7,7 @@ from features.paper.paper_plan_cache import (
     PaperPlanRecord,
 )
 from features.paper.paper_spec_service import PaperSpecService
+from features.paper.paper_tuning_service import TuningSuggestionService
 from features.paper.paper_user_supply_service import UserSupplyService
 
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     "PaperPlanRecord",
     "PaperSpecCache",
     "PaperSpecService",
+    "TuningSuggestionService",
     "UserSupplyService",
 ]

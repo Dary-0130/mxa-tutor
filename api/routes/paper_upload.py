@@ -15,14 +15,15 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from api.dependencies import (
-    get_paper_plan_cache,
+    get_paper_bundle_store,
     get_paper_plan_service,
     get_paper_spec_service,
     get_settings,
 )
 from app.config import AppSettings
 from core.domain.exceptions import DocumentParseError
-from features.paper.paper_plan_cache import PaperPlanCache, PaperPlanRecord
+from core.interfaces.paper_cache import PaperBundleStore
+from features.paper.paper_plan_cache import PaperPlanRecord
 from features.paper.paper_plan_service import PaperPlanService
 from features.paper.paper_schemas import (
     MissingParameterPromptModel,
@@ -53,7 +54,7 @@ async def upload_document(
     file: Annotated[UploadFile, File(...)],
     service: Annotated[PaperSpecService, Depends(get_paper_spec_service)],
     plan_service: Annotated[PaperPlanService, Depends(get_paper_plan_service)],
-    plan_cache: Annotated[PaperPlanCache, Depends(get_paper_plan_cache)],
+    bundle_store: Annotated[PaperBundleStore, Depends(get_paper_bundle_store)],
     settings: Annotated[AppSettings, Depends(get_settings)],
 ) -> UploadDocumentResponse:
     """Upload a PDF/docx paper and return generated PaperSpec + baseline plan."""
@@ -80,18 +81,16 @@ async def upload_document(
             extension,
         )
         paper_id = str(uuid.uuid4())
-        spec = await service.extract(saved_path, paper_id)
+        spec = await service.extract_uncached(saved_path, paper_id)
         plan, missing_prompts, missing_bindings = await plan_service.generate(spec, paper_id)
-        await plan_cache.set(
-            paper_id,
-            PaperPlanRecord(
-                paper_id=paper_id,
-                spec=spec,
-                plan=plan,
-                missing_prompts=missing_prompts,
-                missing_bindings=missing_bindings,
-            ),
+        record = PaperPlanRecord(
+            paper_id=paper_id,
+            spec=spec,
+            plan=plan,
+            missing_prompts=missing_prompts,
+            missing_bindings=missing_bindings,
         )
+        await bundle_store.save_ready_bundle(record)
         return UploadDocumentResponse(
             paper_id=paper_id,
             spec=PaperSpecModel.from_domain(spec),

@@ -1,6 +1,6 @@
 """API 层异常 handler 挂载点(不是 ASGI middleware,命名沿用历史目录结构)。
 
-本模块实现 26 个业务 handler,覆盖上传 / 工程 / LLM / 解析 / 导览 /
+本模块实现 28 个业务 handler,覆盖上传 / 工程 / LLM / 解析 / 导览 /
 问答异常树 + ``MxaError`` final fallback,并补 2 个 FastAPI 默认 handler 兜底。
 
 响应体 shape ``{"error": "<machine_code>", "message": "<中文文案>"}`` 由本
@@ -48,8 +48,10 @@ from core.domain.exceptions import (
     MParseError,
     MxaError,
     OverviewGenerationError,
+    PaperNotFoundError,
     PaperPlanGenerationError,
     PaperSpecGenerationError,
+    PaperTuningError,
     PaperUserSupplyError,
     ProjectError,
     ProjectNotFoundError,
@@ -116,7 +118,7 @@ def _make_project_too_large_handler(settings: AppSettings) -> ExceptionHandler:
 
 
 def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
-    """注册 26 个业务 handler + 2 个 FastAPI 默认 handler 兜底。
+    """注册 28 个业务 handler + 2 个 FastAPI 默认 handler 兜底。
 
     注册顺序不影响 FastAPI 行为(FastAPI 按 MRO 查找最具体 handler),
     现有 tuple 顺序保持不重组,仅在末尾追加 3 个 leaf handler。
@@ -238,6 +240,18 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         (
             PaperPlanGenerationError,
             _make_handler(502, "paper_plan_generation_failed", "建模计划生成失败,请刷新重试"),
+        ),
+        (
+            PaperNotFoundError,
+            _make_handler(
+                404,
+                "paper_not_found",
+                "没有找到这份资料,可能已过期或已被删除,请重新上传",
+            ),
+        ),
+        (
+            PaperTuningError,
+            _make_handler(502, "paper_tuning_failed", "调参建议生成失败,请刷新重试"),
         ),
         (
             PaperUserSupplyError,

@@ -8,6 +8,7 @@ from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
+    PaperPlanRecord,
     ParameterMapping,
 )
 from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
@@ -16,6 +17,7 @@ from features.paper.paper_plan_helpers import (
     EvidenceTagger,
     MissingBindingModel,
     PlanAssembler,
+    resolved_prompt_ids,
 )
 
 
@@ -188,6 +190,71 @@ def test_plan_assembler_rejects_missing_binding_ambiguous() -> None:
         )
 
 
+def test_resolved_prompt_ids_requires_all_five_conditions() -> None:
+    record = _record(
+        mapping=_mapping("H", "3.5", source=EvidenceSource.USER_SUPPLIED),
+        plan_evidence=[_document_evidence(), _user_evidence(missing_param_prompt_id="MISS-1")],
+    )
+
+    assert resolved_prompt_ids(record) == frozenset({"MISS-1"})
+
+    unresolved_value = _record(
+        mapping=_mapping("H", MISSING_VALUE_SENTINEL, source=EvidenceSource.USER_SUPPLIED),
+        plan_evidence=[_document_evidence(), _user_evidence(missing_param_prompt_id="MISS-1")],
+    )
+    unresolved_source = _record(
+        mapping=_mapping("H", "3.5", source=EvidenceSource.DOCUMENT_EXTRACTED),
+        plan_evidence=[_document_evidence(), _user_evidence(missing_param_prompt_id="MISS-1")],
+    )
+    unresolved_evidence = _record(
+        mapping=_mapping("H", "3.5", source=EvidenceSource.USER_SUPPLIED),
+        plan_evidence=[_document_evidence()],
+    )
+    duplicate_binding = _record(
+        mapping=_mapping("H", "3.5", source=EvidenceSource.USER_SUPPLIED),
+        bindings=[
+            MissingBindingModel(
+                prompt_id="MISS-1",
+                paper_param_name="H",
+                model_param_name="Synchronous Machine.H",
+            ),
+            MissingBindingModel(
+                prompt_id="MISS-1",
+                paper_param_name="H",
+                model_param_name="Synchronous Machine.H",
+            ),
+        ],
+        plan_evidence=[_document_evidence(), _user_evidence(missing_param_prompt_id="MISS-1")],
+    )
+
+    assert resolved_prompt_ids(unresolved_value) == frozenset()
+    assert resolved_prompt_ids(unresolved_source) == frozenset()
+    assert resolved_prompt_ids(unresolved_evidence) == frozenset()
+    assert resolved_prompt_ids(duplicate_binding) == frozenset()
+
+
+def test_validate_for_record_accepts_resolved_user_evidence() -> None:
+    record = _record(
+        mapping=_mapping("H", "3.5", source=EvidenceSource.USER_SUPPLIED),
+        plan_evidence=[_document_evidence(), _user_evidence(missing_param_prompt_id="MISS-1")],
+    )
+
+    EvidenceTagger().validate_for_record([_user_evidence(missing_param_prompt_id="MISS-1")], record)
+
+
+def test_validate_for_record_rejects_unresolved_user_evidence() -> None:
+    record = _record(
+        mapping=_mapping("H", MISSING_VALUE_SENTINEL, source=EvidenceSource.USER_SUPPLIED),
+        plan_evidence=[_document_evidence()],
+    )
+
+    with pytest.raises(PaperPlanGenerationError, match="user_evidence_unresolved_prompt"):
+        EvidenceTagger().validate_for_record(
+            [_user_evidence(missing_param_prompt_id="MISS-1")],
+            record,
+        )
+
+
 def _spec() -> PaperSpec:
     evidence = _document_evidence()
     return PaperSpec(
@@ -219,8 +286,33 @@ def _spec() -> PaperSpec:
     )
 
 
-def _plan(parameter_mapping: list[ParameterMapping]) -> ModelGenerationPlan:
-    evidence = _document_evidence()
+def _record(
+    *,
+    mapping: ParameterMapping,
+    plan_evidence: list[PaperEvidenceEntry],
+    bindings: list[MissingBindingModel] | None = None,
+) -> PaperPlanRecord:
+    return PaperPlanRecord(
+        paper_id="PAPER-1",
+        spec=_spec(),
+        plan=_plan(parameter_mapping=[mapping], plan_evidence=plan_evidence),
+        missing_prompts=[_missing_prompt()],
+        missing_bindings=bindings
+        or [
+            MissingBindingModel(
+                prompt_id="MISS-1",
+                paper_param_name="H",
+                model_param_name="Synchronous Machine.H",
+            )
+        ],
+    )
+
+
+def _plan(
+    parameter_mapping: list[ParameterMapping],
+    plan_evidence: list[PaperEvidenceEntry] | None = None,
+) -> ModelGenerationPlan:
+    block_evidence = _document_evidence()
     return ModelGenerationPlan(
         plan_id="PLAN-BAD",
         paper_spec_id="BAD",
@@ -229,23 +321,28 @@ def _plan(parameter_mapping: list[ParameterMapping]) -> ModelGenerationPlan:
             BlockRecommendation(
                 block_type="Synchronous Machine",
                 purpose="Model the generator.",
-                paper_reference=evidence,
+                paper_reference=block_evidence,
             )
         ],
         parameter_mapping=parameter_mapping,
         subsystem_breakdown=[],
         m_script_skeleton=None,
-        evidence=[evidence],
+        evidence=plan_evidence if plan_evidence is not None else [_document_evidence()],
     )
 
 
-def _mapping(paper_param_name: str, value: str) -> ParameterMapping:
+def _mapping(
+    paper_param_name: str,
+    value: str,
+    *,
+    source: EvidenceSource = EvidenceSource.DOCUMENT_EXTRACTED,
+) -> ParameterMapping:
     return ParameterMapping(
         paper_param_name=paper_param_name,
         model_param_name=f"Synchronous Machine.{paper_param_name}",
         value=value,
         unit="s",
-        source=EvidenceSource.DOCUMENT_EXTRACTED,
+        source=source,
     )
 
 

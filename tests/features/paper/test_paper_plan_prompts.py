@@ -5,15 +5,21 @@ from pathlib import Path
 import pytest
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
-from core.domain.paper_plan import BlockRecommendation
+from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
+from core.domain.paper_plan import (
+    BlockRecommendation,
+    ModelGenerationPlan,
+    PaperPlanRecord,
+    ParameterMapping,
+)
 from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
-from core.interfaces.document_parser import FigurePlaceholder
 from features.paper._prompt_builder import (
     _shared_paper_plan_constraints,
     build_messages_for_missing_detect,
     build_messages_for_mscript_draft,
     build_messages_for_plan_compose,
     build_messages_for_subsystem_plan,
+    build_messages_for_tuning_suggest,
 )
 from features.paper._prompt_loader import load_prompt_template
 
@@ -22,6 +28,7 @@ PAPER_PLAN_PROMPTS = [
     "paper_plan_composer.yaml",
     "paper_plan_subsystem.yaml",
     "paper_plan_mscript.yaml",
+    "paper_tuning_suggest.yaml",
 ]
 
 
@@ -33,15 +40,16 @@ def _clear_prompt_cache() -> None:
 def test_load_paper_plan_missing_detector_yaml() -> None:
     template = load_prompt_template("paper_plan_missing_detector.yaml")
 
-    assert template.version == "v0.1"
+    assert template.version == "v0.2"
     assert "MissingDetector" in template.system
     assert "{paper_spec_json}" in template.user
+    assert "{sentinel_mappings_json}" in template.user
 
 
 def test_load_paper_plan_composer_yaml() -> None:
     template = load_prompt_template("paper_plan_composer.yaml")
 
-    assert template.version == "v0.2"
+    assert template.version == "v0.3"
     assert "PlanComposer" in template.system
     assert "{plan_id}" in template.user
 
@@ -60,6 +68,15 @@ def test_load_paper_plan_mscript_yaml() -> None:
     assert template.version == "v0.1"
     assert "MScriptDrafter" in template.system
     assert "{equations_json}" in template.user
+
+
+def test_load_paper_tuning_suggest_yaml() -> None:
+    template = load_prompt_template("paper_tuning_suggest.yaml")
+
+    assert template.version == "v0.1"
+    assert "TuningSuggestion" in template.system
+    assert "{allowed_plan_parameter_names_json}" in template.user
+    assert "禁止输出 suggestion_id / user_scenario / disclaimer" in template.system
 
 
 def test_shared_snippet_contains_evidence_double_source_contract() -> None:
@@ -112,7 +129,7 @@ def test_shared_snippet_contains_plan_id_injection_rule() -> None:
 
 def test_4_role_systems_all_inject_shared_snippet() -> None:
     systems = [
-        build_messages_for_missing_detect(_spec(), [_figure_placeholder()])[0].content,
+        build_messages_for_missing_detect(_spec(), [_sentinel_mapping()])[0].content,
         build_messages_for_plan_compose(_spec(), "PLAN-PAPER-001", "PAPER-001")[0].content,
         build_messages_for_subsystem_plan([_block_recommendation()], [_document_evidence()])[
             0
@@ -130,6 +147,19 @@ def test_4_role_systems_all_inject_shared_snippet() -> None:
         assert "plan_id / paper_spec_id 不要自生成,由系统注入,逐字照抄" in system
 
 
+def test_build_messages_for_tuning_suggest_uses_allowlists_not_fixed_fields() -> None:
+    messages = build_messages_for_tuning_suggest(_record_with_resolved_prompt(), "需要提高阻尼")
+    user = messages[1].content
+
+    assert "需要提高阻尼" in user
+    assert '"H"' in user
+    assert '"D"' not in user
+    assert '"MISS-1"' in user
+    assert '"MISS-2"' not in user
+    assert "suggestion_id" not in user
+    assert "disclaimer" not in user
+
+
 def test_build_messages_for_plan_compose_substitutes_plan_id() -> None:
     messages = build_messages_for_plan_compose(_spec(), "PLAN-PAPER-001", "PAPER-001")
 
@@ -141,17 +171,16 @@ def test_build_messages_for_plan_compose_substitutes_plan_id() -> None:
 def test_missing_detector_system_specifies_prompt_fields() -> None:
     system = load_prompt_template("paper_plan_missing_detector.yaml").system
 
-    assert "MissingParameterPrompt 7 字段硬约束" in system
+    assert "draft 字段硬约束" in system
     for field_name in (
-        "prompt_id",
         "parameter_name",
         "paper_reference",
         "suggested_unit",
-        "user_supplied_value",
-        "user_supplied_unit",
         "source",
     ):
         assert field_name in system
+    assert "禁止输出 prompt_id" in system
+    assert "Python 按 sentinel 顺序注入" in system
 
 
 def test_composer_system_specifies_subsystem_breakdown_empty_and_mscript_null() -> None:
@@ -224,11 +253,72 @@ def _block_recommendation() -> BlockRecommendation:
     )
 
 
-def _figure_placeholder() -> FigurePlaceholder:
-    return FigurePlaceholder(
-        figure_id="FIG-01",
-        caption="Machine parameters",
-        paper_section_id="S1",
+def _sentinel_mapping() -> ParameterMapping:
+    return ParameterMapping(
+        paper_param_name="H 惯性时间常数",
+        model_param_name="Synchronous Machine.H",
+        value="null",
+        unit="s",
+        source=EvidenceSource.DOCUMENT_EXTRACTED,
+    )
+
+
+def _record_with_resolved_prompt() -> PaperPlanRecord:
+    return PaperPlanRecord(
+        paper_id="paper-1",
+        spec=_spec(),
+        plan=ModelGenerationPlan(
+            plan_id="PLAN-paper-1",
+            paper_spec_id="paper-1",
+            library_choice="SimPowerSystems",
+            block_recommendations=[_block_recommendation()],
+            parameter_mapping=[
+                ParameterMapping(
+                    paper_param_name="H",
+                    model_param_name="Synchronous Machine.H",
+                    value="3.5",
+                    unit="s",
+                    source=EvidenceSource.USER_SUPPLIED,
+                ),
+                ParameterMapping(
+                    paper_param_name="D",
+                    model_param_name="Synchronous Machine.D",
+                    value="null",
+                    unit=None,
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                ),
+            ],
+            subsystem_breakdown=["Place machine", "Apply fault", "Observe current"],
+            m_script_skeleton=None,
+            evidence=[_document_evidence(), _user_evidence("MISS-1")],
+        ),
+        missing_prompts=[
+            _missing_prompt("MISS-1", "H"),
+            _missing_prompt("MISS-2", "D"),
+        ],
+        missing_bindings=[
+            MissingParameterBinding(
+                prompt_id="MISS-1",
+                paper_param_name="H",
+                model_param_name="Synchronous Machine.H",
+            ),
+            MissingParameterBinding(
+                prompt_id="MISS-2",
+                paper_param_name="D",
+                model_param_name="Synchronous Machine.D",
+            ),
+        ],
+    )
+
+
+def _missing_prompt(prompt_id: str, parameter_name: str) -> MissingParameterPrompt:
+    return MissingParameterPrompt(
+        prompt_id=prompt_id,
+        parameter_name=parameter_name,
+        paper_reference=_document_evidence(figure_id="FIG-01"),
+        suggested_unit="s",
+        user_supplied_value=None,
+        user_supplied_unit=None,
     )
 
 
@@ -245,4 +335,15 @@ def _document_evidence(
         figure_id=figure_id,
         excerpt="The report states the machine parameter.",
         missing_param_prompt_id=None,
+    )
+
+
+def _user_evidence(prompt_id: str) -> PaperEvidenceEntry:
+    return PaperEvidenceEntry(
+        source=EvidenceSource.USER_SUPPLIED,
+        paper_section_id=None,
+        equation_id=None,
+        figure_id=None,
+        excerpt=None,
+        missing_param_prompt_id=prompt_id,
     )

@@ -116,9 +116,9 @@ async def test_generate_happy_path_returns_plan_missing_bindings() -> None:
     plan, missing_prompts, missing_bindings = await service.generate(_spec(), "PAPER-001")
 
     assert service.calls == [
-        "missing_detector",
         "plan_composer",
         "mscript_drafter",
+        "missing_detector",
         "subsystem_planner",
     ]
     assert plan.plan_id == "PLAN-PAPER-001"
@@ -128,10 +128,10 @@ async def test_generate_happy_path_returns_plan_missing_bindings() -> None:
         plan.m_script_skeleton
         == "clear; clc;\n% 参数区\nfigure; subplot(1,1,1); title('短路电流');"
     )
-    assert [prompt.prompt_id for prompt in missing_prompts] == ["MISS-1"]
+    assert [prompt.prompt_id for prompt in missing_prompts] == ["MISS-001"]
     assert missing_bindings == [
         MissingBindingModel(
-            prompt_id="MISS-1",
+            prompt_id="MISS-001",
             paper_param_name="H",
             model_param_name="Synchronous Machine.H",
         )
@@ -139,7 +139,7 @@ async def test_generate_happy_path_returns_plan_missing_bindings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_step1_three_llm_calls_run_concurrently_via_asyncio_gather() -> None:
+async def test_two_llm_calls_run_concurrently_in_each_dag_phase() -> None:
     class ConcurrentService(PaperPlanService):
         def __init__(self) -> None:
             super().__init__(NoopTextProvider())
@@ -153,8 +153,13 @@ async def test_step1_three_llm_calls_run_concurrently_via_asyncio_gather() -> No
             self.active -= 1
             return result
 
-        async def _llm_missing_detect(self, spec: PaperSpec) -> list[MissingParameterPrompt]:
-            _ = spec
+        async def _llm_missing_detect(
+            self,
+            spec: PaperSpec,
+            paper_id: str,
+            sentinel_mappings: list[ParameterMapping],
+        ) -> list[MissingParameterPrompt]:
+            _ = spec, paper_id, sentinel_mappings
             return await self._parallel([])  # type: ignore[return-value]
 
         async def _llm_plan_compose(
@@ -182,7 +187,7 @@ async def test_step1_three_llm_calls_run_concurrently_via_asyncio_gather() -> No
 
     await service.generate(_spec(), "PAPER-001")
 
-    assert service.max_active == 3
+    assert service.max_active == 2
 
 
 @pytest.mark.asyncio
@@ -192,8 +197,13 @@ async def test_step2_subsystem_planner_awaits_plan_composer_block_recommendation
             super().__init__(NoopTextProvider())
             self.plan_done = False
 
-        async def _llm_missing_detect(self, spec: PaperSpec) -> list[MissingParameterPrompt]:
-            _ = spec
+        async def _llm_missing_detect(
+            self,
+            spec: PaperSpec,
+            paper_id: str,
+            sentinel_mappings: list[ParameterMapping],
+        ) -> list[MissingParameterPrompt]:
+            _ = spec, paper_id, sentinel_mappings
             return []
 
         async def _llm_plan_compose(
@@ -236,7 +246,7 @@ async def test_all_role_helpers_use_call_llm_json(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(service, "_call_llm_json", fake_call)
 
-    await service._llm_missing_detect(_spec())
+    await service._llm_missing_detect(_spec(), "PAPER-001", [_sentinel_mapping()])
     await service._llm_plan_compose(_spec(), "PLAN-PAPER-001", "PAPER-001")
     await service._llm_subsystem_plan([_block_recommendation()], [_document_evidence()])
     await service._llm_mscript_draft(_spec())
@@ -312,7 +322,7 @@ async def test_missing_detector_rejects_paper_reference_not_document_extracted()
     service = PayloadPaperPlanService(payloads)
 
     with pytest.raises(PaperPlanGenerationError):
-        await service._llm_missing_detect(_spec())
+        await service._llm_missing_detect(_spec(), "PAPER-001", [_sentinel_mapping()])
 
 
 @pytest.mark.asyncio
@@ -322,7 +332,7 @@ async def test_missing_detector_rejects_figure_id_not_in_spec_whitelist() -> Non
     service = PayloadPaperPlanService(payloads)
 
     with pytest.raises(PaperPlanGenerationError):
-        await service._llm_missing_detect(_spec())
+        await service._llm_missing_detect(_spec(), "PAPER-001", [_sentinel_mapping()])
 
 
 @pytest.mark.asyncio
@@ -332,7 +342,76 @@ async def test_missing_detector_rejects_source_not_user_supplied() -> None:
     service = PayloadPaperPlanService(payloads)
 
     with pytest.raises(PaperPlanGenerationError):
-        await service._llm_missing_detect(_spec())
+        await service._llm_missing_detect(_spec(), "PAPER-001", [_sentinel_mapping()])
+
+
+@pytest.mark.asyncio
+async def test_missing_detector_rejects_llm_prompt_id_output() -> None:
+    payloads = _payloads()
+    payloads["missing_detector"]["missing_prompts"][0]["prompt_id"] = "MISS-LLM"
+
+    with pytest.raises(PaperPlanGenerationError, match="validation_failed"):
+        await PayloadPaperPlanService(payloads)._llm_missing_detect(
+            _spec(),
+            "PAPER-001",
+            [_sentinel_mapping()],
+        )
+
+
+@pytest.mark.asyncio
+async def test_missing_detector_rejects_parameter_name_mismatch() -> None:
+    payloads = _payloads()
+    payloads["missing_detector"]["missing_prompts"][0]["parameter_name"] = "H"
+    sentinel = ParameterMapping(
+        paper_param_name="H 惯性时间常数",
+        model_param_name="Synchronous Machine.H",
+        value=MISSING_VALUE_SENTINEL,
+        unit="s",
+        source=EvidenceSource.DOCUMENT_EXTRACTED,
+    )
+
+    with pytest.raises(PaperPlanGenerationError, match="missing_prompt_parameter_mismatch"):
+        await PayloadPaperPlanService(payloads)._llm_missing_detect(
+            _spec(),
+            "PAPER-001",
+            [sentinel],
+        )
+
+
+@pytest.mark.asyncio
+async def test_missing_detector_rejects_cardinality_mismatch() -> None:
+    with pytest.raises(PaperPlanGenerationError, match="missing_prompt_cardinality_mismatch"):
+        await PayloadPaperPlanService(_payloads())._llm_missing_detect(_spec(), "PAPER-001", [])
+
+
+@pytest.mark.asyncio
+async def test_plan_composer_rejects_duplicate_paper_param_name() -> None:
+    payloads = _payloads()
+    payloads["plan_composer"]["parameter_mapping"].append(
+        {
+            "paper_param_name": "H",
+            "model_param_name": "Synchronous Machine.H duplicate",
+            "value": "3.5",
+            "unit": "s",
+            "source": "document_extracted",
+        }
+    )
+
+    with pytest.raises(PaperPlanGenerationError, match="paper_param_name_duplicate"):
+        await PayloadPaperPlanService(payloads)._llm_plan_compose(
+            _spec(), "PLAN-PAPER-001", "PAPER-001"
+        )
+
+
+@pytest.mark.asyncio
+async def test_plan_composer_rejects_sentinel_user_supplied_source() -> None:
+    payloads = _payloads()
+    payloads["plan_composer"]["parameter_mapping"][0]["source"] = "user_supplied"
+
+    with pytest.raises(PaperPlanGenerationError, match="sentinel_source_must_be_document"):
+        await PayloadPaperPlanService(payloads)._llm_plan_compose(
+            _spec(), "PLAN-PAPER-001", "PAPER-001"
+        )
 
 
 @pytest.mark.asyncio
@@ -403,16 +482,16 @@ async def test_mscript_drafter_allows_null_output() -> None:
 
 
 @pytest.mark.asyncio
-async def test_plan_assembler_missing_binding_not_found_raises_502() -> None:
+async def test_composer_missing_sentinel_fails_in_detector_cardinality() -> None:
     payloads = _payloads()
     payloads["plan_composer"]["parameter_mapping"][0]["value"] = "3.5"
 
-    with pytest.raises(PaperPlanGenerationError, match="missing_binding_not_found"):
+    with pytest.raises(PaperPlanGenerationError, match="missing_prompt_cardinality_mismatch"):
         await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 
 
 @pytest.mark.asyncio
-async def test_plan_assembler_missing_binding_ambiguous_raises_502() -> None:
+async def test_duplicate_sentinel_mapping_fails_before_assembly() -> None:
     payloads = _payloads()
     payloads["plan_composer"]["parameter_mapping"].append(
         {
@@ -424,7 +503,7 @@ async def test_plan_assembler_missing_binding_ambiguous_raises_502() -> None:
         }
     )
 
-    with pytest.raises(PaperPlanGenerationError, match="missing_binding_ambiguous"):
+    with pytest.raises(PaperPlanGenerationError, match="paper_param_name_duplicate"):
         await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 
 
@@ -470,10 +549,21 @@ async def test_evidence_tagger_locator_whitelist_fail_raises_502() -> None:
 
 @pytest.mark.asyncio
 async def test_invalid_json_raises_paper_plan_generation_error() -> None:
-    service = PaperPlanService(QueueTextProvider(["not json"]))
+    service = PaperPlanService(QueueTextProvider(["not json", "still not json"]))
 
     with pytest.raises(PaperPlanGenerationError, match="invalid_json"):
         await service._call_llm_json([LLMMessage("system", "x")], "plan_composer")
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_retries_once_then_returns_valid_payload() -> None:
+    provider = QueueTextProvider(["not json", '{"ok": true}'])
+    service = PaperPlanService(provider)
+
+    data = await service._call_llm_json([LLMMessage("system", "x")], "plan_composer")
+
+    assert data == {"ok": True}
+    assert len(provider.calls) == 2
 
 
 @pytest.mark.asyncio
@@ -512,7 +602,7 @@ async def test_logger_uses_error_with_type_name_not_exception(
     monkeypatch.setattr(service_module.logger, "exception", fake_exception)
 
     with pytest.raises(PaperPlanGenerationError):
-        await PaperPlanService(QueueTextProvider(["not json"]))._call_llm_json(
+        await PaperPlanService(QueueTextProvider(["not json", "still not json"]))._call_llm_json(
             [LLMMessage("system", "x")],
             "plan_composer",
         )
@@ -530,10 +620,9 @@ async def test_logger_does_not_leak_llm_response_text(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(service_module.logger, "error", fake_error)
     with pytest.raises(PaperPlanGenerationError):
-        await PaperPlanService(QueueTextProvider(["SECRET_LLM_RAW_TEXT"]))._call_llm_json(
-            [LLMMessage("system", "x")],
-            "plan_composer",
-        )
+        await PaperPlanService(
+            QueueTextProvider(["SECRET_LLM_RAW_TEXT", "SECRET_LLM_RAW_TEXT"])
+        )._call_llm_json([LLMMessage("system", "x")], "plan_composer")
 
     logged_text = " ".join(repr(item) for call in error_calls for item in call[0])
     assert "SECRET_LLM_RAW_TEXT" not in logged_text
@@ -581,12 +670,9 @@ def _plan_payload() -> dict[str, Any]:
 
 def _missing_prompt_payload() -> dict[str, Any]:
     return {
-        "prompt_id": "MISS-1",
         "parameter_name": "H",
         "paper_reference": _document_evidence_payload(figure_id="FIG-01"),
         "suggested_unit": "s",
-        "user_supplied_value": None,
-        "user_supplied_unit": None,
         "source": "user_supplied",
     }
 
@@ -649,6 +735,16 @@ def _block_recommendation() -> BlockRecommendation:
         block_type="Synchronous Machine",
         purpose="Model the generator.",
         paper_reference=_document_evidence(),
+    )
+
+
+def _sentinel_mapping() -> ParameterMapping:
+    return ParameterMapping(
+        paper_param_name="H",
+        model_param_name="Synchronous Machine.H",
+        value=MISSING_VALUE_SENTINEL,
+        unit="s",
+        source=EvidenceSource.DOCUMENT_EXTRACTED,
     )
 
 

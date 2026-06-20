@@ -34,6 +34,7 @@ from core.interfaces.chat_store import ChatStore
 from core.interfaces.document_parser import DocumentParserRouter
 from core.interfaces.embedder import EmbeddingProvider
 from core.interfaces.llm_provider import TextProvider
+from core.interfaces.paper_cache import PaperBundleStore
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
 from core.interfaces.teaching_unit_store import TeachingUnitStore
@@ -47,14 +48,13 @@ from features.overview._teaching_unit_builder import TeachingUnitBuilder
 from features.overview._teaching_unit_service import TeachingUnitService
 from features.overview.overview_service import ProjectOverviewService
 from features.paper import (
-    InMemoryPaperPlanCache,
-    InMemoryPaperSpecCache,
     PaperPlanCache,
     PaperSpecCache,
     PaperSpecService,
     UserSupplyService,
 )
 from features.paper.paper_plan_service import PaperPlanService
+from features.paper.paper_tuning_service import TuningSuggestionService
 
 
 @lru_cache(maxsize=1)
@@ -145,8 +145,7 @@ def get_paper_spec_cache(request: Request) -> PaperSpecCache:
     """从 app.state.paper_spec_cache 取 PaperSpecCache。"""
     cache = getattr(request.app.state, "paper_spec_cache", None)
     if cache is None:
-        cache = InMemoryPaperSpecCache()
-        request.app.state.paper_spec_cache = cache
+        raise RuntimeError("PaperSpecCache not initialized; lifespan misconfigured")
     return cast(PaperSpecCache, cache)
 
 
@@ -154,9 +153,16 @@ def get_paper_plan_cache(request: Request) -> PaperPlanCache:
     """从 app.state.paper_plan_cache 取 PaperPlanCache。"""
     cache = getattr(request.app.state, "paper_plan_cache", None)
     if cache is None:
-        cache = InMemoryPaperPlanCache()
-        request.app.state.paper_plan_cache = cache
+        raise RuntimeError("PaperPlanCache not initialized; lifespan misconfigured")
     return cast(PaperPlanCache, cache)
+
+
+def get_paper_bundle_store(request: Request) -> PaperBundleStore:
+    """从 app.state.paper_bundle_store 取 PaperBundleStore。"""
+    store = getattr(request.app.state, "paper_bundle_store", None)
+    if store is None:
+        raise RuntimeError("PaperBundleStore not initialized; lifespan misconfigured")
+    return cast(PaperBundleStore, store)
 
 
 def get_document_parser_router() -> DocumentParserRouter:
@@ -239,6 +245,13 @@ def get_paper_user_supply_service(
 ) -> UserSupplyService:
     """装配 UserSupplyService。"""
     return UserSupplyService(cache=cache)
+
+
+def get_paper_tuning_service(
+    text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+) -> TuningSuggestionService:
+    """装配 TuningSuggestionService。"""
+    return TuningSuggestionService(text_provider=text_provider)
 
 
 def get_chat_service(request: Request) -> ChatService:

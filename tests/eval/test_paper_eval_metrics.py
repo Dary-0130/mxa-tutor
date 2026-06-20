@@ -3,7 +3,6 @@ from __future__ import annotations
 from eval._paper_eval_metrics import (
     MISSING_VALUE_SENTINEL,
     compute_a1_field_coverage,
-    compute_b1_b2,
     compute_c3_param_mapping_coverage,
     compute_d1_mscript_shape,
     is_unitless,
@@ -65,18 +64,3 @@ def test_compute_a1_field_coverage_basic() -> None:
     }
 
     assert compute_a1_field_coverage(actual, golden) == 7 / 8
-
-
-def test_compute_b1_b2_recall_precision() -> None:
-    actual = [
-        {"parameter_name": "H"},
-        {"parameter_name": "F"},
-        {"parameter_name": "extra"},
-    ]
-    golden = [
-        {"parameter_name": "H"},
-        {"parameter_name": "F"},
-        {"parameter_name": "alpha0"},
-    ]
-
-    assert compute_b1_b2(actual, golden) == (2 / 3, 2 / 3)

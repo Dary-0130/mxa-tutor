@@ -53,8 +53,14 @@ system: |
     - 若资料原文未明示单位且非标幺值,严格按资料原文处理(本卡 PaperSpec
       阶段几乎所有参数都有单位或 pu)
   - figure_locations: 只有 figure_id 白名单非空时才可输出对应条目,否则必须 []
+    - 若图占位 caption / 同行括号说明包含 "v0.1 无 OCR"、"图片信息丢失"、
+      "系统应识别为缺失参数" 或具体参数名(如 H / F / X_T / α0),caption 必须保留这些
+      参数线索,不得压缩成 "模型参数图" / "变压器参数图" 这类泛称
   - pseudocode_blocks: 0-N 项,每项为字符串,概括资料中的计算/流程描述
   - evidence: 至少 1 项,source 全部为 document_extracted
+    - 对含缺参线索的图占位,evidence.excerpt 必须摘录具体缺失参数名称和图 ID
+      语境;例如 "FIG-02 变压器参数图包括变压器变比、漏阻抗 X_T、接线方式,
+      文字未给出具体数值"
 
   locator 白名单硬约束:
   - paper_section_id 只能来自用户消息给出的 section_ids

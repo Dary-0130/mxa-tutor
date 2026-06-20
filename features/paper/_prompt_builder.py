@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 
-from core.domain.paper_evidence import PaperEvidenceEntry
-from core.domain.paper_plan import BlockRecommendation
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_plan import BlockRecommendation, PaperPlanRecord, ParameterMapping
 from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterEntry
 from core.interfaces.document_parser import FigurePlaceholder, ParsedDocument
 from core.interfaces.llm_provider import LLMMessage
+from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL, resolved_prompt_ids
 from features.paper.paper_schemas import (
     BlockRecommendationModel,
     EquationEntryModel,
     PaperEvidenceEntryModel,
     PaperSpecModel,
     ParameterEntryModel,
+    ParameterMappingModel,
 )
 
 from ._prompt_loader import load_prompt_template
@@ -90,7 +91,7 @@ def _shared_paper_plan_constraints() -> str:
 
 def build_messages_for_missing_detect(
     spec: PaperSpec,
-    figure_placeholders: list[FigurePlaceholder],
+    sentinel_mappings: list[ParameterMapping],
 ) -> list[LLMMessage]:
     """Build MissingDetector messages."""
 
@@ -99,7 +100,12 @@ def build_messages_for_missing_detect(
         template.user,
         {
             "paper_spec_json": _paper_spec_json(spec),
-            "figure_placeholders": _json_dumps([asdict(figure) for figure in figure_placeholders]),
+            "sentinel_mappings_json": _json_dumps(
+                [
+                    ParameterMappingModel.from_domain(mapping).model_dump(mode="json")
+                    for mapping in sentinel_mappings
+                ]
+            ),
         },
     )
     return _role_messages(template.system, user)
@@ -178,6 +184,68 @@ def build_messages_for_mscript_draft(
     return _role_messages(template.system, user)
 
 
+def build_messages_for_tuning_suggest(
+    record: PaperPlanRecord,
+    user_scenario: str,
+) -> list[LLMMessage]:
+    """Build TuningSuggestion messages with server-side allowlists."""
+
+    resolved_ids = resolved_prompt_ids(record)
+    allowed_document_evidence = _dedupe_evidence(
+        [
+            entry
+            for entry in [
+                *record.spec.evidence,
+                *record.plan.evidence,
+                *(block.paper_reference for block in record.plan.block_recommendations),
+                *(prompt.paper_reference for prompt in record.missing_prompts),
+            ]
+            if entry.source is EvidenceSource.DOCUMENT_EXTRACTED
+        ]
+    )
+    allowed_resolved_user_evidence = [
+        entry
+        for entry in record.plan.evidence
+        if entry.source is EvidenceSource.USER_SUPPLIED
+        and entry.missing_param_prompt_id in resolved_ids
+    ]
+
+    template = load_prompt_template("paper_tuning_suggest.yaml")
+    user = _render_user(
+        template.user,
+        {
+            "user_scenario": user_scenario,
+            "allowed_plan_parameter_names_json": _json_dumps(
+                [
+                    mapping.paper_param_name
+                    for mapping in record.plan.parameter_mapping
+                    if mapping.value != MISSING_VALUE_SENTINEL
+                ]
+            ),
+            "allowed_document_evidence_json": _json_dumps(
+                [
+                    PaperEvidenceEntryModel.from_domain(entry).model_dump(mode="json")
+                    for entry in allowed_document_evidence
+                ]
+            ),
+            "allowed_resolved_user_evidence_json": _json_dumps(
+                [
+                    PaperEvidenceEntryModel.from_domain(entry).model_dump(mode="json")
+                    for entry in allowed_resolved_user_evidence
+                ]
+            ),
+            "resolved_prompt_ids_json": _json_dumps(
+                [
+                    prompt.prompt_id
+                    for prompt in record.missing_prompts
+                    if prompt.prompt_id in resolved_ids
+                ]
+            ),
+        },
+    )
+    return _role_messages(template.system, user)
+
+
 def _role_messages(system: str, user: str) -> list[LLMMessage]:
     return [
         LLMMessage(
@@ -197,6 +265,25 @@ def _render_user(template: str, values: dict[str, str]) -> str:
 
 def _paper_spec_json(spec: PaperSpec) -> str:
     return _json_dumps(PaperSpecModel.from_domain(spec).model_dump(mode="json"))
+
+
+def _dedupe_evidence(entries: list[PaperEvidenceEntry]) -> list[PaperEvidenceEntry]:
+    seen: set[tuple[object, ...]] = set()
+    result: list[PaperEvidenceEntry] = []
+    for entry in entries:
+        key = (
+            entry.source,
+            entry.paper_section_id,
+            entry.equation_id,
+            entry.figure_id,
+            entry.excerpt,
+            entry.missing_param_prompt_id,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(entry)
+    return result
 
 
 def _json_dumps(value: object) -> str:

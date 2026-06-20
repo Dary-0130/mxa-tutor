@@ -98,6 +98,14 @@ class PaperPlanGenerationError(MxaError):
     """Paper plan 生成失败。"""
 
 
+class PaperNotFoundError(MxaError):
+    """指定 paper bundle 不存在。"""
+
+
+class PaperTuningError(MxaError):
+    """Paper tuning suggestion 生成失败。"""
+
+
 class PaperUserSupplyError(MxaError):
     """用户补充 paper plan 参数失败。"""
 

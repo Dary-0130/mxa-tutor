@@ -22,6 +22,11 @@ from adapters.llm import DeepSeekTextProvider
 from adapters.storage._connection import open_connection
 from adapters.storage.schema import init_schema
 from adapters.storage.sqlite_chat_store import SqliteChatStore
+from adapters.storage.sqlite_paper_cache import (
+    SqlitePaperBundleStore,
+    SqlitePaperPlanCacheView,
+    SqlitePaperSpecCacheView,
+)
 from adapters.storage.sqlite_project_store import SqliteProjectStore
 from adapters.storage.sqlite_teaching_unit_store import SqliteTeachingUnitStore
 from adapters.storage.sqlite_vector_store import SqliteVectorStore
@@ -30,6 +35,8 @@ from api.middleware.error_handler import register_error_handlers
 from api.routes.chat import router as chat_router
 from api.routes.health import router as health_router
 from api.routes.overview import router as overview_router
+from api.routes.paper_query import router as paper_query_router
+from api.routes.paper_tuning import router as paper_tuning_router
 from api.routes.paper_upload import router as paper_upload_router
 from api.routes.paper_user_supply import router as paper_user_supply_router
 from api.routes.teaching_unit import router as teaching_unit_router
@@ -44,7 +51,6 @@ from features.chunking import ChunkingService
 from features.ingest.cleanup_worker import CleanupWorker
 from features.overview import InMemoryOverviewCache
 from features.overview.project_graph_builder import ProjectGraphBuilder
-from features.paper import InMemoryPaperSpecCache
 
 
 def SentenceTransformerEmbedder(
@@ -98,9 +104,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         store = SqliteProjectStore(settings.db_path)
         chat_store = SqliteChatStore(settings.db_path)
         teaching_unit_store = SqliteTeachingUnitStore(settings.db_path)
+        paper_bundle_store = SqlitePaperBundleStore(settings.db_path)
         app.state.project_store = store
         app.state.chat_store = chat_store
         app.state.teaching_unit_store = teaching_unit_store
+        app.state.paper_bundle_store = paper_bundle_store
+        app.state.paper_spec_cache = SqlitePaperSpecCacheView(paper_bundle_store)
+        app.state.paper_plan_cache = SqlitePaperPlanCacheView(paper_bundle_store)
         try:
             embedder: EmbeddingProvider = await asyncio.to_thread(_build_embedder, settings)
         except Exception as exc:
@@ -151,8 +161,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         stack.push_async_callback(teaching_unit_store.aclose)
         stack.push_async_callback(chat_store.aclose)
         stack.push_async_callback(store.aclose)
-        app.state.paper_spec_cache = InMemoryPaperSpecCache()
-
         worker = CleanupWorker(
             store=store,
             upload_dir=upload_dir,
@@ -189,6 +197,8 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(upload_router)
     app.include_router(paper_upload_router)
+    app.include_router(paper_query_router)
+    app.include_router(paper_tuning_router)
     app.include_router(paper_user_supply_router)
     app.include_router(overview_router)
     app.include_router(teaching_unit_router)

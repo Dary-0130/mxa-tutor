@@ -54,6 +54,12 @@ class PaperSpecService:
             logger.info("PaperSpec cache hit: paper_id={}", paper_id)
             return cached
 
+        spec = await self.extract_uncached(file_path, paper_id)
+        await self._cache.put(paper_id, spec)
+        return spec
+
+    async def extract_uncached(self, file_path: Path, paper_id: str) -> PaperSpec:
+        """Extract a PaperSpec without reading or writing the cache."""
         parser = await asyncio.to_thread(self._document_parser_router.route, file_path)
         parsed = await asyncio.to_thread(run_in_sandbox, parser, file_path)
         if len(parsed.raw_text) > self._max_raw_text_chars:
@@ -69,9 +75,7 @@ class PaperSpecService:
             timeout=self._timeout,
             max_tokens=self._max_tokens,
         )
-        spec = self._parse_and_validate(response, parsed)
-        await self._cache.put(paper_id, spec)
-        return spec
+        return self._parse_and_validate(response, parsed)
 
     def _parse_and_validate(self, response: LLMResponse, parsed: ParsedDocument) -> PaperSpec:
         try:

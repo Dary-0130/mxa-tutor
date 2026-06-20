@@ -9,22 +9,23 @@ from fastapi.testclient import TestClient
 
 import api.routes.paper_upload as paper_upload_module
 from api.dependencies import (
-    get_paper_plan_cache,
+    get_paper_bundle_store,
     get_paper_plan_service,
     get_paper_spec_service,
     get_settings,
 )
 from api.main import create_app
-from core.domain.exceptions import DocumentParseError, PaperSpecGenerationError
+from core.domain.exceptions import DocumentParseError, PaperSpecGenerationError, StoreError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
+    PaperPlanRecord,
     ParameterMapping,
 )
 from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterEntry
-from features.paper.paper_plan_cache import InMemoryPaperPlanCache
+from core.interfaces.paper_cache import PaperBundleStore
 from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL, MissingBindingModel
 
 
@@ -35,6 +36,9 @@ class FakePaperSpecService:
         self.bytes_seen: list[bytes] = []
 
     async def extract(self, file_path: Path, paper_id: str) -> PaperSpec:
+        return await self.extract_uncached(file_path, paper_id)
+
+    async def extract_uncached(self, file_path: Path, paper_id: str) -> PaperSpec:
         uuid.UUID(paper_id)
         self.paths.append(file_path)
         self.bytes_seen.append(file_path.read_bytes())
@@ -55,6 +59,29 @@ class FakePaperPlanService:
         uuid.UUID(paper_id)
         self.calls.append((spec, paper_id))
         return _plan(paper_id), [_missing_prompt()], [_missing_binding()]
+
+
+class FakePaperBundleStore(PaperBundleStore):
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.records: dict[str, PaperPlanRecord] = {}
+        self.deleted_ids: list[str] = []
+
+    async def save_ready_bundle(self, record: PaperPlanRecord) -> None:
+        if self.error is not None:
+            raise self.error
+        self.records[record.paper_id] = record
+
+    async def get_spec(self, paper_id: str) -> PaperSpec | None:
+        record = self.records.get(paper_id)
+        return record.spec if record is not None else None
+
+    async def get_plan_record(self, paper_id: str) -> PaperPlanRecord | None:
+        return self.records.get(paper_id)
+
+    async def delete_bundle(self, paper_id: str) -> None:
+        self.deleted_ids.append(paper_id)
+        self.records.pop(paper_id, None)
 
 
 def test_upload_document_returns_200_with_paper_id_and_spec(
@@ -89,22 +116,47 @@ def test_upload_response_contains_plan_and_missing_prompts(
     assert "missing_bindings" not in body
 
 
-def test_upload_writes_record_to_paper_plan_cache(
+def test_upload_writes_record_to_paper_bundle_store(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    cache = InMemoryPaperPlanCache()
-    app = _create_app(tmp_path, monkeypatch, FakePaperSpecService(), plan_cache=cache)
+    bundle_store = FakePaperBundleStore()
+    app = _create_app(
+        tmp_path,
+        monkeypatch,
+        FakePaperSpecService(),
+        bundle_store=bundle_store,
+    )
 
     with TestClient(app) as client:
         response = _post_document(client, b"%PDF-1.7\n", "paper.pdf")
 
     paper_id = response.json()["paper_id"]
-    record = _run_async(cache.get(paper_id))
-    assert record is not None
+    record = bundle_store.records[paper_id]
     assert record.paper_id == paper_id
     assert record.plan.plan_id == f"PLAN-{paper_id}"
     assert record.missing_bindings == [_missing_binding()]
+
+
+def test_upload_store_failure_does_not_run_application_compensation_delete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_store = FakePaperBundleStore(StoreError("sqlite_operation_failed"))
+    app = _create_app(
+        tmp_path,
+        monkeypatch,
+        FakePaperSpecService(),
+        bundle_store=bundle_store,
+    )
+
+    with TestClient(app) as client:
+        response = _post_document(client, b"%PDF-1.7\n", "paper.pdf")
+
+    assert response.status_code == 500
+    assert response.json()["error"] == "store_error"
+    assert bundle_store.records == {}
+    assert bundle_store.deleted_ids == []
 
 
 def test_upload_calls_plan_service_with_injected_paper_id(
@@ -242,7 +294,7 @@ def _create_app(
     service: FakePaperSpecService,
     *,
     plan_service: FakePaperPlanService | None = None,
-    plan_cache: InMemoryPaperPlanCache | None = None,
+    bundle_store: FakePaperBundleStore | None = None,
 ) -> Any:
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     get_settings.cache_clear()
@@ -251,7 +303,9 @@ def _create_app(
     app.dependency_overrides[get_paper_plan_service] = (
         lambda: plan_service or FakePaperPlanService()
     )
-    app.dependency_overrides[get_paper_plan_cache] = lambda: plan_cache or InMemoryPaperPlanCache()
+    app.dependency_overrides[get_paper_bundle_store] = (
+        lambda: bundle_store or FakePaperBundleStore()
+    )
     return app
 
 
@@ -342,9 +396,3 @@ def _document_evidence() -> PaperEvidenceEntry:
         excerpt="报告给出了惯性常数和短路公式。",
         missing_param_prompt_id=None,
     )
-
-
-def _run_async(coro):
-    import asyncio
-
-    return asyncio.run(coro)

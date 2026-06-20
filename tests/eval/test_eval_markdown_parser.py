@@ -45,12 +45,12 @@ def test_parse_empty_file_has_empty_locator_sets(tmp_path: Path) -> None:
 def test_extracts_captioned_and_bare_figures(tmp_path: Path) -> None:
     parsed = _parse_text(
         tmp_path,
-        "> **[FIG-01:标准同步发电机模型参数图]**\n\n> **[FIG-02]**\n",
+        "> **[FIG-01:标准同步发电机模型参数图]**(含 H / F 缺参线索)\n\n" "> **[FIG-02]**\n",
     )
 
     assert parsed.locator_index.figure_ids == ["FIG-01", "FIG-02"]
     assert [figure.caption for figure in parsed.figure_placeholders] == [
-        "标准同步发电机模型参数图",
+        "标准同步发电机模型参数图（含 H / F 缺参线索）",
         "",
     ]
 
@@ -129,9 +129,9 @@ def test_real_missing_fixture_exact_locator_sets() -> None:
         "FIG-05",
     ]
     assert [figure.caption for figure in parsed.figure_placeholders] == [
-        "标准同步发电机模型参数图",
-        "变压器参数图",
-        "电机初始化工具截图",
-        ".m 计算 a 相定子电流分量波形",
-        "Simulink 三相定子电流波形",
+        "标准同步发电机模型参数图（v0.1 系统无 OCR,图片信息丢失;论文在此提供 SimPowerSystems Synchronous Machine pu Standard 完整参数槽位,可能含本文档第 2 节文字之外的额外参数如 H 惯性时间常数 / F 摩擦因数 等(系统应识别这两项为缺失参数,等待用户补充)。）",
+        "变压器参数图（v0.1 系统无 OCR,图片信息丢失;论文在此提供 Three-Phase Transformer 参数 — 包括 **变压器变比(原边/副边电压比)** / **变压器漏阻抗 X_T** / **变压器接线方式(原边 / 副边连接组别)** 三项,文字未给出任何变压器具体数值。系统应识别这三项为缺失参数,等待用户补充。）",
+        "电机初始化工具截图（v0.1 系统无 OCR,图片信息丢失;文字仅明示 a 相滞后电压 -4.43°,其他初始化参数 — 如励磁电压 Vf0 / 机械功率初值 Pm0 / α0 初相角 — 在截图中。系统应识别为缺失参数,等待用户补充。）",
+        ".m 计算 a 相定子电流分量波形（图片占位,v0.1 系统无 OCR;非参数缺失,仅是结果可视化）",
+        "Simulink 三相定子电流波形（图片占位,同上;非参数缺失）",
     ]

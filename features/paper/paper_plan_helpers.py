@@ -2,25 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from collections import Counter
+from dataclasses import replace
 from typing import Protocol
 
 from core.domain.exceptions import PaperPlanGenerationError, PaperUserSupplyError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
-from core.domain.paper_missing import MissingParameterPrompt
-from core.domain.paper_plan import ModelGenerationPlan, ParameterMapping
+from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
+from core.domain.paper_plan import ModelGenerationPlan, PaperPlanRecord, ParameterMapping
 from core.domain.paper_spec import PaperSpec
 
 MISSING_VALUE_SENTINEL: str = "null"
-
-
-@dataclass(frozen=True)
-class MissingBindingModel:
-    """Private binding from a missing prompt to one parameter mapping."""
-
-    prompt_id: str
-    paper_param_name: str
-    model_param_name: str
+MissingBindingModel = MissingParameterBinding
 
 
 class _UserSuppliedResponseLike(Protocol):
@@ -51,6 +44,29 @@ class EvidenceTagger:
                 allowed_equations=allowed_equations,
                 allowed_figures=allowed_figures,
             )
+
+    def validate_for_record(
+        self,
+        evidence: list[PaperEvidenceEntry],
+        record: PaperPlanRecord,
+    ) -> None:
+        """Validate evidence against PaperSpec and resolved user-supplied provenance."""
+
+        self.validate_for_spec(evidence, record.spec)
+        resolved_ids = resolved_prompt_ids(record)
+        plan_user_evidence_ids = {
+            entry.missing_param_prompt_id
+            for entry in record.plan.evidence
+            if entry.source is EvidenceSource.USER_SUPPLIED
+            and entry.missing_param_prompt_id is not None
+        }
+        for entry in evidence:
+            if entry.source is not EvidenceSource.USER_SUPPLIED:
+                continue
+            if entry.missing_param_prompt_id not in resolved_ids:
+                raise PaperPlanGenerationError("user_evidence_unresolved_prompt")
+            if entry.missing_param_prompt_id not in plan_user_evidence_ids:
+                raise PaperPlanGenerationError("user_evidence_missing_from_plan")
 
     def tag_user_supplied(
         self,
@@ -153,3 +169,34 @@ class PlanAssembler:
             paper_param_name=mapping.paper_param_name,
             model_param_name=mapping.model_param_name,
         )
+
+
+def resolved_prompt_ids(record: PaperPlanRecord) -> frozenset[str]:
+    """Return prompt IDs that are uniquely bound, filled, and evidenced."""
+
+    binding_counts = Counter(binding.prompt_id for binding in record.missing_bindings)
+    resolved: list[str] = []
+    for binding in record.missing_bindings:
+        if binding_counts[binding.prompt_id] != 1:
+            continue
+        matches = [
+            mapping
+            for mapping in record.plan.parameter_mapping
+            if mapping.paper_param_name == binding.paper_param_name
+            and mapping.model_param_name == binding.model_param_name
+        ]
+        if len(matches) != 1:
+            continue
+        mapping = matches[0]
+        if mapping.value == MISSING_VALUE_SENTINEL:
+            continue
+        if mapping.source is not EvidenceSource.USER_SUPPLIED:
+            continue
+        if not any(
+            entry.source is EvidenceSource.USER_SUPPLIED
+            and entry.missing_param_prompt_id == binding.prompt_id
+            for entry in record.plan.evidence
+        ):
+            continue
+        resolved.append(binding.prompt_id)
+    return frozenset(resolved)

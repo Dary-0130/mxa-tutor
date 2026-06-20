@@ -30,8 +30,10 @@ from core.domain.exceptions import (
     MParseError,
     MxaError,
     OverviewGenerationError,
+    PaperNotFoundError,
     PaperPlanGenerationError,
     PaperSpecGenerationError,
+    PaperTuningError,
     PaperUserSupplyError,
     ProjectError,
     ProjectNotFoundError,
@@ -94,6 +96,18 @@ HANDLER_CASES: list[HandlerCase] = [
         502,
         "paper_plan_generation_failed",
         "建模计划生成失败,请刷新重试",
+    ),
+    (
+        PaperNotFoundError,
+        404,
+        "paper_not_found",
+        "没有找到这份资料,可能已过期或已被删除,请重新上传",
+    ),
+    (
+        PaperTuningError,
+        502,
+        "paper_tuning_failed",
+        "调参建议生成失败,请刷新重试",
     ),
     (
         PaperUserSupplyError,
@@ -273,7 +287,7 @@ class TestDocstring:
         source = Path("api/middleware/error_handler.py").read_text(encoding="utf-8")
 
         assert re.search(r"minimal ERROR_MAP[^\d]*\b8\b|注册\s*\b8\s*个", source) is None
-        assert "26 个业务 handler" in source
+        assert "28 个业务 handler" in source
         assert "2 个 FastAPI 默认 handler 兜底" in source
 
 

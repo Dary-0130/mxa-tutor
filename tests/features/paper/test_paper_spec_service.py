@@ -80,6 +80,24 @@ async def test_extract_generates_and_caches_spec(
 
 
 @pytest.mark.asyncio
+async def test_extract_uncached_bypasses_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    parsed = _parsed_document()
+    provider = FakeTextProvider()
+    _patch_sandbox(monkeypatch, parsed)
+    service = _service(provider)
+
+    first = await service.extract_uncached(tmp_path / "paper.pdf", "paper-1")
+    second = await service.extract_uncached(tmp_path / "paper.pdf", "paper-1")
+
+    assert first == second
+    assert first is not second
+    assert provider.calls == 2
+
+
+@pytest.mark.asyncio
 async def test_extract_uses_to_thread_for_route_sandbox_and_llm(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
