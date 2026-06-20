@@ -349,15 +349,16 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
+Week 5+: [✅✅✅✅]              4/4  (paper-to-model TASK-500~503)
 
-总计: 31/35
+总计: 35/40
 ```
 
 ---
 
 ## 下一步
 
-**当前状态**:**TASK-310 v0.1 + PR #1 + PR #2 + chore PR 四件套完工**(2026-06-15;TASK-310 架构债重构 = ProjectOverview contract relocation(PR #1)+ TeachingUnit 最小闭环(PR #2);PR #1 squash commit `453f280` / #90;PR #2 squash commit `98ef3d9` / #91;反例累积同步 + 03 索引 TASK-310 ✅,本档 chore PR / #92)。Week 4 主线剩 **TASK-404 激活码 / TASK-405 部署 / TASK-406 内测**;Week 3 完工(7/8 → 8/9,30/34 → 31/35)。**项目级里程碑**:TASK-310 经 GPT R0 + R1 双轮 conditional pass(43 + 30 条全采纳)+ Codex P1.1 摸底 24 项实测 + Stage 0 Round 1-3 守门(含 K_28a 自抓 migrations 目录 / projects 表名 / overview_schemas 期望窄)+ PR #1 / PR #2 实施 + CI mypy + ruff format hotfix + chore PR 归档,**双 AI 互审 + Codex 实测 + PM 救场 工艺协议正常工作**;**决策 12 沿用 v0.4 不升 v0.5**(v0.5 协议候选累积至 6 项,详 § 反例累积段;待下任正式起 v0.5 协议升级 task)。**v3.0 pivot 同步**:方向 pivot 完成,宪法升 v3.0,paper-to-model 主线启动;Week 4 TASK-404 激活码冻结,TASK-405 部署 / TASK-406 内测转交,详 `docs/decisions/20260615-22-direction-pivot-paper-to-model.md`。**留 X 候选系列**(挂下任评估):X2(m_function line_range 观察,沿用)/ X6(prompt yaml 数量约束)/ X7(advanced V4-Pro + 202+polling)/ X8(ExplanationPack 抽 TeachingUnit 摘要)/ X10(Python 环境治理全套)/ TASK-311(TeachingUnit prompt 调权)。
+**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 4/4,总进度纳入 TASK-500~503 后为 35/40。下一步进入 paper-to-model 后续 task / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
 
 ## Week 5+:paper-to-model 主线占位
 
@@ -368,23 +369,23 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-500 | paper-to-model 开门 chore(5 项前置硬门槛一锅炖) | ✅ | Codex | 5 项门槛全部入仓,paper-to-model 主线解封 |
 | TASK-501 | PaperPlanService 与资料入口实现起点 | ✅ | Codex | TASK-500 已合并,可派单 |
 | TASK-502 | PaperPlanService + 4 prompt yaml + Python helper + MissingDetector + UserSupplyMerger | ✅ | Codex | 已合并 main 2026-06-18 PR #99,转 TASK-503 |
-| TASK-503 | TuningSuggestion + 持久化 PaperBundleStore + GET 路由 + D 根因方向 A + R6 整体门槛 5 解封 | 🔍 | Codex | v0.2.4 + decision 25,等待 PM 验收 |
+| TASK-503 | TuningSuggestion + 持久化 PaperBundleStore + GET 路由 + D 根因方向 A + R6 整体门槛 5 解封 | ✅ | Codex | v0.2.4 + decision 25 验收通过，整体门槛 5 解封 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
-**决策 09 反例库**:108 → **162**(本任 TASK-310 累积 +54;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
+**决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
 
-- K_28a 36 → **53**(+17):38 任 +13(R0 / R1 / Round 1 / Round 2 / D-E-F 五段)/ 39 任 +4(派单凭印象 migrations 目录 + projects 表名 + overview_schemas 期望窄 + 索引数字 32/34 凭印象)
+- K_28a 36 → **56**(+20):38 任 +13(R0 / R1 / Round 1 / Round 2 / D-E-F 五段)/ 39 任 +4(派单凭印象 migrations 目录 + projects 表名 + overview_schemas 期望窄 + 索引数字 32/34 凭印象)/ 49 任 +3(TASK-503 v0.2.4 起草线:凭交接包转述写"12 项参数"(实测 15)+ 凭印象写 decision 编号 23(实测应 25)+ 推 A 重做未核 v0.2.3→v0.2.4 改动范围)
 - K_28b 4 → **10**(+6):38 任 +5(起稿粒度反复)/ 39 任 +1(治标 vs 治本决策点漏明示)
 - K_30 23 → **31**(+8):38 任 +7(R0 / R1 / Round 1 / 派单 / freeze 跨段)/ 39 任 +1(派单验收 ruff format --check 漏列,PR #1 K_30 同款未消化)
 - K_31 2 → 2(沿用)
 - K_34 9 → 9(沿用)
-- K_36 13 → **21**(+8):38 任 +6(env 项目级归档 / 验收清单粒度)/ 39 任 +2(派单验收清单只补 mypy 漏 ruff format / 同类 CI step 拆条)
-- **K 总(剔除救场)= 87 → 126**(+39)
-- Codex 守门救场 13 → **22**(+9):38 任 +5(Round 1 命令本体错 / Round 2 派单 git 真值错 / Round 2 #7+#13 freeze 守门 / E 段找回 mxa env / F 段项目级归档补齐)/ 39 任 +4(PR #2 Stage 0 Round 3 #14 migrations 目录 + #3 overview_schemas 期望 + PR #1 CI mypy 自动化救场 + PR #2 CI ruff format 自动化救场)
-- PM 救场架构师 6 → **14**(+8):38 任 +5(D1-B / R0 / 修订工艺 / 单文件整合 / env 归档不全)/ 39 任 +3(PR #1 治标 vs 治本 / PR #2 "一次跑绿 CI" / chore PR 数字 "一来就错")
-- **反例库总计 = 126 + 22 + 14 = 162**
+- K_36 13 → **22**(+9):38 任 +6(env 项目级归档 / 验收清单粒度)/ 39 任 +2(派单验收清单只补 mypy 漏 ruff format / 同类 CI step 拆条)/ 49 任 +1(推 A 重做未核范围红线,与 K_28a 双重记账)
+- **K 总(剔除救场)= 87 → 130**(+43)
+- Codex 守门救场 13 → **23**(+10):38 任 +5(Round 1 命令本体错 / Round 2 派单 git 真值错 / Round 2 #7+#13 freeze 守门 / E 段找回 mxa env / F 段项目级归档补齐)/ 39 任 +4(PR #2 Stage 0 Round 3 #14 migrations 目录 + #3 overview_schemas 期望 + PR #1 CI mypy 自动化救场 + PR #2 CI ruff format 自动化救场)/ 49 任 +1(取证 16 第一行实测拦下"main 无 task-503 任务卡",派单 base 假设错)
+- PM 救场架构师 6 → **18**(+12):38 任 +5(D1-B / R0 / 修订工艺 / 单文件整合 / env 归档不全)/ 39 任 +3(PR #1 治标 vs 治本 / PR #2 "一次跑绿 CI" / chore PR 数字 "一来就错")/ 49 任 +4(四次一句话点破:框架性授权后过度请示 / 推 A 重做 / "怎么还要拍"等)
+- **反例库总计 = 130 + 23 + 18 = 171**
 
-> **自 41 任(决策 22)起,反例库改趋势记账(不再逐位累加)**:本任高发区是 K_28a(架构师凭印象写宪法 / 契约级文档未核字面,单任约 7 次,GPT R1 + Codex R6 + GPT 联审三道各有斩获)。其余触发包括 K_30 跨段同步漏、K_34 语义记忆错位(含知识库 ≠ 仓库)、K_36 边界。三层审查(GPT 决策质量 / Codex 实测 / PM 兜底)正常工作,无漏入仓。详决策 22 § 9。
+> **自 41 任(决策 22)起,反例库改趋势记账(不再逐位累加)**:第 49 任 TASK-503 v0.2.4 起草线新增趋势集中在 K_28a(+3:12 项参数 / decision 23 / 推 A 重做范围)、K_36(+1:范围红线)、Codex 守门救场(+1:取证 16 拦 base 假设错)、PM 救场架构师(+4:四次一句话点破)。三层审查(GPT 决策质量 / Codex 实测 / PM 兜底)继续正常工作,无漏入仓。详决策 22 § 9。
 
 **触发独立阈值**:K_28a ≥ 10 / K_28b ≥ 5 / K_30 ≥ 5 / K_31 ≥ 2 / K_34 ≥ 5 / K_36 ≥ 2 / Codex 守门救场 ≥ 5 / PM 救场架构师 ≥ 5 全部稳定触发。
 
@@ -399,4 +400,4 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 ---
 
 **版本**:v3.0(delta)
-**最后更新**:2026-06-15
+**最后更新**:2026-06-20
