@@ -1,0 +1,161 @@
+{
+  "schema_version": "1",
+  "case_id": "missing_param/case_01_missing_image_param",
+  "description": "本表声明文档对参数的明确陈述(给值 / 未提),供 TASK-503 v0.2.4 evaluator R2 判分裁决冲突型(SUT 把文档已给值参数误报为缺失)与幻觉型(SUT 报文档完全未提的参数为缺失)两类误报。本表不声明 SUT 应列出的完整 missing 参数集合;SUT 可多报有文档依据的参数,只要不冲突不幻觉。SUT 漏报盲评归 v0.2 多 case + judge,本任不涵盖。actor(spec extract / plan generate / missing detect)在评测运行期不读本文件,防答案泄漏。",
+  "maintainer": "架构师起草 + PM 核审",
+  "source_doc_path": "input/source_doc_stripped.md",
+  "locator_strategy": "单源:source_doc markdown 标题 + 行号。本 case 无 expected_paper_spec.json,无 PaperSpec section_id 双源对齐;evaluator R2 算法只查 actual_prompt.parameter_name ∈ document_given_values[*].canonical_param_name 集合 / document_not_mentioned[*].canonical_param_name 集合,不强校验 locator 实际命中(locator 是真值源事实正确性的人工核审依据,不是机器判分输入)。",
+  "document_given_values": [
+    {
+      "canonical_param_name": "额定有功功率 PN",
+      "given_value": "200",
+      "given_unit": "MW",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [27, 27],
+        "excerpt": "额定有功功率 PN = 200 MW"
+      }
+    },
+    {
+      "canonical_param_name": "额定电压 UN",
+      "given_value": "13.8",
+      "given_unit": "kV",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [28, 28],
+        "excerpt": "额定电压 UN = 13.8 kV"
+      }
+    },
+    {
+      "canonical_param_name": "额定频率 fN",
+      "given_value": "50",
+      "given_unit": "Hz",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [29, 29],
+        "excerpt": "额定频率 fN = 50 Hz"
+      }
+    },
+    {
+      "canonical_param_name": "d 轴同步电抗 xd",
+      "given_value": "1.0",
+      "given_unit": "pu",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [30, 30],
+        "excerpt": "d 轴同步电抗 xd = 1.0"
+      }
+    },
+    {
+      "canonical_param_name": "q 轴同步电抗 xq",
+      "given_value": "0.6",
+      "given_unit": "pu",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [31, 31],
+        "excerpt": "q 轴同步电抗 xq = 0.6"
+      }
+    },
+    {
+      "canonical_param_name": "d 轴暂态电抗 xd'",
+      "given_value": "0.3",
+      "given_unit": "pu",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [32, 32],
+        "excerpt": "d 轴暂态电抗 xd' = 0.3"
+      }
+    },
+    {
+      "canonical_param_name": "d 轴次暂态电抗 xd''",
+      "given_value": "0.21",
+      "given_unit": "pu",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [33, 33],
+        "excerpt": "d 轴次暂态电抗 xd'' = 0.21"
+      }
+    },
+    {
+      "canonical_param_name": "q 轴次暂态电抗 xq''",
+      "given_value": "0.31",
+      "given_unit": "pu",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [34, 34],
+        "excerpt": "q 轴次暂态电抗 xq'' = 0.31"
+      }
+    },
+    {
+      "canonical_param_name": "定子电阻 r",
+      "given_value": "0.005",
+      "given_unit": "pu",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [35, 35],
+        "excerpt": "定子电阻 r = 0.005"
+      }
+    },
+    {
+      "canonical_param_name": "励磁绕组漏抗 xσf",
+      "given_value": "0.18",
+      "given_unit": "pu",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [36, 36],
+        "excerpt": "励磁绕组漏抗 xσf = 0.18"
+      }
+    },
+    {
+      "canonical_param_name": "d 轴阻尼绕组互漏抗 xaD",
+      "given_value": "0.1",
+      "given_unit": "pu",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [37, 37],
+        "excerpt": "d 轴阻尼绕组互漏抗 xaD = 0.1"
+      }
+    },
+    {
+      "canonical_param_name": "q 轴阻尼绕组漏抗 xσQ",
+      "given_value": "0.25",
+      "given_unit": "pu",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [38, 38],
+        "excerpt": "q 轴阻尼绕组漏抗 xσQ = 0.25"
+      }
+    },
+    {
+      "canonical_param_name": "d 轴开路暂态时间常数 Td0'",
+      "given_value": "5",
+      "given_unit": "s",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [39, 39],
+        "excerpt": "d 轴开路暂态时间常数 Td0' = 5 s"
+      }
+    },
+    {
+      "canonical_param_name": "d 轴阻尼时间常数 TD",
+      "given_value": "2",
+      "given_unit": "s",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [40, 40],
+        "excerpt": "d 轴阻尼时间常数 TD = 2 s"
+      }
+    },
+    {
+      "canonical_param_name": "q 轴开路次暂态时间常数 Tq0''",
+      "given_value": "1.4",
+      "given_unit": "s",
+      "locator": {
+        "source_doc_heading": "## 2 电机参数与工况",
+        "source_doc_line_range": [41, 41],
+        "excerpt": "q 轴开路次暂态时间常数 Tq0'' = 1.4 s"
+      }
+    }
+  ],
+  "document_not_mentioned": []
+}

@@ -17,8 +17,8 @@
 │   ↓ 若 Layer 1 任一非 Pass → 启动 Layer 2              │
 ├─────────────────────────────────────────────────────────┤
 │ Layer 2 ─ Component 诊断(条件启动)                    │
-│   5 大类 10 标准(A 抽取 / B 缺失识别 / C 工程方案 /    │
-│   D 代码骨架 / E 证据契约)                              │
+│   通用组件(A 抽取 / C 工程方案 / D 代码骨架 / E 证据契约)│
+│   + missing case R1a/R2/R3/R4/R5 自动死规则              │
 │   每个 ❌ 加 [Origin / Inherited] 标签 → 解决上游污染   │
 ├─────────────────────────────────────────────────────────┤
 │ Layer 3 ─ Trajectory(留 TASK-501 后做,本任不做)       │
@@ -68,11 +68,13 @@
 
 | 档位 | 判定指引 |
 |---|---|
-| ✅ Pass | 用户补充的 6 个值全部正确写入 plan + 全部正确标 user_supplied |
+| ✅ Pass | 用户补充参数全量正确写入 plan + 全部正确标 user_supplied |
 | 🟡 Partial | 大多数补充值正确写入,1-2 处遗漏或标错来源,但主功能可用 |
 | ❌ Fail | 用户补充未生效,或多处标错来源(把 user_supplied 伪装成 document_extracted) |
 
 **仅 missing_param case 适用**。material_to_plan case 跳过 O2。
+
+**missing_param 额外门槛**:TASK-503 v0.2.4 evaluator 先跑 R1a-pre/R1a-post/R2/R3/R4/R5 五条自动死规则;任一 Fail 即整 case Fail,不走 Partial。
 
 ### Layer 1 评分卡(模板)
 
@@ -128,7 +130,7 @@ MissingDetector (B)           MScriptDrafter (D)
 LibrarySelector / BlockRecommender / ParameterMapper / SubsystemPlanner (C)
    
 EvidenceTagger (E1) ─── 横跨所有 ─── 拦在每个输出的 evidence 字段
-UserSupplyMerger (E2) ─── 依赖 B + 用户输入
+UserSupplyMerger (R3/R5) ─── 依赖 B + 用户输入
 ```
 
 **追溯规则**:若 A ❌,大概率 B / C / D 也 ❌(上游污染);若 A ✅ 但 B ❌,则 B 是 [Origin]。
@@ -144,12 +146,12 @@ UserSupplyMerger (E2) ─── 依赖 B + 用户输入
 | **A1** PaperSpec 字段抽取完整 | Pass = 所有论文显式给出的参数 / 公式 / 摘要全命中;Partial = 命中 ≥70%;Fail = 命中 <70% | Extractor prompt 加强字段识别(具体改哪段 prompt 由 TASK-501 落地后定位) |
 | **A2** 无幻觉(没编造论文里没有的内容) | Pass = 零幻觉;Partial = 1 处可疑(如改写了原文表述);Fail = ≥2 处明显幻觉(编造参数 / 公式 / 引用) | Extractor prompt 加 "STRICT NO HALLUCINATION" 指令 + 后置 hallucination check |
 
-#### B. 缺失识别(MissingDetector)
+#### R1a / R2. 缺失识别死规则(MissingDetector,missing_param only)
 
 | 标准 | 判定指引 | Fail → 优化方向 |
 |---|---|---|
-| **B1** 该识别的缺失参数都识别到(recall) | Pass = recall ≥80%(对照 golden missing_prompts);Partial = 50-80%;Fail = <50% | MissingDetector prompt 加 "scan all figure placeholders" + 学科特定参数清单 |
-| **B2** 不乱报缺(文档已给的不当缺失)(precision) | Pass = 100% precision;Partial = 1 处误报;Fail = ≥2 处误报 | MissingDetector 加"先查 parameter_table"前置过滤 |
+| **R1a-pre / R1a-post** 缺失识别链路 | Pass = evaluator 两阶段均通过;Fail = 任一阶段缺失识别链路断裂。**无 Partial 档** | MissingDetector prompt 加 "scan all figure placeholders" + 学科特定参数清单 |
+| **R2** 真值源冲突 / 幻觉 | Pass = actual 缺失参数不与 `r2_truth_source/document_facts.json` 冲突,且不把真值源之外内容当文档给值;Fail = 任一冲突或幻觉。**无 Partial 档** | MissingDetector 加 document_facts 前置过滤 + hallucination check |
 
 #### C. 工程方案(LibrarySelector + BlockRecommender + ParameterMapper)
 
@@ -165,14 +167,15 @@ UserSupplyMerger (E2) ─── 依赖 B + 用户输入
 |---|---|---|
 | **D1** .m 骨架语法正确(若非空) | Pass = 解析器(TASK-103)通过无 error;Partial = ≤2 个 warning;Fail = syntax error;**N/A** = m_script_skeleton 为空(尽力交付层不交付) | MScriptDrafter prompt + 加 MATLAB 解析器回读守门 |
 
-#### E. 证据契约(EvidenceTagger + UserSupplyMerger,**两条均一票否决**)
+#### E / R3. 证据契约(EvidenceTagger + UserSupplyMerger,**来源真实性一票否决**)
 
 | 标准 | 判定指引 | Fail → 优化方向 |
 |---|---|---|
 | **E1** 所有 evidence 满足双源不变量 — **一票否决** | Pass = 全过(verification_method § 3 两套不变量);Fail = 任一不满足。**无 Partial 档**(契约层非黑即白) | EvidenceTagger schema validation(Pydantic validator,留 TASK-501) |
-| **E2** 用户补充正确标 user_supplied — **一票否决** | Pass = 所有用户补充参数 source = user_supplied;Fail = 任一伪装成 document_extracted。**无 Partial 档** | UserSupplyMerger 的 source 标注规则 |
+| **R3** 用户补充来源真实 — **一票否决** | missing case:Pass = 用户补充参数均为 user_supplied,且文档明示参数不被伪装成 user_supplied;material case:Pass = 无 user_supplied mapping。Fail = 任一来源伪装。**无 Partial 档** | UserSupplyMerger 的 source 标注规则 |
+| **R4/R5** 用户补充链路一致 | Pass = prompt、user_input、updated_plan 一对一基数与 canonical name 全链一致;Fail = 任一缺失 / 多绑 / 名称漂移。**无 Partial 档** | UserSupplyMerger 的 canonical name normalizer |
 
-**E1 / E2 任一 Fail = 整 case Fail**,无论 Outcome / 其他组件如何,**这是产品架构层硬约束**(双源契约错乱会污染下游所有依赖参数源头追溯的能力)。
+**E1 / R3 / R4 / R5 任一 Fail = 整 case Fail**,无论 Outcome / 其他组件如何,**这是产品架构层硬约束**(双源契约错乱会污染下游所有依赖参数源头追溯的能力)。
 
 ### 4.4 Layer 2 评分卡(模板)
 
@@ -183,14 +186,14 @@ Case: ________________________  ← 启动 Layer 2 的原因(O1 / O2 哪个非 P
 |---|------|------|------|----|------|
 | A1 | 抽取 | PaperSpec 字段完整 | ☐ Pass / ☐ Partial / ☐ Fail | ☐ Origin / ☐ Inherited | |
 | A2 | 抽取 | 无幻觉 | ☐ Pass / ☐ Partial / ☐ Fail | ☐ Origin / ☐ Inherited | |
-| B1 | 缺失识别 | 缺失参数 recall | ☐ Pass / ☐ Partial / ☐ Fail | ☐ Origin / ☐ Inherited | |
-| B2 | 缺失识别 | 缺失参数 precision | ☐ Pass / ☐ Partial / ☐ Fail | ☐ Origin / ☐ Inherited | |
+| R1a | 缺失识别 | pre/post 缺失链路死规则 | ☐ Pass / ☐ Fail / ☐ N/A | ☐ Origin / ☐ Inherited / ☐ N/A | |
+| R2 | 缺失识别 | 真值源冲突 / 幻觉 | ☐ Pass / ☐ Fail / ☐ N/A | ☐ Origin / ☐ Inherited / ☐ N/A | |
 | C1 | 工程方案 | 库选对 | ☐ Pass / ☐ Partial / ☐ Fail | ☐ Origin / ☐ Inherited | |
 | C2 | 工程方案 | 关键 block 推对 | ☐ Pass / ☐ Partial / ☐ Fail | ☐ Origin / ☐ Inherited | |
 | C3 | 工程方案 | 参数映射对 | ☐ Pass / ☐ Partial / ☐ Fail | ☐ Origin / ☐ Inherited | |
 | D1 | 代码骨架 | .m 语法 | ☐ Pass / ☐ Partial / ☐ Fail / ☐ N/A | ☐ Origin / ☐ Inherited / ☐ N/A | |
 | E1 | 证据契约 | 双源不变量 | ☐ Pass / ☐ Fail(一票否决) | — | |
-| E2 | 证据契约 | user_supplied 标对 | ☐ Pass / ☐ Fail(一票否决) | — | |
+| R3/R4/R5 | 证据契约 | 来源真实 + 一对一基数 + canonical name | ☐ Pass / ☐ Fail(一票否决) | — | |
 ```
 
 ---
@@ -209,7 +212,7 @@ Step 1. 测评人填评分卡
 Step 2. 倒推根因(人 + Claude/GPT 共同分析)
         ├─ 优先看 Layer 2 [Origin] ❌(本组件独立出错)
         ├─ [Inherited] ❌ 暂不直接改 → 上游修好后大概率自然修复
-        ├─ 若有 E1 / E2 一票否决 → 立即定位到 EvidenceTagger / UserSupplyMerger,与其他组件解耦改
+        ├─ 若有 E1 / R3/R4/R5 一票否决 → 立即定位到 EvidenceTagger / UserSupplyMerger,与其他组件解耦改
         └─ 输出"待优化组件清单"(组件名 + 失败模式 + 优化方向)
 
 Step 3. PM / 架构师 + Claude / GPT 共同决定:
@@ -247,18 +250,18 @@ v0.3+(中期):
 | 情况 | 单 case 验收判定 |
 |---|---|
 | Layer 1 全 Pass | ✅ 验收通过 |
-| Layer 1 任一 Partial,Layer 2 启动后 E1 / E2 均 Pass,其他大类多数 Pass / Partial | 🟡 条件通过(建议改 [Origin] ❌ 组件后重跑) |
+| Layer 1 任一 Partial,Layer 2 启动后 E1 / R3/R4/R5 均 Pass,其他大类多数 Pass / Partial | 🟡 条件通过(建议改 [Origin] ❌ 组件后重跑) |
 | Layer 1 任一 Fail | ❌ 不通过,启动 Layer 2 定位组件 |
-| E1 / E2 任一 Fail(任何 Layer) | ❌ 一票否决,不通过(无论 Outcome 如何) |
+| E1 / R3/R4/R5 任一 Fail(任何 Layer) | ❌ 一票否决,不通过(无论 Outcome 如何) |
 
 ### 6.1 跨 case 汇总
 
-| Case | Layer 1 O1 | Layer 1 O2 | E1 / E2 一票否决? | 单 case 验收 |
+| Case | Layer 1 O1 | Layer 1 O2 | E1 / R3/R4/R5 一票否决? | 单 case 验收 |
 |---|---|---|---|---|
 | material_to_plan/case_01 | | (N/A) | | |
 | missing_param/case_01 | | | | |
 
-**整体门槛 5 通过标准**:两个 case 各自达到 ✅ 或 🟡 + 两个 case 均无 E1 / E2 一票否决。
+**整体门槛 5 通过标准**:两个 case 各自达到 ✅ 或 🟡 + 两个 case 均无 E1 / R3/R4/R5 一票否决;missing_param 另须 R1a/R2/R3/R4/R5 自动死规则全 Pass。
 
 ---
 

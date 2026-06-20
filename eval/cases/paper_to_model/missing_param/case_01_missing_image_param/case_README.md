@@ -13,7 +13,7 @@
 
 > 给定一份电机短路类资料,**图片中含关键参数但未被文本抽取**(v0.1 系统无 OCR),系统能否:
 >
-> 1. **识别缺失**:在 PaperSpec 抽取阶段,识别出"论文提及该参数但文本未给具体值",输出 `MissingParameterPrompt` 列表(本 case golden 期望 6 个 prompt)
+> 1. **识别缺失**:在 PaperSpec 抽取阶段,识别出"论文提及该参数但文本未给具体值",输出 `MissingParameterPrompt` 候选;判分按 R1a-pre / R1a-post / R2 / R3 / R4 / R5 死规则,不约束固定数量
 > 2. **接受用户补充**:用户为每个 prompt 提供具体数值,系统接受 `user_supplied_value` / `user_supplied_unit`
 > 3. **更新 plan + 标对双源**:用户补充后,`ModelGenerationPlan` 更新;补充的参数在 `parameter_mapping` 中 `source: user_supplied`,与文档证据 `source: document_extracted` **分开标注**
 > 4. **遵守双源不变量**:补充的 evidence 三 locator 全 None + excerpt = None + missing_param_prompt_id 关联到具体 prompt;文档证据 evidence 三 locator ≥ 1 + excerpt 非空 + missing_param_prompt_id = None
@@ -37,31 +37,31 @@
 
 ### 2.2 `input/expected_missing_prompts.json`
 
-系统**应识别**的 6 个 `MissingParameterPrompt`(本 case golden):
+系统**参考样例**中的 `MissingParameterPrompt`(供人工理解 case,不作为 evaluator 判分真值源):
 
-| prompt_id | parameter_name | 缺失原因 | suggested_unit |
-|---|---|---|---|
-| MISS-001 | 同步发电机惯性时间常数 H | FIG-01 图片中,文字未给 | s |
-| MISS-002 | 同步发电机摩擦因数 F | FIG-01 图片中 | pu |
-| MISS-003 | 变压器变比 | FIG-02 图片中,文字未给任何变压器数值 | kV / kV |
-| MISS-004 | 变压器漏阻抗 X_T | FIG-02 图片中 | pu |
-| MISS-005 | 变压器接线方式 | FIG-02 图片中 | (无单位) |
-| MISS-006 | 电机初相角 α0 | FIG-03 初始化截图中(文字仅给 -4.43°) | rad |
+| parameter_name | 缺失原因 | suggested_unit |
+|---|---|---|
+| 同步发电机惯性时间常数 H | FIG-01 图片中,文字未给 | s |
+| 同步发电机摩擦因数 F | FIG-01 图片中 | pu |
+| 变压器变比(原边/副边电压比) | FIG-02 图片中,文字未给任何变压器数值 | kV / kV |
+| 变压器漏阻抗 X_T | FIG-02 图片中 | pu |
+| 变压器接线方式(原边 / 副边连接组别) | FIG-02 图片中 | (无单位) |
+| 电机初相角 α0 | FIG-03 初始化截图中(文字仅给 -4.43°) | rad |
 
-**说明**:6 个 prompt 是 v0.1 阶段**架构师手工标定**的"图片中应该但文本里没有"的关键缺失参数;TASK-501 实施后,系统应能机器自动识别这些缺失(基于"论文提及该参数 / 该 block 需要该参数 - 文本中无具体值"的判定逻辑)。
+**说明**:这些条目是 v0.1 阶段**架构师手工标定**的参考样例;TASK-503 v0.2.4 evaluator 不把该文件当判分真值源,缺失识别按 R1a-pre / R1a-post + R2 真值源 + R3/R4/R5 死规则自动判定,详见 `verification_method.md`。
 
 ### 2.3 `user_input/user_supplied_params.json`
 
-用户为 6 个 prompt 提供的补充值(本 case 模拟一位电气工程师在使用产品时按 prompt 填入的典型值):
+用户为参考样例中的缺失参数提供补充值(本 case 模拟一位电气工程师在使用产品时按 prompt 填入的典型值):
 
-| prompt_id | 补充值 | 单位 | 来源说明 |
+| parameter_name | 补充值 | 单位 | 来源说明 |
 |---|---|---|---|
-| MISS-001 | 3.5 | s | 200MW 汽轮发电机典型值 |
-| MISS-002 | 0 | pu | SimPowerSystems block 默认 F=0 |
-| MISS-003 | 13.8 / 230 | kV / kV | 电厂出口升压变压器,接 230 kV 输电网 |
-| MISS-004 | 0.12 | pu | 200MW 等级升压变压器典型漏抗 |
-| MISS-005 | Yn / d11 | — | 标准电厂升压变压器接线 |
-| MISS-006 | 1.5708 | rad | π/2,空载短路典型初值 |
+| 同步发电机惯性时间常数 H | 3.5 | s | 200MW 汽轮发电机典型值 |
+| 同步发电机摩擦因数 F | 0 | pu | SimPowerSystems block 默认 F=0 |
+| 变压器变比(原边/副边电压比) | 13.8 / 230 | kV / kV | 电厂出口升压变压器,接 230 kV 输电网 |
+| 变压器漏阻抗 X_T | 0.12 | pu | 200MW 等级升压变压器典型漏抗 |
+| 变压器接线方式(原边 / 副边连接组别) | Yn / d11 | — | 标准电厂升压变压器接线 |
+| 电机初相角 α0 | 1.5708 | rad | π/2,空载短路典型初值 |
 
 ---
 
@@ -77,9 +77,9 @@
 - `parameter_mapping`:**26 个映射条目** = 15 个论文文字直接给的(`source: document_extracted`)+ 6 个用户补充的(`source: user_supplied`)+ 5 个工程配置(`source: document_extracted`,因 missing_param case 的剥离版保留了"5MW 负荷 / 平衡节点 / 0.2s 故障 / ode15s / 1s"文字段)
 - `subsystem_breakdown`:9 步搭建流程(比 material_to_plan case 多一步变压器与初始化配置)
 - `m_script_skeleton`:基于 EQ-01 + α0 = 1.5708 的 .m 代码骨架
-- `evidence`:**9 个 PaperEvidenceEntry** = 3 个 document_extracted(指向论文核心段落:S2 参数 / S3 公式 / S5 仿真配置)+ 6 个 user_supplied(每个关联到 MISS-001 至 MISS-006 prompt_id)
+- `evidence`:**9 个 PaperEvidenceEntry** = 3 个 document_extracted(指向论文核心段落:S2 参数 / S3 公式 / S5 仿真配置)+ 6 个 user_supplied(每个关联到参考样例中的用户补充参数;判分真值仍以 R2 truth source + actual 链路为准)
 
-**评分重点**:本 case 测试**双源契约**(E1 / E2 一票否决)+ 缺失参数识别(B1 / B2)+ 更新后 plan 可执行性(O1 / O2)
+**评分重点**:本 case 测试 R1a-pre/R1a-post 缺失识别死规则 + R2 真值源(冲突 / 幻觉)+ R3 来源真实性一票否决 + R4 一对一基数 + R5 全链 canonical name 一致 + 更新后 plan 可执行性(O1 / O2)
 
 ---
 
@@ -103,12 +103,12 @@
 | 组件 | 标准 | 本 case 关注 |
 |---|---|---|
 | A 抽取 | A1 / A2 | 论文 12 项参数 + 公式 + 物理含义抽取完整,无幻觉(同 material_to_plan case) |
-| **B 缺失识别**(本 case 核心) | **B1 recall** | golden 中 6 个 missing prompt 是否都识别到(变压器 3 项 / 同步机 H/F / α0) |
-| B 缺失识别 | **B2 precision** | 文档已显式给出的参数不应被误识别为缺失(如 12 项 pu 参数文字已给,不该出 prompt) |
+| **R1a 缺失识别**(本 case 核心) | **R1a-pre / R1a-post** | 图片参数候选与用户补充后链路必须按 evaluator 死规则通过;不约束固定 prompt 数量 |
+| **R2 真值源**(本 case 核心) | **R2 conflict / hallucination** | 对照 `r2_truth_source/document_facts.json`,文档已显式给出的参数不应被误识别为缺失或伪造成用户补充 |
 | C 工程方案 | C1 / C2 / C3 | 同 material_to_plan case;额外注意 Three-Phase Transformer block 应推出 |
 | D 代码骨架 | D1 | 用用户补充的 α0 = 1.5708 而非默认 α0 = 0 |
-| **E 证据契约**(本 case 核心) | **E1 双源不变量(一票否决)** | golden 含 3 个 document_extracted + 6 个 user_supplied;6 个 user_supplied 的 missing_param_prompt_id 必须正确关联到 MISS-001 至 MISS-006 |
-| **E 证据契约**(本 case 核心) | **E2 user_supplied 标对(一票否决)** | **本 case 关键测试点**:用户补充的 6 个参数**不许伪装成 document_extracted**;若有任一伪装 → 整 case Fail 无论其他维度如何 |
+| **R3 来源真实性**(本 case 核心) | **一票否决** | **本 case 关键测试点**:用户补充参数不许伪装成 document_extracted;文档明示参数不许伪装成 user_supplied |
+| **R4/R5 绑定一致**(本 case 核心) | **R4 一对一基数 / R5 canonical name** | user_supplied mapping 与 prompts、updated_plan 全链参数名必须一致 |
 
 ---
 
@@ -117,11 +117,11 @@
 详 `verification_method.md` § 1.1。本 case 特殊步骤:
 
 1. 读 `input/source_doc_stripped.md`
-2. 读 `input/expected_missing_prompts.json`(对照系统应识别哪些缺失参数)
+2. 读 `input/expected_missing_prompts.json`(仅参考样例,evaluator 不读)
 3. 读 `user_input/user_supplied_params.json`(对照用户应如何补充)
-4. 读 `golden/expected_updated_plan.json`(对照更新后 plan 应长什么样)
-5. 若有 actual 输出:按 `scoring_template.md` 三层栈口径,先填 Layer 1(O1 + O2 都填),非 Pass 时启动 Layer 2(本 case 重点看 B1 / B2 / E1 / E2)
-6. **双源不变量校验**(本 case 必跑):对 `actual_updated_plan.json` 的所有 evidence 数组逐项跑 verification_method § 3 的两套不变量校验;任一不通过 → **E1 Fail 一票否决**
+4. 读 `golden/expected_updated_plan.json`(仅参考样例,evaluator 不读)
+5. 若有 actual 输出:按 `scoring_template.md` 口径,先填 Layer 1(O1 + O2 都填),再对 missing case 必跑 R1a/R2/R3/R4/R5 五条死规则
+6. **R3 来源真实性校验**(本 case 必跑):对 `actual_updated_plan.json` 的所有 evidence 数组逐项跑 verification_method § 3 的两套不变量校验;任一用户补充伪装成 document_extracted 或文档明示值伪装成 user_supplied → **R3 Fail 一票否决**
 
 ---
 
@@ -130,7 +130,7 @@
 测评时特别注意:
 - ❌ **用户补充的参数不许标 `source: document_extracted`**(把 user_supplied 伪装成文档证据是双源契约最严重的违反)
 - ❌ **文档明示的参数不许标 `source: user_supplied`**(把已经在文档第 2 段写明的 PN/UN/fN/12 项 pu 参数误判为缺失)
-- ❌ actual 不应输出 expected_missing_prompts 之外的"假缺失"(如把"故障持续时间"列为缺失 — 文档第 5 段写明 "0.2s 时发生三相短路",仅是单点时刻;持续时间默认为"故障后到仿真结束"是常识)
+- ❌ actual 不应输出与 `r2_truth_source/document_facts.json` 冲突的"假缺失"(如把"故障持续时间"列为缺失 — 文档第 5 段写明 "0.2s 时发生三相短路",仅是单点时刻;持续时间默认为"故障后到仿真结束"是常识)
 - ⚠️ 用户补充的具体数值可能与 golden 不一致(用户可填任意合理值);评分关注**双源标注正确性 + plan 接受用户值的能力**,不关注具体数值是否等于 golden(只要在物理合理范围内)
 
 ---

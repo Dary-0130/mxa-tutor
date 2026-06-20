@@ -82,7 +82,7 @@
     },
     {
       "prompt_id": "MISS-006",
-      "parameter_name": "电机初相角 α0(初始化结果,论文文字仅给出 a 相滞后电压 -4.43°,完整 α0 需从初始化工具截图读出)",
+      "parameter_name": "电机初相角 α0",
       "paper_reference": {
         "source": "document_extracted",
         "paper_section_id": "S5",
