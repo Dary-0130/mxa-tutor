@@ -6,48 +6,49 @@
 
 ## 1. 两个阶段的验收方式
 
-### 1.1 TASK-500 chore 阶段(当前) — 人工对照骨架
+### 1.1 TASK-500 / TASK-503 当前验收 — case 分流
 
-**目的**:在 PaperPlanService(留 TASK-501 落地)未实现前,**先把 golden 数据 + 评分约定 + 验收方式落仓**,避免门槛 5 降级为"TODO 骨架"反向改写决策 22 § 10.4(R1 P0-1 K_31 教训)。
+**目的**:在 TASK-503 v0.2.4 evaluator 接管 missing case 判分后,**明确 golden 数据 / R2 真值源 / 评分约定 / 验收方式的职责边界**,避免门槛 5 降级为"TODO 骨架"或固定样例对拍。
 
-**形式**:**人工骨架对照**(非端到端实跑)。具体步骤:
+**形式**:**case 分流验收**。具体步骤:
 
-1. **读 input**:测评人打开 `input/source_doc_stripped.md`,理解输入资料(以及 missing_param case 的 `expected_missing_prompts.json`)
-2. **读 golden**:测评人对照 `golden/expected_*.json`,理解期望输出
-3. **读 case_README**:测评人理解本 case 评分关注点(三层栈口径,见 case_README § 4)
-4. **如有 actual**(PM 用通用 LLM 跑 baseline 时):按 `scoring_template.md` 三层诊断栈打分:**Layer 1 Outcome(O1 / O2 必填)→ 若非 Pass 启动 Layer 2 Component(A-E 5 大类 10 标准)+ [Origin/Inherited] 标签**;**没有 actual 也可执行**(此时打分表留空,本阶段只验收"骨架 + golden 自洽")
-5. **结构性自检**:对每个 golden JSON 跑 `python -m json.tool` 验证 JSON 合法;对 golden 中的 evidence 字段逐项验证双源不变量(详 § 3)
+1. **missing_param/case_01**:TASK-503 v0.2.4 evaluator 全自动跑 R1a-pre / R1a-post / R2 / R3 / R4 / R5 五条死规则;`expected_missing_prompts.json` 与 `expected_updated_plan.json` 仅作参考样例,evaluator 不读
+2. **material_to_plan/case_01**:保留人工 + 自动混合验收;自动 metrics 覆盖 A1 / C2 / C3 / D1 / E1 / R3,人工 spot-check 覆盖 A2 / C1
+3. **读 case_README**:测评人理解本 case 评分关注点(见 case_README § 4)
+4. **结构性自检**:对每个 golden JSON 跑 `python -m json.tool` 验证 JSON 合法;对 golden 中的 evidence 字段逐项验证双源不变量(详 § 3)
+5. **对外口径自检**:本目录任何 .md / .json 不含"自动生成 .slx / 一键生成 / 完整仿真模型 / 模型成品"等表述
 
 **本阶段验收通过标准**(不依赖 actual):
-- [ ] 12 个文件齐全(README / verification_method / scoring_template + 两个 case 各自 5 个 + 4 个文件)
+- [ ] 14 个文件齐全(README / verification_method / scoring_template + 两个 case 文件 + missing r2_truth_source 两文件)
 - [ ] 所有 JSON 文件 `python -m json.tool` 通过
 - [ ] golden 中每个 `PaperEvidenceEntry` 满足 task-500 v0.2.1 § 接口契约要点的两套不变量
 - [ ] golden 字段名 / 类型 / Literal 取值与 06 § 12 字段表对齐(本阶段 06 § 12 也由本 chore 同步入仓)
 - [ ] case_README 对每个 case 说明清晰(输入 / 期望输出 / 评分关注维度)
 - [ ] 对外口径合规:本目录任何 .md / .json 不含"自动生成 .slx / 一键生成 / 完整仿真模型 / 模型成品"等表述
 
-### 1.2 TASK-501 PaperPlanService 落地后 — 自动 evaluator
+### 1.2 TASK-503 v0.2.4 evaluator 落地后 — 自动 evaluator
 
 **目的**:实现端到端实跑评测,作为模型 / prompt 改动的回归守门。
 
-**形式**:**`eval/run_paper_eval.py`**(具体脚本路径由 TASK-501 拍板,本 chore 不写)。具体设计建议(留 TASK-501 参考):
+**形式**:**`eval/run_paper_eval.py`**(具体脚本路径由 TASK-503 v0.2.4 拍板,本 chore 不写)。具体设计建议(留 TASK-503 参考):
 
 1. **input 喂入**:读 `input/source_doc_stripped.md` → 调 PaperPlanService → 拿到 actual_paper_spec / actual_model_generation_plan / actual_missing_prompts / actual_updated_plan(按 case 类型)
-2. **structural diff**:对 actual vs golden 跑字段级对比:
-   - **schema 校验**:actual JSON 必须通过 Pydantic 校验(`features/paper/paper_schemas.py`,TASK-501 落地)
+2. **case-specific evaluator**:
+   - **schema 校验**:actual JSON 必须通过 Pydantic 校验(`features/paper/paper_schemas.py`)
    - **字段填充率**:actual 必填字段覆盖率 ≥ 90%
-   - **关键 list 项命中**:actual `parameter_table` / `block_recommendations` / `parameter_mapping` 等 list,与 golden 的 key field(`symbol` / `block_type` / `paper_param_name`)交集 / 召回率
+   - **missing case**:R1a-pre / R1a-post / R2 / R3 / R4 / R5 五条死规则全自动;R2 对照 `r2_truth_source/document_facts.json`
+   - **material case**:actual `parameter_table` / `block_recommendations` / `parameter_mapping` 等 list,与 golden 的 key field(`symbol` / `block_type` / `paper_param_name`)交集 / 召回率
 3. **双源不变量校验**:对 actual 的所有 `evidence` 数组中每个 `PaperEvidenceEntry` 自动校验两套不变量(详 § 3)
 4. **Outcome vs Component 分层自动化**(对齐 scoring_template.md 三层诊断栈):
-   - **Layer 1 Outcome**(O1 / O2):**LLM-as-judge**(Claude / GPT 看 actual vs golden 自动打 Pass / Partial / Fail);DeepSeek 是被测 actor 不参与
-   - **Layer 2 Component**(A-E):**结构性维度(A1 字段完整 / B1 / B2 / C1 / C2 / C3 / D1 / E1 / E2)可自动跑**;**A2 无幻觉 + Origin/Inherited 标签**仍需人工 spot-check
+   - **Layer 1 Outcome**(O1 / O2):material case 可用 LLM-as-judge;missing case 由五条死规则优先判定
+   - **Layer 2 Component**:material case 自动跑 A1 / C2 / C3 / D1 / E1 / R3;missing case 自动跑 R1a / R2 / R3 / R4 / R5;**A2 无幻觉 + Origin/Inherited 标签**仍需人工 spot-check
    - 自动评测 v0.2 起 Layer 1 全自动 + Layer 2 部分自动;v0.3+ 推全自动(详 scoring_template.md § 5.2 演进路径)
-5. **CSV 输出**:每 case 一行,字段建议:`case_id / o1 / o2 / a1 / a2 / b1 / b2 / c1 / c2 / c3 / d1 / e1 / e2 / origin_inherited_tags / verdict`
+5. **CSV 输出**:每 case 一行,字段建议:`case_id / o1 / o2 / a1 / a2 / r1a / r2 / c1 / c2 / c3 / d1 / e1 / r3 / r4 / r5 / origin_inherited_tags / verdict`
 
-**TASK-501 阶段验收通过标准**:
+**TASK-503 阶段验收通过标准**:
 - [ ] `eval/run_paper_eval.py` 存在并可跑
 - [ ] 跑通 material_to_plan + missing_param 两个 v0.1 case
-- [ ] **Layer 1 Outcome 全 Pass** OR **Layer 2 启动后 E1 / E2 均 Pass**(scoring_template § 6 单 case 验收口径)
+- [ ] **Layer 1 Outcome 全 Pass** OR **Layer 2 启动后 E1 / R3/R4/R5 均 Pass**(scoring_template § 6 单 case 验收口径);missing case 另须 R1a/R2/R3/R4/R5 全 Pass
 - [ ] CSV 输出格式齐全;人工 spot-check 后无 [Origin] 类组件失败遗漏
 
 ---
@@ -145,7 +146,7 @@ def validate_evidence_invariants(entry: dict) -> tuple[bool, str]:
 - 能读懂 MATLAB / Simulink 工程
 - 了解被测 case 的 domain(electrical / signal_processing / etc)对应的标准 MATLAB 工具箱
 
-不具备上述资质的测评人,只能对**纯结构性 Layer 2 标准**(A1 字段完整 / B1 / B2 / C3 / D1 / E1 / E2)打分;**Layer 1 Outcome + A2 + C1 / C2 + [Origin/Inherited] 标签**留 PM / 架构师 / 电气专家 spot-check。
+不具备上述资质的测评人,只能对**纯结构性 Layer 2 标准**(A1 字段完整 / R1a / R2 / C3 / D1 / E1 / R3/R4/R5)打分;**Layer 1 Outcome + A2 + C1 / C2 + [Origin/Inherited] 标签**留 PM / 架构师 / 电气专家 spot-check。
 
 ---
 
