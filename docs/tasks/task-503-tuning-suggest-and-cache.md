@@ -1,6 +1,6 @@
 # TASK-503：TuningSuggestion + 持久化 PaperBundleStore + GET 路由 + D 根因方向 A + R6 整体门槛 5 解封
 
-> **版本**：v0.2.3（2026-06-19，Codex Stage 0 实测反馈修订，可派 Codex 进 Stage 1）  
+> **版本**：v0.2.4（2026-06-20，设计稿 v1 + 取证 16 + PM D-501~D-512 全拍闭环；§ 1 第 5 项扩写 evaluator 判分改造 + 双轴 + per-case scorer + 动态 ID adapter；依赖 TASK-500 v0.2.2 先合）
 > **作者**：Claude（第 47 任架构师）；v0.2.1 由 GPT 代集成，v0.2.2 架构师 R1 三审，v0.2.3 据 Codex Stage 0 实测补两处 P0  
 > **审批级别**：架构升级类 + 评测层门槛 task（R1 + R6 + PM）  
 > **前置基线**：main 必须包含 `3941605`（TASK-502 PR #103 squash merge）；Codex Stage 0 已实测 `git merge-base` BASE OK、`CURRENT_SCHEMA_VERSION = 3`  
@@ -11,7 +11,7 @@
 
 ## 状态
 
-🔲 **v0.2.3，Codex Stage 0 摸底已通过 + 两处 P0 修订完毕，可派 Codex 进 Stage 1-6 实施**。
+🔲 **v0.2.4，设计稿 v1 + 取证 16 闭环，PM D-501~D-512 全拍；依赖 TASK-500 v0.2.2 先合并入仓，本任 rebase 后可派 Codex 进 Stage 1-6 实施**（Stage 6 内部扩为“判分代码改造 + 真跑两 case”，不拆子阶段）。
 
 - v0.1：架构师起稿。
 - v0.2：集成 GPT R1 一审 5 P0 + 9 P1 + 5 P2；PM 拍板真事务方案 A、DAG 方向 A。
@@ -23,6 +23,18 @@
   - 同步修 P1/P2：§14.1 CI 用实测命令；`ERROR_MAP` 符号名改“既有 LLMError handler 映射”+ 实测 HTTP 码；§12 任务卡入仓说明。
 
 **Codex Stage 0 已确认可实施（理解 6/6、新增文件/leaf 均不存在、validate_for_spec + UserSupplyService 调用点已核）。本卡修订闭环，可派 Codex 进 Stage 1。**
+
+- v0.2.4：**设计稿 v1 + 取证 16 + PM D-501~D-512 拍板闭环修订**。
+  1. **§ 1 第 5 项扩写**：原“R6 真跑两 case 解封” → “完成 evaluator 结果封装、双轴状态、missing_param per-case 死规则判分，按新口径真跑两 case 解封”。
+  2. **判分方向**：E2 取消 → 拆 R3（来源真实性一票否决）+ R1a-post（写回值断言）+ fixture/schema 输入校验；missing 五条死规则（R1a-pre/R1a-post / R2 / R3 / R4 / R5）全自动，无 partial，无人工，无 judge（judge 留 v0.2 多 case）；material 评分 E2 → 改名 material R3（行为不变）。
+  3. **双轴状态**：`execution_status ∈ {succeeded, case_failed}` × `verdict ∈ {pass, partial, fail, not_evaluated}`；`blocked_known_defect` 不再作新状态，历史读取映射 `case_failed + not_evaluated`。
+  4. **动态 ID adapter**：evaluator 按 canonical name 绑定 fixture 用户脚本到 actual prompts → 注入运行期 prompt_id → 交 merge；新建 `eval/_paper_eval_dynamic_id_adapter.py`。
+  5. **case-boundary 异常封装**：merge / IO / serialization / provider / fixture 损坏异常 wrap 在 case 边界 try/except；finally 始终写 case_result + actual artifacts + 规则明细 + failure_stage；不 catch BaseException。
+  6. **per-case scorer 分派**：material / missing 不同评分流程，统一在 `compute_verdict` 汇总。
+  7. **R2 真值源**：依赖 TASK-500 v0.2.2 新增 `r2_truth_source/document_facts.json`（15 项 + 单源 locator）；R2 验冲突型 + 幻觉型两类误报。
+  8. **关联新长期 decision**：`docs/decisions/20260620-25-evaluator-dual-axis-and-per-case-scorer.md`（本版同期入仓）。
+
+**v0.2.4 修订闭环，可派 Codex 实施（TASK-500 v0.2.2 合并后 rebase）。**
 
 ---
 
@@ -51,7 +63,7 @@ TASK-503 是 paper-to-model v0.1 后端收口 task，承接 TASK-501 的资料�
 2. 持久化 PaperSpec + PaperPlan，支持进程重启后读取；
 3. 新增 `GET /spec`、`GET /plan`；
 4. 新增 `POST /tuning-suggest`；
-5. R6 真跑两个 paper-to-model case，解封 TASK-502 整体门槛 5。
+5. 完成 evaluator 结果封装、双轴状态、missing_param per-case 死规则判分（R1a-pre/R1a-post + R2 + R3 + R4 + R5 五条 + E2 取消），按新口径真跑两个 paper-to-model case，解封 TASK-502 整体门槛 5。
 
 前端 UX 仍留 TASK-504；本卡不承诺 `.slx` 成品、运行、收敛或最优调参。
 
@@ -96,6 +108,13 @@ POST /tuning-suggest（只引用 document evidence 或已 resolved 的 user evid
 - PaperNotFoundError / PaperTuningError；
 - 真实 SQLite fault injection；
 - 两个 evaluator case 真跑；
+- evaluator 结果双轴状态（`execution_status ∈ {succeeded, case_failed}` × `verdict ∈ {pass, partial, fail, not_evaluated}`）落地；
+- evaluator case-boundary 异常封装（merge / IO / serialization / provider / fixture 损坏异常 wrap 在 case 边界）；
+- missing_param case per-case 死规则判分（R1a-pre / R1a-post / R2 / R3 / R4 / R5 五条 + E1 保留 + E2 取消）；
+- material_to_plan case 评分 E2 → R3 改名（行为不变，语义 = 无 user_supplied mapping）；
+- per-case scorer 分派 + 统一 `compute_verdict` 汇总函数；
+- 动态 ID 适配器（按 canonical name 绑定 fixture 用户脚本到 actual prompts → 注入运行期 prompt_id）；
+- 按新口径真跑两 case 解封门槛 5（missing case 期望 `succeeded + pass`，material case 期望 `succeeded + pass/partial`）；
 - 03 TASK_INDEX 当前 task 状态同步。
 
 ### 2.2 不做
@@ -110,6 +129,13 @@ POST /tuning-suggest（只引用 document evidence 或已 resolved 的 user evid
 - 修改 parser/sandbox；
 - 修改 overview/explanation 私有结构；
 - 统一 `put/set`、`invalidate/delete` 命名（留后续 chore）。
+- judge / 多 judge 平台 / 判分 DSL（留 v0.2 多 case）；
+- R1b（用户脚本绑定的“产品级”resolved 二次校验，本任 R1a-pre/post 死规则已覆盖）；
+- 漏报盲评（missing 漏报判断，留 v0.2 多 case + judge）；
+- 新 case 样本（本任仅按新口径真跑既有 2 case；新增样本归 v0.2 任务）；
+- 改 material_to_plan case 真值语义（E2 → R3 仅改名，**行为完全保留**）；
+- 修改 production code（`paper_user_supply_service.py` / `paper_plan_helpers.py` / `paper_plan_service.py` 行为不动；evaluator 自写独立 resolved 判据，不调 production helper）；
+- v0.2.3 既有“修改 eval fixtures”不做项保留（fixture 改动归 TASK-500 v0.2.2）；
 
 ### 2.3 红线
 
@@ -720,6 +746,8 @@ return validated
 | `adapters/storage/sqlite_paper_cache.py` | BundleStore + 两个组合 view |
 | `api/routes/paper_query.py` | GET spec/plan |
 | `api/routes/paper_tuning.py` | POST tuning-suggest |
+| `eval/_paper_eval_rules.py` | R1a-pre / R1a-post / R2 / R3 / R4 / R5 五条 missing 死规则独立判分逻辑（刻意不调 production helper，代码独立） |
+| `eval/_paper_eval_dynamic_id_adapter.py` | 按 canonical name 绑定 fixture 用户脚本到 actual prompts → 注入运行期 prompt_id |
 
 ### 12.2 修订生产/文档文件（18）
 
@@ -743,6 +771,9 @@ return validated
 | `api/routes/paper_upload.py` | bundle transaction |
 | `docs/03_TASK_INDEX.md` | 当前 task 状态/进度 |
 | `adapters/storage/schema.py` | schema + migration |
+| `eval/run_paper_eval.py` | case-boundary 异常封装 + 动态 ID adapter 注入点 + per-case scorer 分派 + 双轴状态写入 + ExecutionStatus 改 `succeeded / case_failed` |
+| `eval/_paper_eval_metrics.py` | 删 `compute_b1_b2`；保留 `compute_a1/c2/c3/d1` + `is_unitless`（material 仍用）；可选删 `_compute_b1_b2` 依赖 import |
+| `eval/_paper_eval_csv.py` | `ExecutionStatus` 改 `Literal["succeeded", "case_failed"]`；CSV 列 `B1` / `B2` / `E2` 直接删；`_validate_state` blocked_known_defect 分支删；FIELDNAMES 同步；新增 verdict 自动汇总值传入路径 |
 
 > Codex Stage 0 必须按逐行表重新计数，并在 PR 中用 `git diff --name-only` 报告实际文件；不得照抄估算总数。
 
@@ -762,6 +793,9 @@ return validated
 - `tests/api/test_paper_tuning.py`
 - `tests/api/test_paper_tuning_error_handler.py`
 - `tests/api/test_lifespan_with_sqlite_paper_cache.py`
+- `tests/eval/test_paper_eval_rules.py`（R1a-pre 5 条 + R1a-post 4 组 18 条 + R2 冲突 / 幻觉 + R3 一票否决 + R4 一对一 + R5 全链 canonical 一致独立判据测试）
+- `tests/eval/test_paper_eval_dynamic_id_adapter.py`（canonical name 绑定 + 注入运行期 ID + 不匹配 / 重复 / 0 命中失败路径）
+- `tests/eval/test_paper_eval_dual_axis_status.py`（双轴状态 6 种组合 + case_failed not_evaluated 不变量 + blocked_known_defect 历史读取映射）
 
 ### 12.4 必须 clean
 
@@ -774,6 +808,12 @@ return validated
 - parser/sandbox 全部；
 - overview/explanation 全部；
 - `eval/cases/paper_to_model/` 全部。
+- `eval/cases/paper_to_model/material_to_plan/`（整目录；TASK-500 v0.2.2 也不动 material）
+- `eval/cases/paper_to_model/missing_param/case_01_missing_image_param/r2_truth_source/`（整目录；TASK-500 v0.2.2 新增，本任 v0.2.4 只读）
+- `features/paper/paper_user_supply_service.py`（production merge 行为不动）
+- `features/paper/paper_plan_helpers.py` 中 `resolved_prompt_ids()` 函数（production helper 不动，evaluator 自写独立判据）
+
+> **本任 v0.2.4 在 `eval/` 下改 code 文件 + 新建 code 文件，不改 `eval/cases/` 任何 fixture 文件**（fixture 归 TASK-500 v0.2.2）。
 
 > **本任务卡入仓说明**(v0.2.3 / Codex Stage 0 P2):`docs/tasks/task-503-tuning-suggest-and-cache.md` 本身随本 PR 一起入仓(入仓模式 = create file),可作为 PR 第一个 commit（如 `docs: add TASK-503 task card`）；§ 14.8 范围报告把它列为**预期 docs 文件**,不触发"范围外文件停手"。
 
@@ -816,9 +856,24 @@ return validated
 
 完成 § 10 和 lifespan 装配。
 
-### 阶段 6：R6 + 索引
+### 阶段 6：evaluator 判分改造 + R6 + 索引
 
-真跑全 CI、fault injection、两 case、进程重启持久化；更新 03 索引。
+**阶段 6 内部顺序**（不拆子阶段编号，只内部按序）：
+
+1. **判分代码改造**：
+   - `eval/_paper_eval_csv.py`：`ExecutionStatus` 改 `succeeded / case_failed`；CSV 删 B1/B2/E2 列；`_validate_state` blocked_known_defect 分支删；FIELDNAMES 同步；支持 verdict 自动写入
+   - `eval/_paper_eval_metrics.py`：删 `compute_b1_b2`；清理无效 import
+   - `eval/run_paper_eval.py`：
+     - import `_paper_eval_rules` + `_paper_eval_dynamic_id_adapter`
+     - case-boundary 异常封装（merge / IO / serialization / provider / fixture 损坏 → wrap try/except；finally 写 case_result + actual artifacts + 规则明细 + failure_stage；catch Exception + domain exceptions，**不** catch BaseException）
+     - 动态 ID adapter 注入点（merge 调用前；adapter 失败 → R1a-pre fail + case_result.failure_stage = "r1a_pre"）
+     - per-case scorer 分派（material 走旧 metrics + R3 改名；missing 走 R1a/R2/R3/R4/R5）
+     - `compute_verdict` 汇总：material 同旧 pass/partial 逻辑（R3 替代 E2）；missing 五条死规则全 pass → verdict=pass，任一 fail → verdict=fail，case 异常 → verdict=not_evaluated；blocked_known_defect 历史读取映射 `case_failed + not_evaluated`
+   - 新建 `eval/_paper_eval_rules.py`（R1a-pre 5 / R1a-post 4 组 18 / R2 / R3 / R4 / R5 死规则函数；**独立写代码，不调 `features/paper/paper_plan_helpers.py::resolved_prompt_ids()`**；判据复用 § 7 五条，代码刻意独立）
+   - 新建 `eval/_paper_eval_dynamic_id_adapter.py`（`FixtureUserSuppliedEntry` / `R1aPreFailure` / `AdapterSuccess` dataclass + `bind_user_responses_by_canonical_name()` 函数）
+2. **R6 真跑两 case**：
+   - 全 CI（§ 14.1）+ fault injection（§ 5.3）+ 跨进程重启（§ 14.6）+ evaluator 真跑（§ 14.7 新口径）
+3. **03 索引更新**（标 🔍 等待 PM 验收）
 
 ---
 
@@ -912,7 +967,7 @@ curl -f -X POST "http://localhost:8000/api/v1/papers/${PAPER_ID}/tuning-suggest"
 4. 重新启动；
 5. GET spec/plan 均 200。
 
-### 14.7 evaluator
+### 14.7 evaluator（v0.2.4 新口径）
 
 ```bash
 python eval/run_paper_eval.py \
@@ -924,13 +979,15 @@ python eval/run_paper_eval.py \
   --output-dir /d/tmp/task-503-r6
 ```
 
-硬门槛：
+硬门槛（双轴状态）：
 
-- 两 case 均 `succeeded`；
-- 各自 ✅ 或 🟡；
-- 0 E1/E2；
-- `blocked_known_defect` 不通过；
-- actual JSON、CSV、人工项和 fail reason 全部附 PR。
+- **material_to_plan case**：`execution_status = succeeded` + `verdict ∈ {pass, partial}`（metrics A1 / C2 / C3 / D1 / E1 / R3 通过；R3 = 无 user_supplied mapping，行为 = 旧 E2 material 分支不变；保留人工 A2 / C1 评分）
+- **missing_param case**：`execution_status = succeeded` + `verdict = pass`（R1a-pre 5 条 + R1a-post 18 条 + R2 + R3 + R4 + R5 + E1 全部通过；**无 partial / 无人工 / 无 ✅ 🟡 评分维度**）
+- **0 E1 fail**（两 case 必备产物 + 可评测性守门通过）
+- **R3 替代 E2 一票否决语义**（missing case = 来源真实性；material case = 无 user_supplied）
+- **不通过项**：任一 case `execution_status = case_failed` / `verdict ∈ {fail, not_evaluated}` / `blocked_known_defect` 历史值出现 → 整体 R6 不通过
+- **真异常处理**：merge / IO / serialization / provider / fixture 损坏异常 → case 边界 try/except 捕获 → `execution_status = case_failed + verdict = not_evaluated`；finally 必写 case_result + actual artifacts + 规则明细 + failure_stage
+- **PR 必附**：actual_spec / actual_plan / actual_prompts / actual_updated_plan JSON（两 case 各 4 文件）+ CSV（双轴值）+ 规则明细 JSON（R1a-pre / R1a-post / R2 / R3 / R4 / R5 各 case 各条断言通过 / 失败状态）+ material 人工评分 + 任一 fail / case_failed 的 failure_stage + exception_type + 稳定错误码
 
 ### 14.8 范围报告
 
@@ -986,15 +1043,26 @@ git status --short
 - [ ] rollback failure 不覆盖主异常
 - [ ] process restart 读取成功
 
-### R6
+### R6（v0.2.4 新口径）
 
-- [ ] 实际 CI 全绿
-- [ ] full pytest 全绿
-- [ ] static/privacy/boundary grep 全绿
-- [ ] 两 case succeeded + ✅/🟡 + 0 E1/E2
-- [ ] sample fixtures 零 diff
-- [ ] 完工 report 附 stat/name-only/status
-- [ ] 03 TASK_INDEX 同步
+- [ ] 实际 CI 全绿（§ 14.1）
+- [ ] full pytest 全绿（含新增 3 个 `tests/eval/` 测试文件）
+- [ ] static/privacy/boundary grep 全绿（§ 14.2）
+- [ ] **判分代码改造**完成：
+  - [ ] `_paper_eval_csv.py` ExecutionStatus 改 `succeeded / case_failed`；CSV 列 B1 / B2 / E2 删
+  - [ ] `_paper_eval_metrics.py` `compute_b1_b2` 删
+  - [ ] `run_paper_eval.py` case-boundary 异常封装 + adapter 注入 + per-case scorer + compute_verdict 汇总
+  - [ ] 新建 `_paper_eval_rules.py` R1a/R2/R3/R4/R5 死规则（代码独立）
+  - [ ] 新建 `_paper_eval_dynamic_id_adapter.py` canonical name 绑定 + 运行期 ID 注入
+- [ ] **真跑两 case 解封**：
+  - [ ] material case `execution_status = succeeded` + `verdict ∈ {pass, partial}`
+  - [ ] missing case `execution_status = succeeded` + `verdict = pass`
+  - [ ] 两 case 0 E1 fail
+  - [ ] 两 case 无 `blocked_known_defect`
+- [ ] **fixture 零 diff**：`git diff --name-only origin/main -- eval/cases/paper_to_model/` 应为空（fixture 改动归 TASK-500 v0.2.2，本任不动）
+- [ ] **R2 真值源依赖**：`r2_truth_source/document_facts.json` 存在（TASK-500 v0.2.2 已合并入仓）
+- [ ] 完工 report 附 stat / name-only / status / actual JSON / CSV / 规则明细
+- [ ] 03 TASK_INDEX 同步（标 🔍 等 PM 验收）
 
 ---
 
@@ -1005,7 +1073,10 @@ git status --short
 3. **现有 UserSupplyService 与 core alias 不兼容**：只允许兼容 re-export/类型替换；不得改公开 API。
 4. **LLM typed error 当前实现与任务卡不同**：以 main 的既有 LLMError handler 映射为真值，保留全部既有 leaf，不统一包装。
 5. **SQLite fault injection 难以稳定触发**：在 adapter 内注入 execute hook/fake connection，但必须至少有一条真实 SQLite transaction rollback 集成测试，不可只 mock cache。
-6. **真实 case 不达门槛**：走决策 15 diagnose-before-fix，停手报告；不得把 `blocked_known_defect` 改名为 pass。
+6. **真实 case 不达门槛**：走决策 15 diagnose-before-fix，停手报告；**`blocked_known_defect` 不再作新 execution 状态，历史读取自动映射为 `case_failed + not_evaluated`，门槛不通过**（对应 Op 7.1 双轴）；不得把 fail / case_failed 包装为 pass。
+7. **R2 真值源未到位**：若 TASK-500 v0.2.2 未合并入仓 / `r2_truth_source/document_facts.json` 不存在 → 停手报 PM，不得自创真值源或硬编码 15 项字面（违反 ABAA 范围归属 + 设计稿 § 5 单向前置）。
+8. **动态 ID adapter / case-boundary 异常封装设计与 main production 行为冲突**：取证 15 + 16 已锁定 main `paper_user_supply_service.py:92-93 parameter_name_mismatch` 校验 + `paper_plan_service.py MISS-{index:03d}` 生成方式；若 Codex 实施期发现 main HEAD 已变 → 停手报 PM，不得 silently 适配。
+9. **R1a-post 旁损断言触发 production code 既有 bug**：若两 case 真跑 R1a-post-3.x 旁损断言 fail，且根因在 production merge 副作用 → 决策 15 + 决策 21 边界，纳入 production 修订（可能触发新 task 或本任范围扩展，需 PM 拍）；不在 evaluator 兜底掩盖。
 
 ---
 
@@ -1027,6 +1098,12 @@ git status --short
 - **D14**（R1 三审 P0）：EvidenceTagger 保留既有 `validate_for_spec(evidence, spec)`（generate-time + 冻结 UserSupplyService 用），**新增** `validate_for_record(evidence, record)`（仅 tuning 用，含 resolved provenance 校验）；两方法并存，不合并不删除。
 - **D15**（v0.2.3 Stage 0 P0）：§4 dispatcher **重写为 ordered `_MIGRATIONS` 模式（方案 B1）**，替换 main 既有 ad-hoc 串行 dispatcher，折叠 `_migrate_v1_to_v2` / `_migrate_v2_to_v3` 进注册表、剥离其内部 version 写入、修“旧库先跑 latest DDL”半迁移 bug。blast radius 扩到 TASK-310 迁移路径，由 § 4.4 迁移测试矩阵（含 v3→4 保留 teaching_units）兜底。备选 B2（最小追加、保留 bug）若 PM 否决重构再切换。
 - **D16**（v0.2.3 Stage 0 P0）：`paper_plan_composer.yaml` 版本 **v0.2 → v0.3**（main 已是 v0.2 = TASK-502 R6 paper_reference 嵌套约束），v0.3 **保留** v0.2 约束 + **追加**缺参覆盖 contract，不覆盖。
+- **D17**（v0.2.4）：**E2 取消，职责拆分**：E2 旧 “response_ids == expected_ids 集合相等 + len(user_mappings) == len(expected_ids)” 集合相等语义死锁动态 ID；拆为 R3（来源真实性一票否决：目标 mapping 标 user_supplied / user evidence 关联运行期 actual prompt ID / 不带 locator-excerpt / 用户值不出现在 document_extracted）+ R1a-post（写回值字段级断言）+ fixture/schema 输入校验（用户值非空）+ R4（全 mapping 一对一基数）；**material case E2 改名 material R3，行为完全保留**（语义 = 无 user_supplied mapping）。CSV 列 E2 直接删，不保留兼容别名（D-502 拍板）。
+- **D18**（v0.2.4）：**missing_param 五条死规则全自动判分**：R1a-pre（5 条）+ R1a-post（4 组 18 条）+ R2（冲突 / 幻觉真值源裁决）+ R3（来源真实性一票否决）+ R4（一对一基数）+ R5（全链 canonical name 一致）+ E1（必要产物 + 可评测性守门保留）。**无 partial / 无人工 / 无 ✅ 🟡 / 无 judge**（judge 留 v0.2 多 case）。evaluator R1a-post resolved 判据**刻意独立写代码，不调 `features/paper/paper_plan_helpers.py::resolved_prompt_ids()`**（防生产评测同错同过）。
+- **D19**（v0.2.4）：**evaluator 双轴状态**：`execution_status ∈ {succeeded, case_failed}` × `verdict ∈ {pass, partial, fail, not_evaluated}`；不变量 `case_failed → verdict = not_evaluated`，`succeeded → verdict ∈ {pass, partial, fail}`；missing case 不产 partial；`blocked_known_defect` 不再作新 execution 状态，历史读取映射 `case_failed + not_evaluated`。**判分错 = `succeeded + fail`**（不是 case_failed），case_failed 仅用于真异常（merge 抛错 / IO / serialization / provider / fixture 损坏 / 产物缺失）。详 `docs/decisions/20260620-25-evaluator-dual-axis-and-per-case-scorer.md` § 2-3。
+- **D20**（v0.2.4）：**evaluator case-boundary 异常封装与归因分离**：对主动执行、可归属单 case 的公开领域异常，在 case 边界封装并写结构化结果（失败阶段 + 异常类型 + 稳定错误码），不在 artifact 写出前中断；配置 / 依赖 / 资源 / 编程类致命异常可上抛但保留 run-level 诊断。异常类型 / 错误码只描述症状，不自动证明根因属 production / fixture / evaluator；fixture 阻塞仅在独立 fixture 一致性检查 / 经批准 case 级缺陷登记 / 等价可复核证据成立时使用，证据不足记未归因 case failure 且不通过门槛。catch Exception + domain exceptions，**不** catch BaseException（KeyboardInterrupt / SystemExit 直接上抛）。详 decision 25 § 4。
+- **D21**（v0.2.4）：**动态 ID 适配器**：evaluator 按 canonical name（parameter_name）绑定 fixture 用户脚本到 actual prompts → 注入运行期 prompt_id → 交 merge；fixture `prompt_id` 字面保留（便于人工核对历史 / 开发期参考），但 adapter 不读；merge 内部 `_validate_merge_requests` 的 `parameter_name_mismatch` 校验保留，adapter 注入后 parameter_name 仍逐字一致。
+- **D22**（v0.2.4）：**judge 留 v0.2 多 case，本任硬契约用确定性死规则**：judge / 漏报盲评是 v0.2 多 case 能力，不在本任（v0.1 固定单 case）；只有 case 明确承担**开放世界识别完整性**职责且**无可靠客观 oracle** 时才评估引入 judge；**硬契约始终由确定性规则验证**。本任 missing 单 case 用 R1a/R2/R3/R4/R5 五条死规则；material 单 case 用既有 metrics + R3。
 
 ---
 
@@ -1037,5 +1114,16 @@ git status --short
 - v0.2.1（2026-06-19）：GPT R1 二审 conditional pass 后代集成 6 P0 + 9 P1 + 4 P2；待 R1 三审。
 - v0.2.2（2026-06-19）：架构师 R1 三审。二审 19 项确认关闭 18 项；抓出 1 项 v0.2.1 集成新引入的 P0（`validate_for_spec` 被“签名收口”删除 → generate-time 无校验器 + 冻结 UserSupplyService 崩），改为 `validate_for_spec` + `validate_for_record` 双方法并存（§ 9.4 / D14）。其余 v0.2.1 内容未改动。**R1 三审 P0 = 0，三轮收敛（决策 12 v0.4 § 7.1 R 轮稳态上限 3 轮）。**
 - v0.2.3（2026-06-19）：Codex Stage 0 只读摸底反馈（理解 6/6，实测 14 项，抓 2 P0 + 2 P1 + 3 P2）。架构师据 main 实测修订：§4 schema 目标 2→3 改为 **3→4**（main 已 v3 = TASK-310 teaching_units），dispatcher 重写为 ordered `_MIGRATIONS` 修半迁移 bug（D15），迁移测试加 v3→4 保留 teaching_units；composer prompt v0.1.3→v0.2 改为 **v0.2→v0.3**（main 已 v0.2，保留既有约束 + 追加缺参覆盖，D16）；§14.1 CI 用实测命令；`ERROR_MAP` 名改“既有 handler 映射”+ 实测 HTTP 码；§12 加任务卡入仓说明。**两 P0 均为架构师无 checkout 凭知识库起稿的陈旧假设，Stage 0 摸底正常拦下，未流入实现。**
+- v0.2.4（2026-06-20）：**设计稿 v1 + 取证 15 + 取证 16 + PM D-501~D-512 全拍闭环修订**（架构师第 49 任接手）。
+  - **§ 1 第 5 项扩写**：R6 真跑 → evaluator 判分代码改造 + 双轴状态 + per-case scorer + 动态 ID adapter + R1a/R2/R3/R4/R5 死规则 + E2 取消 + case-boundary 异常封装 + 真跑两 case 解封
+  - **§ 2.1 必须做追加 7 项；§ 2.2 不做追加 7 项（保留“修改 eval fixtures”原项）；§ 12.1 新增 2 文件；§ 12.2 修订 3 eval code 文件；§ 12.3 新增 3 测试文件；§ 12.4 必须 clean 加 4 红线项**
+  - **§ 13 阶段 6 内部扩写**（不拆 6a/6b，内部按序“判分代码改造 → R6 真跑 → 03 索引”）
+  - **§ 14.7 evaluator 门槛重写**：双轴口径 + missing succeeded+pass / material succeeded+pass/partial
+  - **§ 15 验收 R6 重写**：加判分改造 / 真跑双轴 / fixture 零 diff / R2 真值源依赖 checkbox
+  - **§ 16 风险加 7-9 项**：R2 真值源 / adapter / R1a-post 旁损边界
+  - **§ 17 决策日志加 D17-D22 共 6 项**
+  - **新长期 decision 25 同期入仓**：`docs/decisions/20260620-25-evaluator-dual-axis-and-per-case-scorer.md`
+  - **依赖**：TASK-500 v0.2.2 微补丁先合 → 本任 rebase
+  - **K_28a 自防生效**（本版 +0）：取证 15 + 16 提供 main 实测源码 + 行号，设计稿断言全部锚 § 4 实测，无凭印象写字面进任务卡；架构师设计稿 v1 阶段抓出“12 项 vs 15 项 / decision 编号 23 vs 25”两处 K_28a 同源错位（分别由取证 16 § A1 / § C1 拦下，未流入 v0.2.4 实施）
 
 **下一步**：PM 复核 v0.2.3 两处 P0 修订（尤其 D15 dispatcher 重构 blast radius 是否接受 B1）→ 把 v0.2.3 覆盖入仓 → 派 Codex 进 Stage 1-6（Codex 已完成 Stage 0，A/B/D 全清,可直接实施）。Codex 实施期对**任何新的** main 实际与任务卡不符仍按决策 15 停手。

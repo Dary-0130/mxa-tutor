@@ -72,10 +72,16 @@ class EvalMarkdownParser(DocumentParser):
                 continue
             seen.add(figure_id)
             ids.append(figure_id)
+            caption = (match.group(2) or "").strip()
+            caption_detail = _figure_line_detail(raw_text, match.end())
+            if caption and caption_detail:
+                caption = f"{caption}（{caption_detail}）"
+            elif caption_detail:
+                caption = caption_detail
             placeholders.append(
                 FigurePlaceholder(
                     figure_id=figure_id,
-                    caption=(match.group(2) or "").strip(),
+                    caption=caption,
                     paper_section_id=None,
                 )
             )
@@ -101,3 +107,16 @@ class EvalMarkdownParser(DocumentParser):
                 start=1,
             )
         ]
+
+
+def _figure_line_detail(raw_text: str, match_end: int) -> str:
+    line_end = raw_text.find("\n", match_end)
+    if line_end == -1:
+        line_end = len(raw_text)
+    tail = raw_text[match_end:line_end].strip()
+    if not tail:
+        return ""
+    tail = tail.lstrip("*").strip()
+    if tail.startswith("(") and tail.endswith(")"):
+        tail = tail[1:-1].strip()
+    return tail.strip()

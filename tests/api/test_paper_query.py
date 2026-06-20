@@ -101,9 +101,7 @@ def test_get_paper_plan_returns_remaining_prompts_from_resolved_helper(
         "MISS-1",
         "MISS-2",
     ]
-    assert [prompt["prompt_id"] for prompt in body["remaining_missing_prompts"]] == [
-        "MISS-2"
-    ]
+    assert [prompt["prompt_id"] for prompt in body["remaining_missing_prompts"]] == ["MISS-2"]
 
 
 def test_get_paper_plan_spec_only_returns_404(tmp_path: Path) -> None:
@@ -164,9 +162,9 @@ def test_user_supply_updates_sqlite_view_then_get_and_tuning_read_updated_record
     assert supply_response.status_code == 200
     assert plan_response.status_code == 200
     assert tuning_response.status_code == 200
-    assert [prompt["prompt_id"] for prompt in plan_response.json()["remaining_missing_prompts"]] == [
-        "MISS-2"
-    ]
+    assert [
+        prompt["prompt_id"] for prompt in plan_response.json()["remaining_missing_prompts"]
+    ] == ["MISS-2"]
     assert tuning_service.records
     mapping = tuning_service.records[0].plan.parameter_mapping[0]
     assert mapping.paper_param_name == "H"

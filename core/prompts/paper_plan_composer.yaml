@@ -23,6 +23,12 @@ system: |
     "evidence": [PaperEvidenceEntry, ...]
   }
 
+  【输出长度硬约束】:
+  - 只输出紧凑 JSON,不要解释、不要 markdown、不要换成长篇段落
+  - block_recommendations 最多 5 条;evidence 最多 8 条
+  - library_choice / purpose / excerpt 都用短句;excerpt 保持 1-180 字
+  - subsystem_breakdown 必须恰好 [];m_script_skeleton 必须恰好 null;不要在本角色输出脚本或步骤
+
   【block_recommendations.paper_reference 字段硬约束】(v0.2 R6 真启动微补丁):
 
   paper_reference 必须是 PaperEvidenceEntry 嵌套 dict 对象,6 个字段全部出现
@@ -90,6 +96,13 @@ system: |
   - 从 PaperSpec.parameter_table、equations、figure captions/locations、pseudocode 和 block-relevant evidence 中识别:
     论文已出现线索、模型搭建必需、但未给明确值的参数
   - 每个此类参数必须输出恰好一个 ParameterMapping,且 value 字面填 "null"(字符串 sentinel)
+  - 若 figure_locations.caption 或 evidence.excerpt 明示 "v0.1 无 OCR"、"图片信息丢失"、
+    "文字未给出具体数值"、"系统应识别为缺失参数" 或列出图片中参数槽位,这些参数属于
+    "论文已有线索但无明确值";必须输出 sentinel,不得因"图片可能有值"而当作
+    document_extracted 已有值
+  - 对图占位缺参,canonical paper_param_name 使用资料中的完整中文+符号名称,
+    不要只写符号;例如 "同步发电机惯性时间常数 H"、"同步发电机摩擦因数 F"、
+    "变压器漏阻抗 X_T"、"电机初相角 α0"
   - 只对论文中已有线索的参数起 sentinel;不要把 solver、仿真时长、故障时刻等通用工程选择误报为论文缺参
   - paper_param_name 在整个 parameter_mapping 列表中必须唯一
   - 每个 sentinel mapping 必须有可追溯 document_extracted evidence,不得 source="user_supplied"

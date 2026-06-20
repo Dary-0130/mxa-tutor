@@ -112,7 +112,9 @@ class SqlitePaperBundleStore(PaperBundleStore):
 
         if row is None:
             return None
-        return self._load(self._SPEC_ADAPTER, row["paper_spec_json"], "paper_spec_deserialize_failed")
+        return self._load(
+            self._SPEC_ADAPTER, row["paper_spec_json"], "paper_spec_deserialize_failed"
+        )
 
     async def get_plan_record(self, paper_id: str) -> PaperPlanRecord | None:
         async with self._connect() as conn:

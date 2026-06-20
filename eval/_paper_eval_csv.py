@@ -6,8 +6,8 @@ import csv
 from pathlib import Path
 from typing import Any, Literal
 
-ExecutionStatus = Literal["succeeded", "blocked_known_defect"]
-Verdict = Literal["pass", "partial", "fail"]
+ExecutionStatus = Literal["succeeded", "case_failed"]
+Verdict = Literal["pass", "partial", "fail", "not_evaluated"]
 
 FIELDNAMES = [
     "case_id",
@@ -17,15 +17,13 @@ FIELDNAMES = [
     "O1_plan_executability",
     "O2_user_supply_update",
     "A1_field_coverage",
-    "B1_missing_recall",
-    "B2_missing_precision",
     "C2_block_coverage",
     "C3_param_mapping_coverage",
     "D1_has_params",
     "D1_has_equations",
     "D1_has_plot",
     "E1_evidence_invariant",
-    "E2_user_supplied_source",
+    "R3_source_authenticity",
     "A2_no_hallucination_manual",
     "C1_library_choice_manual",
     "origin_inherited_notes",
@@ -38,12 +36,12 @@ def write_paper_eval_csv(
     layer2_metrics: dict[str, Any],
     layer2_manual: dict[str, Any],
     execution_status: ExecutionStatus,
-    verdict: Verdict | None,
+    verdict: Verdict,
     failure: str | None,
     output_path: Path,
 ) -> None:
     """Write one paper-to-model evaluation row."""
-    _validate_state(execution_status=execution_status, failure=failure)
+    _validate_state(execution_status=execution_status, verdict=verdict, failure=failure)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     row = {
         "case_id": case_id,
@@ -53,15 +51,13 @@ def write_paper_eval_csv(
         "O1_plan_executability": _csv_value(layer1_outcome.get("O1", "")),
         "O2_user_supply_update": _csv_value(layer1_outcome.get("O2", "")),
         "A1_field_coverage": _csv_value(layer2_metrics.get("A1", "")),
-        "B1_missing_recall": _csv_value(layer2_metrics.get("B1", "")),
-        "B2_missing_precision": _csv_value(layer2_metrics.get("B2", "")),
         "C2_block_coverage": _csv_value(layer2_metrics.get("C2", "")),
         "C3_param_mapping_coverage": _csv_value(layer2_metrics.get("C3", "")),
         "D1_has_params": _csv_value(layer2_metrics.get("D1", {}).get("has_params", "")),
         "D1_has_equations": _csv_value(layer2_metrics.get("D1", {}).get("has_equations", "")),
         "D1_has_plot": _csv_value(layer2_metrics.get("D1", {}).get("has_plot", "")),
         "E1_evidence_invariant": _csv_value(layer2_metrics.get("E1", "")),
-        "E2_user_supplied_source": _csv_value(layer2_metrics.get("E2", "")),
+        "R3_source_authenticity": _csv_value(layer2_metrics.get("R3", "")),
         "A2_no_hallucination_manual": _csv_value(layer2_manual.get("A2", "")),
         "C1_library_choice_manual": _csv_value(layer2_manual.get("C1", "")),
         "origin_inherited_notes": _csv_value(layer2_manual.get("origin_inherited_notes", "")),
@@ -72,11 +68,20 @@ def write_paper_eval_csv(
         writer.writerow(row)
 
 
-def _validate_state(*, execution_status: ExecutionStatus, failure: str | None) -> None:
+def _validate_state(
+    *,
+    execution_status: ExecutionStatus,
+    verdict: Verdict,
+    failure: str | None,
+) -> None:
     if execution_status == "succeeded" and failure is not None:
         raise ValueError("succeeded rows must not include failure")
-    if execution_status == "blocked_known_defect" and not failure:
-        raise ValueError("blocked_known_defect rows require failure")
+    if execution_status == "succeeded" and verdict == "not_evaluated":
+        raise ValueError("succeeded rows require pass/partial/fail verdict")
+    if execution_status == "case_failed" and not failure:
+        raise ValueError("case_failed rows require failure")
+    if execution_status == "case_failed" and verdict != "not_evaluated":
+        raise ValueError("case_failed rows require not_evaluated verdict")
 
 
 def _csv_value(value: Any) -> Any:

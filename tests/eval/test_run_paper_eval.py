@@ -109,10 +109,7 @@ def test_compute_case_metrics_keeps_golden_independent_by_metric() -> None:
         actual_updated_plan=None,
         golden_spec=base_golden_spec,
         golden_plan=plan,
-        golden_prompts=None,
         golden_updated_plan=None,
-        response_prompt_ids=[],
-        failure=None,
     )
     changed = subject._compute_case_layer_metrics(
         case_kind="material_to_plan",
@@ -122,10 +119,7 @@ def test_compute_case_metrics_keeps_golden_independent_by_metric() -> None:
         actual_updated_plan=None,
         golden_spec=changed_golden_spec,
         golden_plan=plan,
-        golden_prompts=None,
         golden_updated_plan=None,
-        response_prompt_ids=[],
-        failure=None,
     )
 
     assert changed["A1"] != base["A1"]
@@ -166,7 +160,7 @@ async def test_run_case_calls_spec_and_plan_services_without_golden_self_fallbac
 
 
 @pytest.mark.asyncio
-async def test_known_blocked_records_na_metrics_and_no_fake_prompts() -> None:
+async def test_generation_error_records_case_failed_and_no_fake_prompts() -> None:
     result = await subject._run_case(
         MISSING_CASE,
         subject.EvaluatorServices(
@@ -180,38 +174,41 @@ async def test_known_blocked_records_na_metrics_and_no_fake_prompts() -> None:
         CASES_ROOT,
     )
 
-    assert result.execution_status == "blocked_known_defect"
+    assert result.execution_status == "case_failed"
+    assert result.verdict == "not_evaluated"
     assert result.failure == "missing_binding_not_found"
     assert result.actual_plan is None
     assert result.actual_prompts is None
     assert result.actual_updated_plan is None
     assert result.layer2_metrics == {
         "A1": "N/A",
-        "B1": "N/A",
-        "B2": "N/A",
         "C2": "N/A",
         "C3": "N/A",
         "D1": {"has_params": None, "has_equations": None, "has_plot": None},
         "E1": "N/A",
-        "E2": "N/A",
+        "R3": "N/A",
     }
 
 
 @pytest.mark.asyncio
-async def test_unknown_generation_error_reraises() -> None:
-    with pytest.raises(PaperPlanGenerationError, match="missing_binding_ambiguous"):
-        await subject._run_case(
-            MISSING_CASE,
-            subject.EvaluatorServices(
-                spec_service=FakeSpecService(_spec()),
-                plan_service=FakePlanService(
-                    error=PaperPlanGenerationError("missing_binding_ambiguous")
-                ),
-                plan_cache=InMemoryPaperPlanCache(),
-                user_supply_service=object(),
+async def test_unknown_generation_error_is_case_boundary_failure() -> None:
+    result = await subject._run_case(
+        MISSING_CASE,
+        subject.EvaluatorServices(
+            spec_service=FakeSpecService(_spec()),
+            plan_service=FakePlanService(
+                error=PaperPlanGenerationError("missing_binding_ambiguous")
             ),
-            CASES_ROOT,
-        )
+            plan_cache=InMemoryPaperPlanCache(),
+            user_supply_service=object(),
+        ),
+        CASES_ROOT,
+    )
+
+    assert result.execution_status == "case_failed"
+    assert result.verdict == "not_evaluated"
+    assert result.failure == "missing_binding_ambiguous"
+    assert result.failure_stage == "plan_generate"
 
 
 def test_user_response_batch_fails_fast_on_wrong_key_or_empty_list() -> None:
@@ -234,7 +231,7 @@ async def test_missing_success_passes_pydantic_models_to_merge() -> None:
             plan_service=FakePlanService(
                 plan=_plan(),
                 prompts=prompts,
-                bindings=[],
+                bindings=_bindings_for_prompts(prompts),
             ),
             plan_cache=InMemoryPaperPlanCache(),
             user_supply_service=supply_service,
@@ -248,7 +245,7 @@ async def test_missing_success_passes_pydantic_models_to_merge() -> None:
     assert not any(isinstance(response, dict) for response in responses)
     assert result.execution_status == "succeeded"
     assert result.layer2_metrics["E1"] == "Pass"
-    assert result.layer2_metrics["E2"] == "Pass"
+    assert result.layer2_metrics["R3"] == "Pass"
 
 
 def test_schema_wrapper_serialization_succeeds_and_validation_errors_escape() -> None:
@@ -270,112 +267,10 @@ def test_missing_case_without_golden_spec_marks_a1_na() -> None:
         actual_updated_plan=_plan_dict(user_mapping_count=0),
         golden_spec=None,
         golden_plan=None,
-        golden_prompts=[],
         golden_updated_plan=_plan_dict(user_mapping_count=0),
-        response_prompt_ids=[],
-        failure=None,
     )
 
     assert metrics["A1"] == "N/A"
-
-
-def test_e2_missing_requires_exact_responses_mappings_and_values() -> None:
-    prompts = [{"prompt_id": f"MISS-{index:03d}"} for index in range(1, 7)]
-    response_ids = [f"MISS-{index:03d}" for index in range(1, 7)]
-
-    assert (
-        subject._compute_e2(
-            case_kind="missing_param",
-            plan=_plan_dict(user_mapping_count=6),
-            golden_prompts=prompts,
-            response_prompt_ids=response_ids[:1],
-            failure=None,
-        )
-        == "Fail"
-    )
-    assert (
-        subject._compute_e2(
-            case_kind="missing_param",
-            plan=_plan_dict(user_mapping_count=6),
-            golden_prompts=prompts,
-            response_prompt_ids=response_ids,
-            failure=None,
-        )
-        == "Pass"
-    )
-    assert (
-        subject._compute_e2(
-            case_kind="missing_param",
-            plan=_plan_dict(user_mapping_count=6),
-            golden_prompts=prompts,
-            response_prompt_ids=[*response_ids, "MISS-999"],
-            failure=None,
-        )
-        == "Fail"
-    )
-    assert (
-        subject._compute_e2(
-            case_kind="missing_param",
-            plan=_plan_dict(user_mapping_count=6),
-            golden_prompts=prompts,
-            response_prompt_ids=[*response_ids[:5], response_ids[0]],
-            failure=None,
-        )
-        == "Fail"
-    )
-    assert (
-        subject._compute_e2(
-            case_kind="missing_param",
-            plan=_plan_dict(user_mapping_count=5),
-            golden_prompts=prompts,
-            response_prompt_ids=response_ids,
-            failure=None,
-        )
-        == "Fail"
-    )
-    assert (
-        subject._compute_e2(
-            case_kind="missing_param",
-            plan=_plan_dict(user_mapping_count=7),
-            golden_prompts=prompts,
-            response_prompt_ids=response_ids,
-            failure=None,
-        )
-        == "Fail"
-    )
-    assert (
-        subject._compute_e2(
-            case_kind="missing_param",
-            plan=_plan_dict(user_mapping_count=6, empty_value_at=2),
-            golden_prompts=prompts,
-            response_prompt_ids=response_ids,
-            failure=None,
-        )
-        == "Fail"
-    )
-
-
-def test_e2_material_flags_user_supplied_pollution() -> None:
-    assert (
-        subject._compute_e2(
-            case_kind="material_to_plan",
-            plan=_plan_dict(user_mapping_count=0),
-            golden_prompts=None,
-            response_prompt_ids=[],
-            failure=None,
-        )
-        == "N/A"
-    )
-    assert (
-        subject._compute_e2(
-            case_kind="material_to_plan",
-            plan=_plan_dict(user_mapping_count=1),
-            golden_prompts=None,
-            response_prompt_ids=[],
-            failure=None,
-        )
-        == "Fail"
-    )
 
 
 def test_write_actual_artifacts_serializes_blocked_nulls(tmp_path: Path) -> None:
@@ -386,9 +281,15 @@ def test_write_actual_artifacts_serializes_blocked_nulls(tmp_path: Path) -> None
         actual_plan=None,
         actual_prompts=None,
         actual_updated_plan=None,
+        actual_bindings=None,
         layer2_metrics={},
+        rule_details={"case_failure": {"status": "n/a"}},
         failure="missing_binding_not_found",
-        execution_status="blocked_known_defect",
+        execution_status="case_failed",
+        verdict="not_evaluated",
+        failure_stage="plan_generate",
+        exception_type="PaperPlanGenerationError",
+        error_code="missing_binding_not_found",
     )
 
     subject._write_actual_artifacts(result, tmp_path, "case")
@@ -401,6 +302,8 @@ def test_write_actual_artifacts_serializes_blocked_nulls(tmp_path: Path) -> None
     assert (
         json.loads((tmp_path / "case.actual_updated_plan.json").read_text(encoding="utf-8")) is None
     )
+    assert (tmp_path / "case.rule_details.json").is_file()
+    assert (tmp_path / "case.case_result.json").is_file()
 
 
 def test_csv_writes_status_failure_and_rejects_invalid_state(tmp_path: Path) -> None:
@@ -411,26 +314,27 @@ def test_csv_writes_status_failure_and_rejects_invalid_state(tmp_path: Path) -> 
         layer1_outcome={"O1": "", "O2": ""},
         layer2_metrics={
             "A1": "N/A",
-            "B1": None,
-            "B2": 1 / 3,
             "C2": "N/A",
             "C3": "N/A",
             "D1": {"has_params": None, "has_equations": None, "has_plot": None},
             "E1": "N/A",
-            "E2": "N/A",
+            "R3": "N/A",
         },
         layer2_manual={"A2": "", "C1": "", "origin_inherited_notes": ""},
-        execution_status="blocked_known_defect",
-        verdict=None,
+        execution_status="case_failed",
+        verdict="not_evaluated",
         failure="missing_binding_not_found",
         output_path=csv_path,
     )
 
     row = next(csv.DictReader(csv_path.open(encoding="utf-8", newline="")))
-    assert row["execution_status"] == "blocked_known_defect"
+    assert row["execution_status"] == "case_failed"
+    assert row["verdict"] == "not_evaluated"
     assert row["failure"] == "missing_binding_not_found"
-    assert row["B1_missing_recall"] == "N/A"
-    assert row["B2_missing_precision"] == "0.3333"
+    assert "B1_missing_recall" not in row
+    assert "B2_missing_precision" not in row
+    assert "E2_user_supplied_source" not in row
+    assert row["R3_source_authenticity"] == "N/A"
     assert row["D1_has_params"] == "N/A"
     with pytest.raises(ValueError):
         write_paper_eval_csv(
@@ -439,7 +343,7 @@ def test_csv_writes_status_failure_and_rejects_invalid_state(tmp_path: Path) -> 
             layer2_metrics={},
             layer2_manual={},
             execution_status="succeeded",
-            verdict=None,
+            verdict="pass",
             failure="missing_binding_not_found",
             output_path=tmp_path / "bad-succeeded.csv",
         )
@@ -449,8 +353,8 @@ def test_csv_writes_status_failure_and_rejects_invalid_state(tmp_path: Path) -> 
             layer1_outcome={},
             layer2_metrics={},
             layer2_manual={},
-            execution_status="blocked_known_defect",
-            verdict=None,
+            execution_status="case_failed",
+            verdict="fail",
             failure=None,
             output_path=tmp_path / "bad-blocked.csv",
         )
@@ -488,18 +392,22 @@ async def test_main_configures_provider_and_writes_csv_plus_artifacts(
             actual_plan={"parameter_mapping": []},
             actual_prompts=[],
             actual_updated_plan=None,
+            actual_bindings=[],
             layer2_metrics={
                 "A1": 1.0,
-                "B1": "N/A",
-                "B2": "N/A",
                 "C2": 1.0,
                 "C3": 1.0,
                 "D1": {"has_params": None, "has_equations": None, "has_plot": None},
                 "E1": "Pass",
-                "E2": "N/A",
+                "R3": "Pass",
             },
+            rule_details={"r3": {"status": "pass", "checks": []}},
             failure=None,
             execution_status="succeeded",
+            verdict="pass",
+            failure_stage=None,
+            exception_type=None,
+            error_code=None,
         )
 
     monkeypatch.setattr(subject, "AppSettings", FakeSettings)
@@ -529,6 +437,8 @@ async def test_main_configures_provider_and_writes_csv_plus_artifacts(
     assert (tmp_path / f"{slug}.actual_plan.json").is_file()
     assert (tmp_path / f"{slug}.actual_prompts.json").is_file()
     assert (tmp_path / f"{slug}.actual_updated_plan.json").is_file()
+    assert (tmp_path / f"{slug}.rule_details.json").is_file()
+    assert (tmp_path / f"{slug}.case_result.json").is_file()
 
 
 def test_reverse_grep_old_helper_name_is_not_reintroduced() -> None:
@@ -622,6 +532,17 @@ def _missing_prompts_from_golden() -> list[MissingParameterPrompt]:
         MISSING_CASE / "input" / "expected_missing_prompts.json"
     )
     return [MissingParameterPromptModel.model_validate(prompt).to_domain() for prompt in prompts]
+
+
+def _bindings_for_prompts(prompts: list[MissingParameterPrompt]) -> list[MissingBindingModel]:
+    return [
+        MissingBindingModel(
+            prompt_id=prompt.prompt_id,
+            paper_param_name=prompt.parameter_name,
+            model_param_name=f"model.param.{index}",
+        )
+        for index, prompt in enumerate(prompts, start=1)
+    ]
 
 
 def _doc_ref(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 
 from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL
@@ -27,20 +26,6 @@ def compute_a1_field_coverage(actual_spec: Any, golden_spec: Any) -> float:
         return 1.0
     covered = sum(1 for field in required_fields if _has_value(actual_spec, field))
     return covered / len(required_fields)
-
-
-def compute_b1_b2(
-    actual_prompts: Iterable[Any], golden_prompts: Iterable[Any]
-) -> tuple[float, float]:
-    """B1 recall and B2 precision for MissingParameterPrompt parameter names."""
-    actual_names = {_norm(_field(prompt, "parameter_name")) for prompt in actual_prompts}
-    golden_names = {_norm(_field(prompt, "parameter_name")) for prompt in golden_prompts}
-    actual_names.discard("")
-    golden_names.discard("")
-
-    recall = 1.0 if not golden_names else len(actual_names & golden_names) / len(golden_names)
-    precision = 1.0 if not actual_names else len(actual_names & golden_names) / len(actual_names)
-    return recall, precision
 
 
 def compute_c2_block_coverage(actual_plan: Any, golden_plan: Any) -> float:

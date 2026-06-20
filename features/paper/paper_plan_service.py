@@ -103,7 +103,9 @@ class PaperPlanService:
         role_name: str,
     ) -> dict[str, Any]:
         """Call the sync TextProvider behind the single thread bridge."""
-        try:
+        last_json_error: json.JSONDecodeError | None = None
+        payload: Any = None
+        for attempt in range(1, 3):
             response = await asyncio.to_thread(
                 self._text_provider.chat,
                 messages,
@@ -112,12 +114,23 @@ class PaperPlanService:
                 max_tokens=self._max_tokens,
             )
             response_text = vars(response)["text"]
-            payload = json.loads(response_text)
-        except json.JSONDecodeError as exc:
+            try:
+                payload = json.loads(response_text)
+                break
+            except json.JSONDecodeError as exc:
+                last_json_error = exc
+                logger.error(
+                    "paper_plan_json_decode_failed role=%s attempt=%s exc_type=%s",
+                    role_name,
+                    attempt,
+                    type(exc).__name__,
+                )
+        else:
+            assert last_json_error is not None
             logger.error(
-                "paper_plan_json_decode_failed role=%s exc_type=%s",
+                "paper_plan_json_decode_exhausted role=%s exc_type=%s",
                 role_name,
-                type(exc).__name__,
+                type(last_json_error).__name__,
             )
             raise PaperPlanGenerationError(f"role={role_name}: invalid_json") from None
 

@@ -549,10 +549,21 @@ async def test_evidence_tagger_locator_whitelist_fail_raises_502() -> None:
 
 @pytest.mark.asyncio
 async def test_invalid_json_raises_paper_plan_generation_error() -> None:
-    service = PaperPlanService(QueueTextProvider(["not json"]))
+    service = PaperPlanService(QueueTextProvider(["not json", "still not json"]))
 
     with pytest.raises(PaperPlanGenerationError, match="invalid_json"):
         await service._call_llm_json([LLMMessage("system", "x")], "plan_composer")
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_retries_once_then_returns_valid_payload() -> None:
+    provider = QueueTextProvider(["not json", '{"ok": true}'])
+    service = PaperPlanService(provider)
+
+    data = await service._call_llm_json([LLMMessage("system", "x")], "plan_composer")
+
+    assert data == {"ok": True}
+    assert len(provider.calls) == 2
 
 
 @pytest.mark.asyncio
@@ -591,7 +602,7 @@ async def test_logger_uses_error_with_type_name_not_exception(
     monkeypatch.setattr(service_module.logger, "exception", fake_exception)
 
     with pytest.raises(PaperPlanGenerationError):
-        await PaperPlanService(QueueTextProvider(["not json"]))._call_llm_json(
+        await PaperPlanService(QueueTextProvider(["not json", "still not json"]))._call_llm_json(
             [LLMMessage("system", "x")],
             "plan_composer",
         )
@@ -609,10 +620,9 @@ async def test_logger_does_not_leak_llm_response_text(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(service_module.logger, "error", fake_error)
     with pytest.raises(PaperPlanGenerationError):
-        await PaperPlanService(QueueTextProvider(["SECRET_LLM_RAW_TEXT"]))._call_llm_json(
-            [LLMMessage("system", "x")],
-            "plan_composer",
-        )
+        await PaperPlanService(
+            QueueTextProvider(["SECRET_LLM_RAW_TEXT", "SECRET_LLM_RAW_TEXT"])
+        )._call_llm_json([LLMMessage("system", "x")], "plan_composer")
 
     logged_text = " ".join(repr(item) for call in error_calls for item in call[0])
     assert "SECRET_LLM_RAW_TEXT" not in logged_text
