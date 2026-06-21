@@ -42,6 +42,7 @@ from core.interfaces.vector_store import VectorStore
 from features.chat.chat_service import ChatService
 from features.chunking import ChunkingService
 from features.ingest.upload_service import ExtractFn, UploadService
+from features.matlab_bridge import DiagnosticService
 from features.overview import OverviewCache
 from features.overview._teaching_level_policy import TeachingLevelPolicy
 from features.overview._teaching_unit_builder import TeachingUnitBuilder
@@ -62,6 +63,11 @@ def get_settings() -> AppSettings:
     """加载并返回单例 ``AppSettings``。"""
     settings_values: dict[str, Any] = {}
     return AppSettings(**settings_values)
+
+
+def get_matlab_bridge_diagnostic_service() -> DiagnosticService:
+    """Return the stateless MATLAB bridge diagnostic service."""
+    return DiagnosticService()
 
 
 def get_project_store(request: Request) -> ProjectStore:

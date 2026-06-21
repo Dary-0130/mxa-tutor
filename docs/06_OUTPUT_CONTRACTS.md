@@ -546,3 +546,59 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 ```json
 {"evidence_pack_kind": "parameter_context", "paper_section_id": "sec-2"}
 ```
+
+## 13. MATLAB Bridge Diagnostic 契约(TASK-510)
+
+`BridgeDiagnostic` 只证明 MATLAB Add-on 到后端的诊断传输桥可达。它不接 MATLAB Engine、不调用 LLM、不生成报错解释、不回传建议、不持久化用户正文。
+
+**状态**:v0.3-a 冻结。
+
+| 同步项 | 路径 |
+|---|---|
+| Domain | `core/domain/bridge_diagnostic.py` |
+| Pydantic wrapper | `features/matlab_bridge/bridge_diagnostic_schemas.py` |
+| JSON Schema | `schemas/bridge_diagnostic_request.schema.json` / `schemas/bridge_diagnostic_receipt.schema.json` / `schemas/bridge_error_response.schema.json` |
+| 导出脚本 | `scripts/export_bridge_schemas.py` |
+| Freeze 测试 | `tests/features/matlab_bridge/test_bridge_diagnostic_schema_freeze.py` |
+| 边界测试 | `tests/features/matlab_bridge/test_bridge_diagnostic_schemas.py` |
+
+### 13.1 BridgeDiagnosticRequest
+
+请求端点:`POST /api/v1/bridge/diagnostic`,`Content-Type: application/json`。
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `protocol_version` | `Literal["0.3-a"]` | 必填 | v0.3-a 传输桥协议 |
+| `request_id` | UUID4 | 必填 | 客户端生成的请求 ID |
+| `diagnostic_kind` | `Literal["manual_error"]` | 必填 | 用户手动粘贴错误文本 |
+| `matlab_release` | string | `^R20[0-9]{2}[ab]$` | MATLAB release,本卡实测 R2026a |
+| `client_version` | string | `^[A-Za-z0-9.\-]{1,32}$` | Add-on 版本,本卡为 `0.1.0` |
+| `error_text` | string | strip 后 1-4096 Unicode 字符,拒 NUL | 用户确认后的脱敏文本 |
+| `consent_confirmed` | StrictBool | 必须为 `true` | 用户已确认发送同一脱敏快照 |
+
+`extra="forbid"`。显式拒绝字段:`file_path` / `source_code` / `slx_path` / `workspace` / `stack` / `project_files` / `model_content` / `files`。
+
+### 13.2 BridgeDiagnosticReceipt
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `request_id` | UUID4 | 与请求相同 | 回执关联 ID |
+| `status` | `Literal["received"]` | 固定 | 后端已收到 |
+| `mode` | `Literal["connectivity_stub"]` | 固定 | 连接回执 stub |
+| `message` | string | 固定文案 | `连接成功。本版本仅验证诊断信息传输,不提供报错解释。` |
+
+### 13.3 BridgeErrorResponse
+
+Bridge guard 错误响应只含 `{error,message}`:
+
+| 状态码 | `error` | `message` |
+|---|---|---|
+| 403 | `matlab_bridge_forbidden` | `仅允许本机 MATLAB Add-on 访问` |
+| 413 | `bridge_payload_too_large` | `诊断内容过大` |
+| 415 | `bridge_unsupported_media_type` | `仅支持 application/json` |
+
+422 沿用全局 `{error,message}`: `validation_error` / `请求参数有问题,请检查后重试`。404 沿用全局 404;feature flag 关闭时整个 bridge path 不注册。
+
+### 13.4 前置 guard 顺序
+
+Bridge route 使用 path-scoped custom `APIRoute` / `Request`,顺序固定为:feature flag 注册路由 → loopback → Content-Type → 实际 body 字节数 `>32768` → JSON → Pydantic → service。不得用普通 dependency 替代前三个请求边界。
