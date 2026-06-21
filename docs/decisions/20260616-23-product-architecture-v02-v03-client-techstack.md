@@ -2,14 +2,14 @@
 
 ## 状态
 
-🔲 v0.2(GPT Pro R1 复审:方向通过 + 2 P0 同步漏 + 3 P1/P2 建议全采纳,2026-06-16,待 PM review → Codex 落仓)
+🔲 v0.3(2026-06-21 前置同步 chore:收窄 v0.3-a 到 TASK-510 传输连接桥,保留 v0.3 总体 Engine 闭环目标)
 
 ---
 
 ## 关联
 
 - **关联决策**:决策 22(方向 pivot)/ 决策 12 v0.4(双 AI 互审工艺)/ 决策 21(EvidencePack boundary)
-- **关联宪法**:v3.0 § 1 项目身份 / § 3 产品形态 / § 10 商业合规边界 — 本决策触发宪法升级至 v3.1
+- **关联宪法**:v3.2 § 1 项目身份 / § 3 产品形态 / § 10 商业合规边界 — 本决策触发宪法 v3.1,前置同步 chore 进一步澄清 v0.3-a/b 边界
 - **关联路线**:`docs/roadmap/mxa-tutor-v2-paper-to-model.md` § 4 / § 5 / § 6 — 本决策触发 roadmap 同步修订
 - **关联讨论**:第 43 任 PM 方向 sanity check(2026-06-15 至 2026-06-16,对话沉淀)
 
@@ -85,8 +85,10 @@ PM 拍板:**继续 paper-to-model 方向,承诺投入到 v0.3**,但需要把 v0.
 
 | 阶段 | 范围 | 验收门槛 |
 |---|---|---|
-| **v0.3-a** Add-on 连接 spike | Add-on 安装流程 + 1 条 error/status 从 MATLAB 发到后端 + 1 条建议回传到 MATLAB UI + 至少 2 个 MATLAB 版本兼容 | Add-on 装机 ≤ 1 分钟,跨版本连通率 ≥ 90% |
+| **v0.3-a** Add-on 连接桥 spike(TASK-510) | Add-on 安装/卸载 + 用户**手动粘贴错误文本**(manual_error)→ 客户端脱敏 + `uiconfirm` 确认 → 1 条诊断 POST 到后端 → 后端返回**固定连接回执**(connectivity stub,不解释、不回传建议)+ **仅 R2026a**;程序化 `.m` app 打包为 `.mltbx` | Add-on 装机 ≤ 1 分钟(R2026a)+ 端到端连通跑通(装 → 脱敏 → 确认 → 发 → 收 → 显示 → 卸载无残留);**不接 Engine、不回传建议、不跨版本** |
 | **v0.3-b** 闭环陪练正式能力 | 报错解释 + 收敛状态解释 + 波形/CSV/MAT 结果解释 + case 评测 | 真实场景调通率 ≥ 50%,评测 case ≥ 5 个覆盖 6 类至少 3 类 |
+
+> **v0.3-a / v0.3-b 边界**:v0.3 **总体仍以 MATLAB Engine 闭环为目标**;v0.3-a 仅打通**传输连接桥**,**不接入、不验证 Engine**(用户手动粘贴错误文本,非 Engine 自动采集);**Engine 接入、自动错误/状态采集、建议回传** 归 v0.3-b。
 
 **理由**:Add-on 不是普通 Web 功能,真实风险在**安装、版本兼容、本地权限、网络回连、错误采集格式、Scope 波形导出** — 这些都是 Web 后端不会遇到的工程不确定性。一锅炖入一个 task 把 spike 风险和闭环推理风险混在一起,失败时定位困难。拆 a/b 让 a 阶段先消化工程不确定性。
 
@@ -112,7 +114,7 @@ PM 拍板:**继续 paper-to-model 方向,承诺投入到 v0.3**,但需要把 v0.
 
 **三档对比已分析**(详见 PM 方向 sanity check 对话):
 
-- **轻 = MATLAB Add-on**:学生 MATLAB 里多一个工具栏按钮;装一个 .mlx 文件 30 秒;不离开 MATLAB 环境
+- **轻 = MATLAB Add-on**:学生 MATLAB 里多一个工具栏按钮;装一个 `.mltbx`(≤ 1 分钟);不离开 MATLAB 环境
 - **中 = Electron 桌面 App**:独立软件,内嵌浏览器 + 后台本地服务连 MATLAB Engine;像 GitHub Desktop / Cursor 那种
 - **重 = 完整桌面 IDE**:对标 VS Code / Cursor,学生整个工作流在产品里
 
@@ -129,7 +131,7 @@ PM 拍板:**继续 paper-to-model 方向,承诺投入到 v0.3**,但需要把 v0.
 - 4-6 个月 IDE 开发远超 v0.3 时间预算
 - 维护成本指数级上升(语法高亮 / 调试器 / 自动补全这些 IDE 基础设施都要做)
 
-**轻形态技术选型**:**MATLAB Add-on**(MATLAB 自己的插件机制,.mlx + .mltbx 打包),不走 VS Code Extension 路径(MATLAB 用户主战场是 MATLAB IDE 本身)
+**轻形态技术选型**:**MATLAB Add-on**(MATLAB 自己的插件机制,`.mltbx` 打包,内含程序化 `.m` app),不走 VS Code Extension 路径(MATLAB 用户主战场是 MATLAB IDE 本身)
 
 ### 2.4 技术栈纪律 — 5 年内不自训模型
 
@@ -225,7 +227,7 @@ PM 拍板:**继续 paper-to-model 方向,承诺投入到 v0.3**,但需要把 v0.
 
 ---
 
-**版本**:v0.2(2026-06-16)
+**版本**:v0.3(2026-06-21)
 **作者**:Claude(架构师,接手第 43 任)
 **修订历史**:
 - v0.1(2026-06-16):架构师起稿,沉淀 2026-06-15 至 2026-06-16 PM sanity check 期间四项产品架构拍板
@@ -235,3 +237,4 @@ PM 拍板:**继续 paper-to-model 方向,承诺投入到 v0.3**,但需要把 v0.
   - **本决策本身的 K_30 同步漏**(由触发文档 patch 处理):roadmap v0.2 patch 同步 line 18 / 151 / 152 / 180 / 252 / 292 / 314 中"逆向调参 v0.3"旧口径;宪法 v0.2 patch 同步 line 170 / 487 中"v0.3 逆向调参"旧口径
   - **K_30 反例**:本决策 v0.1 起 patch 时只盯主要章节,没穷举"逆向调参 / A2a"全文字面 → 起 patch 范围声明应基于全文 grep 而非"主要章节"判断
 - v0.2 二审补丁(2026-06-16):GPT Pro 二审 conditional pass,本决策无新 P0;PM 二审 P1-1 同步采纳(底部版本号 v0.1 → v0.2)
+- v0.3(2026-06-21):前置同步 chore — §2.2 v0.3-a 行收窄到 TASK-510(manual_error + 固定连接回执 + 仅 R2026a + 不接 Engine + `.mltbx`),§2.3 Live Script 旧表述改为 `.mltbx`,新增 v0.3-a/b 边界注(保留 v0.3 总体 Engine 闭环 + Engine 接入归 v0.3-b)
