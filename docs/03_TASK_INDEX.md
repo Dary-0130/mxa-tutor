@@ -349,16 +349,16 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅🔍]            4/5  (paper-to-model TASK-500~503;TASK-510 待 PM 合并)
+Week 5+: [✅✅✅✅✅]            5/5  (paper-to-model TASK-500~503;TASK-510 v0.3-a 连接桥已合并)
 
-总计: 35/41
+总计: 36/41
 ```
 
 ---
 
 ## 下一步
 
-**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 4/5;TASK-510 MATLAB Add-on 连接桥 spike 实施完成待 PM 合并,只证明传输桥,不接 Engine。总进度纳入 TASK-510 后为 35/41。下一步进入 paper-to-model 后续 task / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
+**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 5/5;TASK-510 MATLAB Add-on 连接桥 spike(v0.3-a)已合并 main,只证明传输桥,不接 Engine。总进度纳入 TASK-510 后为 36/41。下一步进入 paper-to-model 后续 task / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
 
 ## Week 5+:paper-to-model 主线占位
 
@@ -370,7 +370,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-501 | PaperPlanService 与资料入口实现起点 | ✅ | Codex | TASK-500 已合并,可派单 |
 | TASK-502 | PaperPlanService + 4 prompt yaml + Python helper + MissingDetector + UserSupplyMerger | ✅ | Codex | 已合并 main 2026-06-18 PR #99,转 TASK-503 |
 | TASK-503 | TuningSuggestion + 持久化 PaperBundleStore + GET 路由 + D 根因方向 A + R6 整体门槛 5 解封 | ✅ | Codex | v0.2.4 + decision 25 验收通过，整体门槛 5 解封 |
-| TASK-510 | MATLAB Add-on 连接桥 spike(v0.3-a) | 🔍 | Codex | 实施完成待 PM 合并;只证传输桥,不接 Engine;PM 合并后 ✅ |
+| TASK-510 | MATLAB Add-on 连接桥 spike(v0.3-a) | ✅ | Codex | 已合并 main(PR #108 / merge 2026-06-21);只证传输桥,不接 Engine;C 类人工补测由 PM 完成 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
