@@ -8,8 +8,16 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi import FastAPI
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from api.dependencies import get_settings
+from api.routes.matlab_bridge import (
+    MAX_BRIDGE_BODY_BYTES,
+    BridgePayloadTooLargeError,
+    MatlabBridgeRequest,
+)
 
 BRIDGE_PATH = "/api/v1/bridge/diagnostic"
 REQUEST_ID = "2690af3d-9cfe-4442-900e-c86af37a6244"
@@ -247,6 +255,42 @@ def test_chunked_body_over_limit_returns_413(
         "POST",
         BRIDGE_PATH,
         content=chunks(),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {
+        "error": "bridge_payload_too_large",
+        "message": "诊断内容过大",
+    }
+
+
+def test_body_limiter_still_rejects_after_starlette_base_body_cache() -> None:
+    app = FastAPI()
+
+    @app.post("/_probe/bridge-body-limit")
+    async def probe(request: Request) -> JSONResponse:
+        bridge_request = MatlabBridgeRequest(request.scope, request.receive)
+        await bridge_request.body()
+        try:
+            await bridge_request.body_with_limit(MAX_BRIDGE_BODY_BYTES)
+        except BridgePayloadTooLargeError:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "error": "bridge_payload_too_large",
+                    "message": "诊断内容过大",
+                },
+            )
+        return JSONResponse({"ok": True})
+
+    body = b"x" * (MAX_BRIDGE_BODY_BYTES + 1)
+
+    response = _request(
+        app,
+        "POST",
+        "/_probe/bridge-body-limit",
+        content=body,
         headers={"content-type": "application/json"},
     )
 

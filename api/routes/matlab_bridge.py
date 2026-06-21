@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from fastapi.routing import APIRoute
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.types import Message, Receive
 
 from api.dependencies import get_matlab_bridge_diagnostic_service
 from features.matlab_bridge.bridge_diagnostic_schemas import (
@@ -28,6 +29,8 @@ class BridgePayloadTooLargeError(Exception):
 class MatlabBridgeRequest(Request):
     """Bridge-scoped request helpers used before FastAPI JSON/Pydantic parsing."""
 
+    _bridge_body: bytes
+
     def is_loopback_client(self) -> bool:
         if self.client is None or self.client.host is None:
             return False
@@ -40,8 +43,8 @@ class MatlabBridgeRequest(Request):
         return self.headers.get("content-type", "").split(";", 1)[0].strip().lower()
 
     async def body_with_limit(self, max_bytes: int) -> bytes:
-        if hasattr(self, "_body"):
-            return self._body  # type: ignore[attr-defined]
+        if hasattr(self, "_bridge_body"):
+            return self._bridge_body
 
         chunks: list[bytes] = []
         total = 0
@@ -50,13 +53,26 @@ class MatlabBridgeRequest(Request):
             if total > max_bytes:
                 raise BridgePayloadTooLargeError
             chunks.append(chunk)
-        self._body = b"".join(chunks)  # type: ignore[attr-defined]
-        return self._body  # type: ignore[attr-defined]
+        self._bridge_body = b"".join(chunks)
+        return self._bridge_body
 
 
 def _bridge_error(status_code: int, error: str, message: str) -> JSONResponse:
     payload = BridgeErrorResponse.model_validate({"error": error, "message": message})
     return JSONResponse(status_code=status_code, content=payload.model_dump())
+
+
+def _replay_receive(body: bytes) -> Receive:
+    sent = False
+
+    async def receive() -> Message:
+        nonlocal sent
+        if sent:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return receive
 
 
 class MatlabBridgeRoute(APIRoute):
@@ -80,14 +96,15 @@ class MatlabBridgeRoute(APIRoute):
                     "仅支持 application/json",
                 )
             try:
-                await bridge_request.body_with_limit(MAX_BRIDGE_BODY_BYTES)
+                body = await bridge_request.body_with_limit(MAX_BRIDGE_BODY_BYTES)
             except BridgePayloadTooLargeError:
                 return _bridge_error(
                     413,
                     "bridge_payload_too_large",
                     "诊断内容过大",
                 )
-            return await original_handler(bridge_request)
+            replay_request = MatlabBridgeRequest(request.scope, _replay_receive(body))
+            return await original_handler(replay_request)
 
         return handler
 
