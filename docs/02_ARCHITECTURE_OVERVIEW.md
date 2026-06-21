@@ -2,7 +2,7 @@
 
 > **前置阅读**:必须先读 `01_PROJECT_CONSTITUTION.md`
 > **目的**:让任何新接手的人 / AI 在 15 分钟内理解整个系统结构
-> **版本**:v3.0(delta)
+> **版本**:v3.1(delta)
 
 ---
 
@@ -92,6 +92,20 @@ ModelGenerationPlan + TuningSuggestion
 ```
 
 资料入口的 EvidencePack 必须区分 `document_extracted` 与 `user_supplied` 两类来源:文档抽取的公式 / 参数 / 段落证据走 `document_extracted`,用户补充的缺失参数走 `user_supplied`,下游回答和调参建议不得把用户补充伪装成文档证据。
+
+### v0.3-a 诊断传输桥数据流(连接 spike,不含 Engine;TASK-510)
+
+```
+用户本地 MATLAB(R2026a)+ mxa Add-on(.mltbx)
+   ↓ 用户手动粘贴错误文本(manual_error)
+客户端绝对路径 best-effort 脱敏 → uiconfirm 确认(快照冻结)
+   ↓ HTTPS,POST /api/v1/bridge/diagnostic
+mxa-tutor Web 后端(loopback 限定 + feature flag 失败关闭 + 415/413/403 边界)
+   ↓ 不调 LLM / DB / cache,不持久化,不 echo error_text
+固定连接回执(connectivity stub)→ 客户端 UI
+```
+
+**v0.3-a 边界**:仅验证**传输连接桥**,**不接入、不验证 MATLAB Engine**,不运行模型、不解释报错、不回传建议。Engine 接入 + 自动错误/状态采集 + 报错解释/收敛/波形解释 + 建议回传 归 **v0.3-b**(届时数据流补充 Engine 采集段)。
 
 ### 关键原则
 
@@ -819,5 +833,9 @@ class AppSettings(BaseSettings):
 
 ---
 
-**版本**:v3.0(delta)
-**最后更新**:2026-06-15
+**版本**:v3.1(delta)
+**最后更新**:2026-06-21
+
+## 修订历史
+
+- v3.1(delta)(2026-06-21):前置同步 chore — §2 新增 v0.3-a 诊断传输桥数据流,明确 TASK-510 仅验证传输连接桥、不含 Engine;Engine 接入与自动采集/解释/建议返回归 v0.3-b

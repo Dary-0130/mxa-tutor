@@ -2,7 +2,7 @@
 
 > **状态**:方向 pivot 后的主线路线图(决策 22 v1.2 配套产物)
 > **日期**:2026-06-16
-> **关联宪法**:v3.1
+> **关联宪法**:v3.2
 > **关联决策**:`docs/decisions/20260615-22-direction-pivot-paper-to-model.md` + `docs/decisions/20260616-23-product-architecture-v02-v03-client-techstack.md` + `docs/decisions/20260616-24-business-path-and-cross-industry-expansion.md`
 > **取代**:`mxa-tutor-update-roadmap.md`(v1,未入仓产品草案;TASK 编号占用作废,产品思考已被本文 § 1 继承,仅历史参考)
 
@@ -231,7 +231,7 @@ EvidenceRef        证据引用(source: document_extracted / user_supplied 双�
 
 **v0.3 默认形态 = MATLAB Add-on(轻)**:
 - 学生 MATLAB 工具栏多一个按钮
-- 装一个 .mlx + .mltbx 30 秒,不离开 MATLAB 环境
+- 装一个 `.mltbx`(≤ 1 分钟,内含程序化 `.m` app),不离开 MATLAB 环境
 - 桥接本地 MATLAB Engine + HTTPS 与 mxa-tutor Web 后端通信
 - 跨平台靠 MATLAB 自己处理
 
@@ -390,9 +390,10 @@ TextProvider / Retriever / ProjectStore / 向量存储接口尽量稳定;换模�
 
 ### 10.3 v0.3 门槛(决策 23 § 2.2 + § 2.5)
 
-**v0.3-a Add-on 连接 spike 门槛**:
-- Add-on 装机流程 ≤ 1 分钟
-- 跨 MATLAB 版本连通率 ≥ 90%(至少覆盖 2 个 MATLAB 版本)
+**v0.3-a Add-on 连接桥 spike 门槛(TASK-510)**:
+- Add-on 装机流程 ≤ 1 分钟(R2026a)
+- 端到端连通跑通(装 → 脱敏 → 确认 → 发 → 收 → 显示 → 卸载无残留),打真实 FastAPI app
+- **仅 R2026a,不跨版本;不接 Engine、不回传建议**
 
 **v0.3-b 闭环陪练正式能力门槛**:
 - 真实场景调通率 ≥ 50%(学生卡点能闭环解决)
@@ -414,10 +415,10 @@ TextProvider / Retriever / ProjectStore / 向量存储接口尽量稳定;换模�
 
 ---
 
-**版本**:v2.1
+**版本**:v2.2
 **日期**:2026-06-16
 **作者**:Claude(架构师,第四十一任)
-**关联宪法**:v3.1
+**关联宪法**:v3.2
 **关联决策**:`docs/decisions/20260615-22-direction-pivot-paper-to-model.md`(v1.3.1)+ `docs/decisions/20260616-23-product-architecture-v02-v03-client-techstack.md` + `docs/decisions/20260616-24-business-path-and-cross-industry-expansion.md`
 **取代**:`mxa-tutor-update-roadmap.md`(v1,未入仓草案,不入仓)
 **入仓**:chore PR(5 文件之一,新建 `docs/roadmap/mxa-tutor-v2-paper-to-model.md`);**当前为草稿,PM 暂不入仓**
@@ -440,3 +441,4 @@ TextProvider / Retriever / ProjectStore / 向量存储接口尽量稳定;换模�
   - P1-1 修复:本 patch 底部版本号 v0.1 → v0.2
   - P1-2 修复:Stage 0 grep 范围从只 § 5 扩为修订 0.1-0.6 + 修订 1/2/3/4 + 顶部全部"原字面";覆盖 § 0 / § 3.7 / § 4.4 / § 5 / § 7 / § 9 / § 10.3 / 顶部 全文同步
   - P1-3 修复:Stage 0 main 预期措辞对齐"4 份同 PR 同时落仓";红线段精确列出本 patch 修改 vs 不修改章节边界
+- **v2.2(2026-06-21)**:前置同步 chore — §5.3 Live Script 旧表述改为 `.mltbx`;§10.3 v0.3-a 门槛收窄到 TASK-510(仅 R2026a,去旧跨版门槛;不接 Engine、不回传建议)

@@ -21,7 +21,7 @@
   - **MCS(已基本交付)**:工程导览 + 问答,验证学生付费意愿
   - **paper-to-model(新主线)**:据资料(论文 / 文献 / 报告)辅助生成仿真模型搭建路线 + 指导调参,定位副驾
 - **产品定位**:**二合一**(工程入口 + 资料入口二选一),MCS 不废弃
-- **文档版本**:**v3.1**(方向 pivot v3.0 + 沉淀 v3.1,见 `docs/decisions/20260615-22-direction-pivot-paper-to-model.md` + `docs/decisions/20260616-23-product-architecture-v02-v03-client-techstack.md` + `docs/decisions/20260616-24-business-path-and-cross-industry-expansion.md`)
+- **文档版本**:**v3.2**(方向 pivot v3.0 + 沉淀 v3.1 + TASK-510 前置同步 v3.2,见 `docs/decisions/20260615-22-direction-pivot-paper-to-model.md` + `docs/decisions/20260616-23-product-architecture-v02-v03-client-techstack.md` + `docs/decisions/20260616-24-business-path-and-cross-industry-expansion.md`)
 
 > ⚠️ **v3.0 起转向 paper-to-model 主线;MCS 工程导览 / 问答资产保留并入二合一产品。对外口径硬约束:不使用"自动生成 Simulink 模型"表述,统一为"复现路线图 / 模型搭建副驾 / 参数对应说明"(决策 22 § 1.1)。**
 
@@ -109,7 +109,7 @@ C 类用户的痛点 = MCS 痛点的下一步:不只是"看懂手上的工程",�
 | 形态 | 实施阶段 | 用途 |
 |---|---|---|
 | **Web 应用** | v0.1 至所有阶段 | **主形态**,所有用户基础体验 |
-| **MATLAB Add-on(轻)** | v0.3 起 | 桥接本地 MATLAB Engine,实现闭环陪练;学生在 MATLAB 工具栏多一个按钮,装一个 .mlx 文件 30 秒;**不离开 MATLAB 环境** |
+| **MATLAB Add-on(轻)** | v0.3 起 | **v0.3 终态**桥接本地 MATLAB Engine 实现闭环陪练(Engine 接入归 v0.3-b);学生在 MATLAB 工具栏多一个按钮,装一个 `.mltbx`(≤ 1 分钟);**不离开 MATLAB 环境**(v0.3-a 先打通传输连接桥,不接 Engine) |
 | **Electron 桌面 App(中)** | v0.4+(视 v0.3 反馈) | 课题组工作区 / 多工程历史 / 离线模式;独立软件,**不是替代 MATLAB IDE**,跟 Add-on 并存 |
 | **完整桌面 IDE(重)** | ❌ **5 年内不做** | 跟决策 22 § 1.1 "副驾,不替代"定位冲突,且 MATLAB IDE 黏性极高,让电气专业学生离开 MATLAB IDE 不现实 |
 
@@ -582,7 +582,7 @@ LLM(基于 TeachingUnit 生成中文讲解)
 - **当前阶段**:MCS 主线完成(31/35 task);paper-to-model 主线启动(决策 22 pivot)
 - **方向**:二合一产品(工程导览 + 问答 / paper-to-model 复现副驾)
 - **下一个动作**:本 pivot chore PR(5 文件,含 02 delta)→ paper-to-model 开门 chore 五项前置硬门槛【06 三套契约 / MissingParameterPrompt + EvidencePack 双源 / 文档上传安全 / 产品文案与对外口径 / 评测准入】(决策 22 § 10.4)→ 五项全 ✅ 后 TASK-501 系列
-- **文档版本**:**v3.0**(方向 pivot)
+- **文档版本**:**v3.2**(方向 pivot + v0.3-a/b Engine 阶段澄清)
 - **MCS 末态**:Week 0-3 全完成;Week 4 前端✅ / 激活码冻结 / 部署内测转交
 - **最近一次重大决策**:
   - **20260615-22:方向 pivot — paper-to-model 副驾(MCS 二合一),宪法升 v3.0**
@@ -592,8 +592,8 @@ LLM(基于 TeachingUnit 生成中文讲解)
 
 ---
 
-**版本**:v3.0
-**最后更新**:2026-06-15
+**版本**:v3.2
+**最后更新**:2026-06-21
 **维护者**:Claude(架构) + PM
 **升级依据**:`docs/decisions/20260615-22-direction-pivot-paper-to-model.md`
 
@@ -614,3 +614,4 @@ LLM(基于 TeachingUnit 生成中文讲解)
   - P1-1 修复:本 patch 底部版本号 v0.1 → v0.2
   - P1-2 修复:Stage 0 grep 范围从只 § 5 扩为修订 1/2/2a/2b/2c/2d/3/4 + 同步修订 2/3/4 全部"原字面"
   - P1-3 修复:Stage 0 main 预期措辞对齐"4 份同 PR 同时落仓"
+- **v3.2(2026-06-21)**:前置同步 chore — §3 MATLAB Add-on 行改为 `.mltbx`,并澄清 v0.3-a 先打通传输连接桥、不接 Engine;v0.3 终态仍以 MATLAB Engine 闭环为目标,Engine 接入归 v0.3-b
