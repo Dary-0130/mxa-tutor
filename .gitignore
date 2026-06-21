@@ -17,6 +17,11 @@ web/dist/
 build/
 *.egg-info/
 
+# TASK-510 MATLAB bridge: track packaging scripts, never track toolbox binaries.
+!clients/matlab_bridge/build/
+!clients/matlab_bridge/build/**
+*.mltbx
+
 # Temporary diagnostic / inspection scripts (per project handoff § 6)
 /tools_*.py
 /diag_*.py

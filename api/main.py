@@ -34,6 +34,7 @@ from api.dependencies import get_settings
 from api.middleware.error_handler import register_error_handlers
 from api.routes.chat import router as chat_router
 from api.routes.health import router as health_router
+from api.routes.matlab_bridge import router as matlab_bridge_router
 from api.routes.overview import router as overview_router
 from api.routes.paper_query import router as paper_query_router
 from api.routes.paper_tuning import router as paper_tuning_router
@@ -51,6 +52,11 @@ from features.chunking import ChunkingService
 from features.ingest.cleanup_worker import CleanupWorker
 from features.overview import InMemoryOverviewCache
 from features.overview.project_graph_builder import ProjectGraphBuilder
+
+
+def _validate_matlab_bridge_settings(settings: AppSettings) -> None:
+    if settings.matlab_bridge_enabled and settings.app_environment not in {"development", "test"}:
+        raise RuntimeError("matlab_bridge_enabled requires APP_ENV=development or APP_ENV=test")
 
 
 def SentenceTransformerEmbedder(
@@ -187,6 +193,7 @@ def create_app() -> FastAPI:
     ``[project].description`` 复制,保持字面一致。
     """
     settings = get_settings()
+    _validate_matlab_bridge_settings(settings)
     app = FastAPI(
         title="mxa-tutor",
         version="0.0.1",
@@ -200,6 +207,8 @@ def create_app() -> FastAPI:
     app.include_router(paper_query_router)
     app.include_router(paper_tuning_router)
     app.include_router(paper_user_supply_router)
+    if settings.matlab_bridge_enabled:
+        app.include_router(matlab_bridge_router)
     app.include_router(overview_router)
     app.include_router(teaching_unit_router)
     app.include_router(chat_router)

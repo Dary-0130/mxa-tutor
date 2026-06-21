@@ -1,0 +1,51 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {
+      "const": "0.3-a",
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "request_id": {
+      "format": "uuid4",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "diagnostic_kind": {
+      "const": "manual_error",
+      "title": "Diagnostic Kind",
+      "type": "string"
+    },
+    "matlab_release": {
+      "pattern": "^R20[0-9]{2}[ab]$",
+      "title": "Matlab Release",
+      "type": "string"
+    },
+    "client_version": {
+      "pattern": "^[A-Za-z0-9.\\-]{1,32}$",
+      "title": "Client Version",
+      "type": "string"
+    },
+    "error_text": {
+      "maxLength": 4096,
+      "minLength": 1,
+      "title": "Error Text",
+      "type": "string"
+    },
+    "consent_confirmed": {
+      "title": "Consent Confirmed",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "request_id",
+    "diagnostic_kind",
+    "matlab_release",
+    "client_version",
+    "error_text",
+    "consent_confirmed"
+  ],
+  "title": "BridgeDiagnosticRequest",
+  "type": "object"
+}

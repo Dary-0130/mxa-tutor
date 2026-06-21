@@ -1,5 +1,7 @@
 """项目全局配置(pydantic-settings 加载自 .env 或环境变量)。"""
 
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -67,6 +69,13 @@ class AppSettings(BaseSettings):
 
     # Logging
     log_level: str = "INFO"
+
+    # MATLAB Add-on bridge(TASK-510)
+    app_environment: Literal["production", "development", "test"] = Field(
+        default="production",
+        validation_alias="APP_ENV",
+    )
+    matlab_bridge_enabled: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",
