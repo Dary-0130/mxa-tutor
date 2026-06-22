@@ -26,6 +26,9 @@ ENV_KEYS = [
     "VECTOR_MIN_SCORE",
     "CHUNKING_MAX_CHUNKS_PER_M_SCRIPT",
     "LOG_LEVEL",
+    "APP_ENV",
+    "MATLAB_BRIDGE_ENABLED",
+    "MATLAB_ENGINE_ENABLED",
 ]
 
 
@@ -65,6 +68,9 @@ def test_default_values(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     assert cfg.max_total_uncompressed_mb == 200
     assert cfg.max_entries_per_project == 200
     assert cfg.log_level == "INFO"
+    assert cfg.app_environment == "production"
+    assert cfg.matlab_bridge_enabled is False
+    assert cfg.matlab_engine_enabled is False
 
 
 def test_env_override_and_type_conversion(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -74,6 +80,9 @@ def test_env_override_and_type_conversion(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setenv("MAX_UPLOAD_SIZE_MB", "100")
     monkeypatch.setenv("VECTOR_TOP_K", "12")
     monkeypatch.setenv("VECTOR_MIN_SCORE", "0.5")
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", "true")
+    monkeypatch.setenv("MATLAB_ENGINE_ENABLED", "true")
     monkeypatch.chdir(tmp_path)
 
     cfg = AppSettings()
@@ -82,6 +91,48 @@ def test_env_override_and_type_conversion(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert isinstance(cfg.max_upload_size_mb, int)
     assert cfg.vector_top_k == 12
     assert cfg.vector_min_score == 0.5
+    assert cfg.app_environment == "test"
+    assert cfg.matlab_bridge_enabled is True
+    assert cfg.matlab_engine_enabled is True
+
+
+@pytest.mark.parametrize(
+    ("app_env", "bridge_enabled", "engine_enabled", "valid"),
+    [
+        ("production", "false", "false", True),
+        ("development", "true", "false", True),
+        ("test", "true", "false", True),
+        ("production", "true", "false", True),
+        ("development", "false", "true", False),
+        ("test", "false", "true", False),
+        ("production", "true", "true", False),
+        ("development", "true", "true", True),
+        ("test", "true", "true", True),
+    ],
+)
+def test_matlab_engine_config_guard(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    app_env: str,
+    bridge_enabled: str,
+    engine_enabled: str,
+    valid: bool,
+) -> None:
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("APP_ENV", app_env)
+    monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", bridge_enabled)
+    monkeypatch.setenv("MATLAB_ENGINE_ENABLED", engine_enabled)
+    monkeypatch.chdir(tmp_path)
+
+    if valid:
+        cfg = AppSettings()
+        assert cfg.app_environment == app_env
+        assert cfg.matlab_bridge_enabled is (bridge_enabled == "true")
+        assert cfg.matlab_engine_enabled is (engine_enabled == "true")
+    else:
+        with pytest.raises(ValidationError):
+            AppSettings()
 
 
 def test_missing_required_raises(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

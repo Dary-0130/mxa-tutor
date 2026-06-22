@@ -1,8 +1,8 @@
 """项目全局配置(pydantic-settings 加载自 .env 或环境变量)。"""
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -76,9 +76,20 @@ class AppSettings(BaseSettings):
         validation_alias="APP_ENV",
     )
     matlab_bridge_enabled: bool = False
+    matlab_engine_enabled: bool = Field(default=False, validation_alias="MATLAB_ENGINE_ENABLED")
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _validate_matlab_engine_guard(self) -> Self:
+        if not self.matlab_engine_enabled:
+            return self
+        if not self.matlab_bridge_enabled:
+            raise ValueError("matlab_engine_enabled requires MATLAB_BRIDGE_ENABLED=true")
+        if self.app_environment not in {"development", "test"}:
+            raise ValueError("matlab_engine_enabled requires APP_ENV=development or APP_ENV=test")
+        return self

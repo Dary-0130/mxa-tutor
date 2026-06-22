@@ -14,6 +14,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from loguru import logger
@@ -43,7 +44,13 @@ from api.routes.paper_user_supply import router as paper_user_supply_router
 from api.routes.teaching_unit import router as teaching_unit_router
 from api.routes.upload import router as upload_router
 from app.config import AppSettings
-from core.domain.exceptions import EmbeddingModelLoadError
+from core.domain.exceptions import (
+    EmbeddingModelLoadError,
+    MatlabEngineBusyError,
+    MatlabEngineError,
+    MatlabEngineStartupError,
+    MatlabEngineTimeoutError,
+)
 from core.interfaces.embedder import EmbeddingProvider
 from features.chat import HybridRetriever, KeywordRetriever, VectorRetriever
 from features.chat._prompt_builder import ChatPromptBuilder
@@ -57,6 +64,114 @@ from features.overview.project_graph_builder import ProjectGraphBuilder
 def _validate_matlab_bridge_settings(settings: AppSettings) -> None:
     if settings.matlab_bridge_enabled and settings.app_environment not in {"development", "test"}:
         raise RuntimeError("matlab_bridge_enabled requires APP_ENV=development or APP_ENV=test")
+
+
+def _start_owned_matlab_engine_runtime() -> Any:
+    from adapters.matlab_engine.owned_startup import start_owned_bounded
+
+    return start_owned_bounded()
+
+
+def _matlab_engine_health_probe_timeout_s() -> float:
+    from adapters.matlab_engine.owned_startup import HEALTH_PROBE_TIMEOUT_S
+
+    return HEALTH_PROBE_TIMEOUT_S
+
+
+def _consume_task_result(task: asyncio.Task[Any]) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        logger.error(
+            "MATLAB Engine late task finished with error: exception_type={}",
+            type(exc).__name__,
+        )
+
+
+async def _attach_matlab_engine_runtime(app: FastAPI, stack: AsyncExitStack) -> None:
+    runtime = await asyncio.to_thread(_start_owned_matlab_engine_runtime)
+    stack.push_async_callback(_close_owned_runtime, app, runtime)
+
+    probe_task = asyncio.create_task(asyncio.to_thread(runtime.provider.health_probe))
+    done, _pending = await asyncio.wait(
+        {probe_task},
+        timeout=_matlab_engine_health_probe_timeout_s(),
+    )
+    if not done:
+        reaped = await asyncio.to_thread(runtime.terminate_tree)
+        probe_task.add_done_callback(_consume_task_result)
+        if reaped:
+            raise MatlabEngineTimeoutError(reason_code="health_probe_timeout_reaped") from None
+        raise MatlabEngineStartupError(reason_code="health_probe_reaper_failed") from None
+
+    probe_task.result()
+    app.state.matlab_engine_provider = runtime.provider
+
+
+async def _close_owned_runtime(app: FastAPI, runtime: Any) -> None:
+    close_task: asyncio.Task[Any] | None = None
+    try:
+        if getattr(runtime, "is_tree_terminated", False):
+            return
+
+        close_task = asyncio.create_task(asyncio.to_thread(runtime.session.close))
+        done, _pending = await asyncio.wait(
+            {close_task},
+            timeout=runtime.cleanup_grace_s,
+        )
+        if not done:
+            close_task.add_done_callback(_consume_task_result)
+            reaped = await asyncio.to_thread(runtime.terminate_tree)
+            if not reaped:
+                logger.error("MATLAB Engine close timeout reaper failed")
+            return
+
+        try:
+            close_task.result()
+        except MatlabEngineBusyError as exc:
+            reaped = await asyncio.to_thread(runtime.terminate_tree)
+            if not reaped:
+                logger.error(
+                    "MATLAB Engine busy close reaper failed: reason_code={} exception_type={}",
+                    exc.reason_code,
+                    type(exc).__name__,
+                )
+            return
+        except MatlabEngineError as exc:
+            reaped = await asyncio.to_thread(runtime.terminate_tree)
+            if not reaped:
+                logger.error(
+                    "MATLAB Engine close failed and reaper failed: reason_code={} "
+                    "exception_type={}",
+                    exc.reason_code,
+                    type(exc).__name__,
+                )
+            return
+        except Exception as exc:
+            reaped = await asyncio.to_thread(runtime.terminate_tree)
+            if not reaped:
+                logger.error(
+                    "MATLAB Engine close raised unexpected error and reaper failed: "
+                    "exception_type={}",
+                    type(exc).__name__,
+                )
+            return
+
+        tree_gone = await asyncio.to_thread(runtime.wait_tree_gone, runtime.cleanup_grace_s)
+        if not tree_gone:
+            reaped = await asyncio.to_thread(runtime.terminate_tree)
+            if not reaped:
+                logger.error("MATLAB Engine close returned but process tree remained")
+    finally:
+        if close_task is not None and not close_task.done():
+            close_task.add_done_callback(_consume_task_result)
+        if hasattr(app.state, "matlab_engine_provider"):
+            delattr(app.state, "matlab_engine_provider")
+        cleanup_log_file = getattr(runtime, "cleanup_log_file", None)
+        if cleanup_log_file is not None:
+            await asyncio.to_thread(cleanup_log_file)
 
 
 def SentenceTransformerEmbedder(
@@ -167,6 +282,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         stack.push_async_callback(teaching_unit_store.aclose)
         stack.push_async_callback(chat_store.aclose)
         stack.push_async_callback(store.aclose)
+        if settings.matlab_engine_enabled:
+            await _attach_matlab_engine_runtime(app, stack)
         worker = CleanupWorker(
             store=store,
             upload_dir=upload_dir,

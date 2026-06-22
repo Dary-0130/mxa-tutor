@@ -30,11 +30,12 @@ from adapters.parser.pdf_parser import PdfParser
 from adapters.parser.slx_parser import SlxParserImpl
 from adapters.parser.zip_extractor import safe_extract
 from app.config import AppSettings
-from core.domain.exceptions import BridgeExplanationUnavailableError
+from core.domain.exceptions import BridgeExplanationUnavailableError, MatlabEngineDisabledError
 from core.interfaces.chat_store import ChatStore
 from core.interfaces.document_parser import DocumentParserRouter
 from core.interfaces.embedder import EmbeddingProvider
 from core.interfaces.llm_provider import TextProvider
+from core.interfaces.matlab_engine_provider import MatlabEngineProvider
 from core.interfaces.paper_cache import PaperBundleStore
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
@@ -77,6 +78,14 @@ def get_matlab_bridge_explanation_service(request: Request) -> BridgeExplanation
     if text_provider is None:
         raise BridgeExplanationUnavailableError("text_provider_unavailable") from None
     return BridgeExplanationService(text_provider=cast(TextProvider, text_provider))
+
+
+def get_matlab_engine_provider(request: Request) -> MatlabEngineProvider:
+    """Return the app-managed MATLAB Engine provider when the feature is enabled."""
+    provider = getattr(request.app.state, "matlab_engine_provider", None)
+    if provider is None:
+        raise MatlabEngineDisabledError(reason_code="matlab_engine_disabled") from None
+    return cast(MatlabEngineProvider, provider)
 
 
 def get_project_store(request: Request) -> ProjectStore:
