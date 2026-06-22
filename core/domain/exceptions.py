@@ -128,6 +128,10 @@ class MatlabEngineUnavailableError(MatlabEngineError):
     """MATLAB Engine Python package 不可用。"""
 
 
+class MatlabEngineDisabledError(MatlabEngineError):
+    """MATLAB Engine service integration is disabled or not wired."""
+
+
 class MatlabEngineStartupError(MatlabEngineError):
     """MATLAB Engine owned session 启动失败。"""
 

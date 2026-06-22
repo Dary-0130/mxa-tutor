@@ -373,6 +373,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-510 | MATLAB Add-on 连接桥 spike(v0.3-a) | ✅ | Codex | 已合并 main(PR #108 / merge 2026-06-21);只证传输桥,不接 Engine;C 类人工补测由 PM 完成 |
 | TASK-511 | MATLAB bridge LLM 报错解释(v0.3-b b1) | 🔍 | Codex | 待验收;只做机制 + 确定性护栏,质量评估留 seam |
 | TASK-512 | MATLAB Engine substrate gate(v0.3-b b2-0) | ✅ | Codex | 已合并 main(PR #110 / merge 2026-06-22);只证独立 Engine substrate,不接 bridge runtime |
+| TASK-513 | MATLAB Engine 接入服务运行时(v0.3-b b2-1 块 A) | 🔍 | Codex | 运行时机制层:单进程单会话、有界 owned 启动、lifespan 接入与 flag 守门 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):

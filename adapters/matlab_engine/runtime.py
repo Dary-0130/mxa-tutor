@@ -177,6 +177,21 @@ class MatlabEngineSession:
             process_terminator=process_terminator,
         )
 
+    @classmethod
+    def from_connected_owned(
+        cls,
+        engine: Any,
+        *,
+        matlab_process_id: int,
+    ) -> MatlabEngineSession:
+        """Wrap an already-connected Engine handle with owned-session semantics."""
+        session = cls(engine, ownership=MatlabEngineOwnership.OWNED)
+        coerced_pid = _coerce_pid(matlab_process_id)
+        if coerced_pid is None:
+            raise ValueError("matlab_process_id must be a positive integer")
+        session._matlab_process_id = coerced_pid
+        return session
+
     @property
     def ownership(self) -> MatlabEngineOwnership:
         return self._ownership

@@ -427,3 +427,13 @@ def test_share_as_uses_eval_without_loading_matlab_module() -> None:
     session.share_as("mxa_shared_unit")
 
     assert fake_engine.eval_calls == ["matlab.engine.shareEngine('mxa_shared_unit')"]
+
+
+def test_from_connected_owned_wraps_existing_engine_with_owned_pid() -> None:
+    fake_engine = FakeEngine(pid=None)
+
+    session = MatlabEngineSession.from_connected_owned(fake_engine, matlab_process_id=9876)
+
+    assert session.ownership == MatlabEngineOwnership.OWNED
+    assert session.matlab_process_id == 9876
+    assert session.state == MatlabEngineState.READY
