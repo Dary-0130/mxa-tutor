@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -32,6 +34,53 @@ class FakeEmbedder:
         return 2
 
 
+class FakeTextProvider:
+    def __init__(self, *args, **kwargs) -> None:
+        _ = args, kwargs
+
+    def chat(
+        self,
+        messages: list[object],
+        json_mode: bool = False,
+        timeout: float = 30.0,
+        max_tokens: int | None = None,
+    ):
+        from core.interfaces.llm_provider import LLMResponse
+
+        _ = json_mode, timeout, max_tokens
+        text = "\n".join(message.content for message in messages)
+        request_id = _extract_request_id(text)
+        payload = {
+            "protocol_version": "0.3-b1",
+            "request_id": request_id,
+            "status": "completed",
+            "mode": "llm_error_explanation",
+            "meaning": "这段报错表示 MATLAB 正在报告某个脚本位置相关的运行错误。",
+            "likely_causes": [
+                {
+                    "cause": "错误可能与报错中提到的位置或调用链有关。",
+                    "is_inference": True,
+                    "confidence": "low",
+                    "supporting_signals": ["Error in [REDACTED_PATH] at line 1"],
+                }
+            ],
+            "next_steps": [{"action": "先运行 `which` 查看相关名称解析,再检查初始化脚本。"}],
+            "caveats": ["这里只基于粘贴的报错文本,没有运行仿真。"],
+        }
+        return LLMResponse(
+            text=json.dumps(payload, ensure_ascii=False),
+            prompt_tokens=1,
+            completion_tokens=1,
+            model="fake",
+            latency_ms=1,
+        )
+
+    def capability(self):
+        from core.interfaces.llm_provider import ModelCapability
+
+        return ModelCapability(model_name="fake")
+
+
 def main() -> int:
     args = _parse_args()
     repo_root = Path(__file__).resolve().parents[3]
@@ -57,13 +106,16 @@ def main() -> int:
 
     get_settings.cache_clear()
     api_main.SentenceTransformerEmbedder = FakeEmbedder
+    api_main.DeepSeekTextProvider = FakeTextProvider
     app = api_main.create_app()
-    bridge_counter = {"count": 0}
+    bridge_counter = {"diagnostic": 0, "explanation": 0}
 
     @app.middleware("http")
     async def count_bridge_requests(request, call_next):
         if request.url.path == "/api/v1/bridge/diagnostic":
-            bridge_counter["count"] += 1
+            bridge_counter["diagnostic"] += 1
+        if request.url.path == "/api/v1/bridge/explanation":
+            bridge_counter["explanation"] += 1
         return await call_next(request)
 
     servers = [
@@ -76,12 +128,10 @@ def main() -> int:
         try:
             _run_matlab_e2e(repo_root, mltbx_path, port)
         except subprocess.CalledProcessError:
-            print(f"bridge_requests_seen={bridge_counter['count']}")
+            print(f"bridge_requests_seen={bridge_counter}")
             raise
-        if bridge_counter["count"] != 1:
-            raise AssertionError(
-                f"expected exactly 1 bridge request, got {bridge_counter['count']}"
-            )
+        if bridge_counter != {"diagnostic": 1, "explanation": 1}:
+            raise AssertionError(f"unexpected bridge request counts: {bridge_counter}")
     finally:
         for server, _ in servers:
             server.should_exit = True
@@ -148,6 +198,17 @@ def _run_matlab_e2e(repo_root: Path, mltbx_path: Path, port: int) -> None:
 
 def _matlab_quote(path: Path) -> str:
     return str(path).replace("'", "''").replace("\\", "/")
+
+
+def _extract_request_id(text: str) -> str:
+    match = re.search(
+        r"request_id:\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+        text,
+    )
+    if match is None:
+        raise RuntimeError("request_id missing from bridge prompt")
+    return match.group(1)
 
 
 if __name__ == "__main__":

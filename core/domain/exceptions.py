@@ -160,6 +160,18 @@ class MatlabEngineBusyError(MatlabEngineSessionError):
     """同一 MATLAB Engine session 已有调用在执行。"""
 
 
+class BridgeExplanationError(MxaError):
+    """MATLAB bridge 报错解释生成失败。"""
+
+
+class BridgeExplanationUnavailableError(BridgeExplanationError):
+    """MATLAB bridge 报错解释 provider 暂不可用。"""
+
+
+class BridgeExplanationTimeoutError(BridgeExplanationError):
+    """MATLAB bridge 报错解释调用超时。"""
+
+
 class ChatSessionNotFoundError(ProjectError):
     """指定对话会话不存在。"""
 

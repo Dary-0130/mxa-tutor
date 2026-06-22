@@ -34,6 +34,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import AppSettings
 from core.domain.exceptions import (
+    BridgeExplanationError,
+    BridgeExplanationTimeoutError,
+    BridgeExplanationUnavailableError,
     ChatGenerationError,
     ChatSessionNotFoundError,
     DocumentParseError,
@@ -256,6 +259,22 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         (
             PaperUserSupplyError,
             _make_handler(400, "paper_user_supply_invalid", "补充参数有问题,请检查后重试"),
+        ),
+        (
+            BridgeExplanationError,
+            _make_handler(502, "bridge_explanation_failed", "报错解释生成失败,请稍后重试"),
+        ),
+        (
+            BridgeExplanationUnavailableError,
+            _make_handler(
+                503,
+                "bridge_explanation_unavailable",
+                "报错解释服务暂时不可用,请稍后重试",
+            ),
+        ),
+        (
+            BridgeExplanationTimeoutError,
+            _make_handler(504, "bridge_explanation_timeout", "报错解释超时,请稍后重试"),
         ),
         (
             ChatSessionNotFoundError,

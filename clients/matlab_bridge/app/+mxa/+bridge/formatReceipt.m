@@ -1,12 +1,11 @@
 function text = formatReceipt(receipt)
 %FORMATRECEIPT Convert the bridge receipt struct to UI text.
 
-message = readValue(receipt, "message", "连接成功。");
 status = readValue(receipt, "status", "");
 mode = readValue(receipt, "mode", "");
 requestId = readValue(receipt, "request_id", "");
 
-lines = string(message);
+lines = "连接回执已收到。";
 if strlength(status) > 0
     lines(end + 1) = "status: " + status;
 end

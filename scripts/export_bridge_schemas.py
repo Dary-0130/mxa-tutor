@@ -15,11 +15,19 @@ from features.matlab_bridge.bridge_diagnostic_schemas import (
     BridgeDiagnosticRequest,
     BridgeErrorResponse,
 )
+from features.matlab_bridge.bridge_explanation_schemas import (
+    BridgeExplanationErrorResponse,
+    BridgeExplanationRequest,
+    BridgeExplanationResultModel,
+)
 
 OUTPUTS = {
     Path("schemas/bridge_diagnostic_request.schema.json"): BridgeDiagnosticRequest,
     Path("schemas/bridge_diagnostic_receipt.schema.json"): BridgeDiagnosticReceiptModel,
     Path("schemas/bridge_error_response.schema.json"): BridgeErrorResponse,
+    Path("schemas/bridge_explanation_request.schema.json"): BridgeExplanationRequest,
+    Path("schemas/bridge_explanation_result.schema.json"): BridgeExplanationResultModel,
+    Path("schemas/bridge_explanation_error.schema.json"): BridgeExplanationErrorResponse,
 }
 
 

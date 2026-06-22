@@ -84,3 +84,39 @@ def test_compute_verdict_uses_dual_axis_invariants() -> None:
         )
         == "fail"
     )
+
+
+def test_error_explanation_verdict_has_no_partial() -> None:
+    passing_rules = {
+        "error_mapping": {"status": "pass"},
+        "schema_contract": {"status": "pass"},
+        "privacy": {"status": "pass"},
+        "timeout": {"status": "pass"},
+        "grounding_hygiene": {"status": "pass"},
+    }
+    failing_rules = {**passing_rules, "privacy": {"status": "fail"}}
+
+    assert (
+        compute_verdict(
+            case_kind="error_explanation",
+            execution_status="succeeded",
+            rule_results=passing_rules,
+        )
+        == "pass"
+    )
+    assert (
+        compute_verdict(
+            case_kind="error_explanation",
+            execution_status="succeeded",
+            rule_results=failing_rules,
+        )
+        == "fail"
+    )
+    assert (
+        compute_verdict(
+            case_kind="error_explanation",
+            execution_status="case_failed",
+            rule_results=passing_rules,
+        )
+        == "not_evaluated"
+    )

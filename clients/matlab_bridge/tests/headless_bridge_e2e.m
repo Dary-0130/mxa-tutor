@@ -27,7 +27,9 @@ if ~submitted
     error("mxa:bridge:E2ESubmitFailed", "submit failed: %s", app.LastErrorIdentifier);
 end
 responseText = strjoin(string(app.ResponseTextArea.Value), newline);
-assert(contains(responseText, "连接成功"));
+assert(contains(responseText, "连接回执已收到"));
+assert(contains(responseText, "报错解释已生成"));
+assert(~contains(responseText, "不提供报错解释"));
 assert(~contains(app.LastSanitizedText, "C:\Users\alice"));
 delete(appCleanup);
 

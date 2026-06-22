@@ -34,7 +34,15 @@ clean:
 
 export-schema:
 	python -m scripts.export_overview_schema
+	python -m scripts.export_bridge_schemas
 
 verify-schema: export-schema
 	@git diff --exit-code schemas/project_overview.schema.json \
 		|| (echo "schemas/project_overview.schema.json drifted. Regenerate with 'make export-schema' and commit." && exit 1)
+	@git diff --exit-code schemas/bridge_diagnostic_request.schema.json \
+		schemas/bridge_diagnostic_receipt.schema.json \
+		schemas/bridge_error_response.schema.json \
+		schemas/bridge_explanation_request.schema.json \
+		schemas/bridge_explanation_result.schema.json \
+		schemas/bridge_explanation_error.schema.json \
+		|| (echo "bridge schemas drifted. Regenerate with 'make export-schema' and commit." && exit 1)

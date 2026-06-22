@@ -602,3 +602,70 @@ Bridge guard 错误响应只含 `{error,message}`:
 ### 13.4 前置 guard 顺序
 
 Bridge route 使用 path-scoped custom `APIRoute` / `Request`,顺序固定为:feature flag 注册路由 → loopback → Content-Type → 实际 body 字节数 `>32768` → JSON → Pydantic → service。不得用普通 dependency 替代前三个请求边界。
+
+## 14. MATLAB Bridge Error Explanation 契约(TASK-511 b1)
+
+`BridgeExplanation` 在 v0.3-a 连接回执之后,用同一个 `request_id` 请求一次 LLM 报错解释。它只解释用户手动粘贴的 `manual_error` 文本,不接 MATLAB Engine、不运行仿真、不验证文件或工具箱状态。质量评估和真实 case 覆盖留到后续 seam;本契约只冻结传输、结构、安全护栏和错误映射。
+
+**状态**:v0.3-b1 冻结。
+
+| 同步项 | 路径 |
+|---|---|
+| Domain | `core/domain/bridge_explanation.py` |
+| Pydantic wrapper | `features/matlab_bridge/bridge_explanation_schemas.py` |
+| JSON Schema | `schemas/bridge_explanation_request.schema.json` / `schemas/bridge_explanation_result.schema.json` / `schemas/bridge_explanation_error.schema.json` |
+| 导出脚本 | `scripts/export_bridge_schemas.py` |
+| Freeze 测试 | `tests/features/matlab_bridge/test_bridge_explanation_schema_freeze.py` |
+| 边界测试 | `tests/features/matlab_bridge/test_bridge_explanation_schemas.py` |
+
+### 14.1 BridgeExplanationRequest
+
+请求端点:`POST /api/v1/bridge/explanation`,`Content-Type: application/json`。该端点与 diagnostic 挂在同一个 `MatlabBridgeRoute`,共享 loopback / Content-Type / 32KB body guard。
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `protocol_version` | `Literal["0.3-b1"]` | 必填 | 报错解释协议 |
+| `request_id` | UUID4 | 与 ACK 同一个 ID | 两段请求关联 |
+| `diagnostic_kind` | `Literal["manual_error"]` | 必填 | 用户手动粘贴错误文本 |
+| `matlab_release` | string | `^R20[0-9]{2}[ab]$` | MATLAB release |
+| `client_version` | string | `^[A-Za-z0-9.\-]{1,32}$` | Add-on 版本 |
+| `error_text` | string | strip 后 1-4096 Unicode 字符,拒 NUL | 用户确认后的脱敏文本;服务端调 provider 前会再次脱敏 |
+| `llm_processing_consent_confirmed` | StrictBool | 必须为 `true` | 用户确认允许进行 LLM 解释 |
+
+`extra="forbid"`。显式拒绝字段与 diagnostic 一致:`file_path` / `source_code` / `slx_path` / `workspace` / `stack` / `project_files` / `model_content` / `files`。
+
+### 14.2 BridgeExplanationResult
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `protocol_version` | `Literal["0.3-b1"]` | 固定 | 报错解释协议 |
+| `request_id` | UUID4 | 与请求相同 | 解释关联 ID |
+| `status` | `Literal["completed"]` | 固定 | 已生成解释 |
+| `mode` | `Literal["llm_error_explanation"]` | 固定 | 与 `connectivity_stub` 区分 |
+| `meaning` | string | 1-1500 字 | 解释报错含义,不得新增环境事实 |
+| `likely_causes` | array[`LikelyCause`] | 1-4 个 | 可能原因 |
+| `next_steps` | array[`NextStep`] | 1-5 个 | 非破坏性排查动作 |
+| `caveats` | array[string] | 1-3 个,每项 1-400 字 | 风险提示;必须说明仅基于粘贴报错文本 |
+
+`LikelyCause`:
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `cause` | string | 1-400 字 | 可能原因 |
+| `is_inference` | `Literal[true]` | 固定 | b1 不输出确定事实判断 |
+| `confidence` | `Literal["low","medium"]` | 禁 high | 置信度 |
+| `supporting_signals` | array[string] | 1-6 个,每项 8-200 字 | 必须是服务端二次脱敏后送入 provider 的文本精确子串 |
+
+`NextStep` 只有 `action:string(1-400)`。步骤必须是非破坏性排查建议,不得伪装成已经执行。
+
+### 14.3 Explanation 错误响应
+
+Explanation 错误响应独立于旧 `BridgeErrorResponse` 的 Literal,但 shape 仍是 `{error,message}`。
+
+| 触发 | HTTP | `error` |
+|---|---:|---|
+| provider 鉴权 / quota / rate / server 错误,或共享 provider 不可用 | 503 | `bridge_explanation_unavailable` |
+| provider `LLMTimeoutError` 或服务端 `wait_for` deadline | 504 | `bridge_explanation_timeout` |
+| 坏 JSON / schema / validator / 输出隐私扫描命中 | 502 | `bridge_explanation_failed` |
+
+所有错误文案为固定中文友好文案,不得包含用户 `error_text` 正文、绝对路径或源码。隐私扫描命中时 fail-closed,不做替换后返回。

@@ -9,7 +9,7 @@ from eval._paper_eval_dynamic_id_adapter import AdapterBinding, R1aPreFailure
 
 RuleStatus = Literal["pass", "fail", "n/a"]
 Verdict = Literal["pass", "partial", "fail", "not_evaluated"]
-CaseKind = Literal["material_to_plan", "missing_param"]
+CaseKind = Literal["material_to_plan", "missing_param", "error_explanation"]
 
 MISSING_VALUE_SENTINEL = "null"
 
@@ -45,6 +45,8 @@ def compute_verdict(
             return "fail"
         soft = [rule_results.get(name) for name in ("a1", "c2", "c3", "d1")]
         return "pass" if all(_soft_rule_perfect(rule) for rule in soft) else "partial"
+    if case_kind == "error_explanation":
+        return "pass" if _error_explanation_rules_passed(rule_results) else "fail"
     raise ValueError(f"unknown case kind: {case_kind}")
 
 
@@ -485,6 +487,17 @@ def _soft_rule_perfect(rule: Any) -> bool:
 
 def _rule_passed(rule: Any) -> bool:
     return isinstance(rule, dict) and rule.get("status") == "pass"
+
+
+def _error_explanation_rules_passed(rule_results: dict[str, Any]) -> bool:
+    required = (
+        "error_mapping",
+        "schema_contract",
+        "privacy",
+        "timeout",
+        "grounding_hygiene",
+    )
+    return all(_rule_passed(rule_results.get(name)) for name in required)
 
 
 def _public_rule(rule: Any) -> Any:
