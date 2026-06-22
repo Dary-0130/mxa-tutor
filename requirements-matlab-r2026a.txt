@@ -1,0 +1,3 @@
+# Optional local MATLAB Engine dependency for R2026a substrate checks.
+# Do not include this file from requirements-dev.txt; CI runners do not have MATLAB.
+matlabengine==26.1.12

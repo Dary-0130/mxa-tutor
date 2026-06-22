@@ -110,6 +110,56 @@ class PaperUserSupplyError(MxaError):
     """用户补充 paper plan 参数失败。"""
 
 
+class MatlabEngineError(MxaError):
+    """MATLAB Engine substrate 相关异常的基类。"""
+
+    def __init__(
+        self,
+        reason_code: str,
+        *,
+        diagnostic_metadata: dict[str, object] | None = None,
+    ) -> None:
+        self.reason_code = reason_code
+        self.diagnostic_metadata = dict(diagnostic_metadata or {})
+        super().__init__(reason_code)
+
+
+class MatlabEngineUnavailableError(MatlabEngineError):
+    """MATLAB Engine Python package 不可用。"""
+
+
+class MatlabEngineStartupError(MatlabEngineError):
+    """MATLAB Engine owned session 启动失败。"""
+
+
+class MatlabEngineConnectionError(MatlabEngineError):
+    """MATLAB Engine shared session 连接失败。"""
+
+
+class MatlabEngineCapabilityError(MatlabEngineError):
+    """MATLAB / Simulink 能力或许可不满足运行要求。"""
+
+
+class MatlabEngineExecutionError(MatlabEngineError):
+    """MATLAB 函数或模型执行失败。"""
+
+
+class MatlabEngineTimeoutError(MatlabEngineError):
+    """MATLAB Engine FutureResult 等待超时。"""
+
+
+class MatlabEngineCancelledError(MatlabEngineError):
+    """MATLAB Engine 调用被主动取消。"""
+
+
+class MatlabEngineSessionError(MatlabEngineError):
+    """MATLAB Engine session 状态不允许当前操作。"""
+
+
+class MatlabEngineBusyError(MatlabEngineSessionError):
+    """同一 MATLAB Engine session 已有调用在执行。"""
+
+
 class ChatSessionNotFoundError(ProjectError):
     """指定对话会话不存在。"""
 
