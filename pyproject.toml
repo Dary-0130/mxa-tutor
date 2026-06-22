@@ -30,3 +30,7 @@ markers = [
 [[tool.mypy.overrides]]
 module = "sentence_transformers.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["matlab", "matlab.*"]
+ignore_missing_imports = true

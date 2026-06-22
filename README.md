@@ -44,6 +44,23 @@ pytest                          # 或 python -m pytest
 
 未来归档计划(X10 候选):新增 `environment.yml`(conda 一键复刻)+ `Makefile` pytest 路径统一 + `.python-version`(pyenv 标准)。
 
+### MATLAB Engine 本地装配
+
+MATLAB Engine 只用于 MATLAB / Simulink 在场机器的 substrate 验收,不进入默认
+`requirements.txt` 或 `requirements-dev.txt`。在服务实际使用的同一个 `.venv` 里安装:
+
+```powershell
+.venv\Scripts\python -m pip install -r requirements-matlab-r2026a.txt
+```
+
+安装后用 `importlib.metadata.version("matlabengine")` 和 distribution location 取证,
+不要用临时 `sys.path` / `PYTHONPATH` 注入 `F:\Matlab\extern\engines\python`。
+真实 Engine 集成门用:
+
+```bash
+make test-engine
+```
+
 ## 快速启动
 
 1. 克隆仓库:

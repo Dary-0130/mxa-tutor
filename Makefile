@@ -1,4 +1,4 @@
-.PHONY: install dev test lint format type-check hygiene check clean export-schema verify-schema
+.PHONY: install dev test test-engine lint format type-check hygiene check clean export-schema verify-schema
 
 install:
 	pip install -r requirements-dev.txt
@@ -8,6 +8,9 @@ dev:
 
 test:
 	pytest -v
+
+test-engine:
+	python -c "import os, subprocess, sys; from pathlib import Path; win = Path('.venv/Scripts/python.exe'); posix = Path('.venv/bin/python'); exe = str(win if win.exists() else posix if posix.exists() else Path(sys.executable)); env = os.environ.copy(); env['MXA_RUN_MATLAB_ENGINE'] = '1'; raise SystemExit(subprocess.call([exe, '-m', 'pytest', '-v', 'tests/adapters/matlab_engine/test_runtime_integration.py'], env=env))"
 
 lint:
 	ruff check .
