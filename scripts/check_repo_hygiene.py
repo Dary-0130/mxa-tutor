@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 FAILED = False
@@ -21,24 +22,33 @@ def _read(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+def _git_tracked_files() -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return [Path(path) for path in result.stdout.split("\0") if path]
+
+
 def _py_files(include_tests: bool = True) -> list[Path]:
-    ignored = {".venv", ".git"}
+    ignored: set[str] = set()
     if not include_tests:
         ignored.update({"eval", "scripts", "tests", "tools"})
     return [
-        path for path in Path(".").rglob("*.py") if not any(part in ignored for part in path.parts)
+        path
+        for path in _git_tracked_files()
+        if path.suffix == ".py" and not _has_part(path, ignored)
     ]
 
 
 def _text_files_by_suffix(*suffixes: str) -> list[Path]:
-    ignored = {".venv", ".git"}
-    return [
-        path
-        for path in Path(".").rglob("*")
-        if path.is_file()
-        and path.suffix in suffixes
-        and not any(part in ignored for part in path.parts)
-    ]
+    return [path for path in _git_tracked_files() if path.suffix in suffixes]
+
+
+def _has_part(path: Path, parts: set[str]) -> bool:
+    return any(part in parts for part in path.parts)
 
 
 def check_gitignore_entries() -> None:
