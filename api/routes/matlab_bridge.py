@@ -4,19 +4,31 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from ipaddress import ip_address
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.routing import APIRoute
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import Message, Receive
 
-from api.dependencies import get_matlab_bridge_diagnostic_service
+from api.dependencies import (
+    get_matlab_bridge_diagnostic_service,
+    get_matlab_bridge_explanation_service,
+)
 from features.matlab_bridge.bridge_diagnostic_schemas import (
     BridgeDiagnosticReceiptModel,
     BridgeDiagnosticRequest,
     BridgeErrorResponse,
+)
+from features.matlab_bridge.bridge_explanation_schemas import (
+    BridgeExplanationErrorResponse,
+    BridgeExplanationRequest,
+    BridgeExplanationResultModel,
+)
+from features.matlab_bridge.bridge_explanation_service import (
+    BridgeExplanationService,
+    bridge_explanation_error_payloads,
 )
 
 MAX_BRIDGE_BODY_BYTES = 32 * 1024
@@ -139,3 +151,53 @@ async def bridge_diagnostic(
     service = get_matlab_bridge_diagnostic_service()
     receipt = service.consume(request_body.to_domain())
     return BridgeDiagnosticReceiptModel.from_domain(receipt)
+
+
+@router.post(
+    "/api/v1/bridge/explanation",
+    response_model=BridgeExplanationResultModel,
+    responses={
+        403: {"model": BridgeErrorResponse},
+        413: {"model": BridgeErrorResponse},
+        415: {"model": BridgeErrorResponse},
+        422: {
+            "description": "Global validation error shape",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "validation_error",
+                        "message": "请求参数有问题,请检查后重试",
+                    }
+                }
+            },
+        },
+        502: {
+            "model": BridgeExplanationErrorResponse,
+            "content": {
+                "application/json": {"example": bridge_explanation_error_payloads()[502]},
+            },
+        },
+        503: {
+            "model": BridgeExplanationErrorResponse,
+            "content": {
+                "application/json": {"example": bridge_explanation_error_payloads()[503]},
+            },
+        },
+        504: {
+            "model": BridgeExplanationErrorResponse,
+            "content": {
+                "application/json": {"example": bridge_explanation_error_payloads()[504]},
+            },
+        },
+    },
+)
+async def bridge_explanation(
+    request_body: BridgeExplanationRequest,
+    service: Annotated[
+        BridgeExplanationService,
+        Depends(get_matlab_bridge_explanation_service),
+    ],
+) -> BridgeExplanationResultModel:
+    """Explain one user-confirmed MATLAB manual_error diagnostic."""
+    result = await service.explain(request_body.to_domain())
+    return BridgeExplanationResultModel.from_domain(result)

@@ -36,8 +36,10 @@ toolboxFiles = [
     fullfile(appDir, "mxaMatlabBridgeApp.m")
     fullfile(appDir, "+mxa", "+bridge", "MatlabBridgeApp.m")
     fullfile(appDir, "+mxa", "+bridge", "defaultConfirm.m")
+    fullfile(appDir, "+mxa", "+bridge", "formatExplanation.m")
     fullfile(appDir, "+mxa", "+bridge", "formatReceipt.m")
     fullfile(appDir, "+mxa", "+bridge", "postDiagnostic.m")
+    fullfile(appDir, "+mxa", "+bridge", "postExplanation.m")
     fullfile(appDir, "+mxa", "+bridge", "redactDiagnosticText.m")
     fullfile(appDir, "+mxa", "+bridge", "validateBaseUrl.m")
 ];

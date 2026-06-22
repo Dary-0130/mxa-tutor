@@ -30,6 +30,7 @@ from adapters.parser.pdf_parser import PdfParser
 from adapters.parser.slx_parser import SlxParserImpl
 from adapters.parser.zip_extractor import safe_extract
 from app.config import AppSettings
+from core.domain.exceptions import BridgeExplanationUnavailableError
 from core.interfaces.chat_store import ChatStore
 from core.interfaces.document_parser import DocumentParserRouter
 from core.interfaces.embedder import EmbeddingProvider
@@ -42,7 +43,7 @@ from core.interfaces.vector_store import VectorStore
 from features.chat.chat_service import ChatService
 from features.chunking import ChunkingService
 from features.ingest.upload_service import ExtractFn, UploadService
-from features.matlab_bridge import DiagnosticService
+from features.matlab_bridge import BridgeExplanationService, DiagnosticService
 from features.overview import OverviewCache
 from features.overview._teaching_level_policy import TeachingLevelPolicy
 from features.overview._teaching_unit_builder import TeachingUnitBuilder
@@ -68,6 +69,14 @@ def get_settings() -> AppSettings:
 def get_matlab_bridge_diagnostic_service() -> DiagnosticService:
     """Return the stateless MATLAB bridge diagnostic service."""
     return DiagnosticService()
+
+
+def get_matlab_bridge_explanation_service(request: Request) -> BridgeExplanationService:
+    """Return a bridge explanation service using the shared app text provider."""
+    text_provider = getattr(request.app.state, "text_provider", None)
+    if text_provider is None:
+        raise BridgeExplanationUnavailableError("text_provider_unavailable") from None
+    return BridgeExplanationService(text_provider=cast(TextProvider, text_provider))
 
 
 def get_project_store(request: Request) -> ProjectStore:

@@ -1,0 +1,133 @@
+{
+  "$defs": {
+    "LikelyCauseModel": {
+      "additionalProperties": false,
+      "properties": {
+        "cause": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Cause",
+          "type": "string"
+        },
+        "is_inference": {
+          "const": true,
+          "title": "Is Inference",
+          "type": "boolean"
+        },
+        "confidence": {
+          "enum": [
+            "low",
+            "medium"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "supporting_signals": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 8,
+            "type": "string"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Supporting Signals",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cause",
+        "is_inference",
+        "confidence",
+        "supporting_signals"
+      ],
+      "title": "LikelyCauseModel",
+      "type": "object"
+    },
+    "NextStepModel": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "NextStepModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {
+      "const": "0.3-b1",
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "request_id": {
+      "format": "uuid4",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "status": {
+      "const": "completed",
+      "title": "Status",
+      "type": "string"
+    },
+    "mode": {
+      "const": "llm_error_explanation",
+      "title": "Mode",
+      "type": "string"
+    },
+    "meaning": {
+      "maxLength": 1500,
+      "minLength": 1,
+      "title": "Meaning",
+      "type": "string"
+    },
+    "likely_causes": {
+      "items": {
+        "$ref": "#/$defs/LikelyCauseModel"
+      },
+      "maxItems": 4,
+      "minItems": 1,
+      "title": "Likely Causes",
+      "type": "array"
+    },
+    "next_steps": {
+      "items": {
+        "$ref": "#/$defs/NextStepModel"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "title": "Next Steps",
+      "type": "array"
+    },
+    "caveats": {
+      "items": {
+        "maxLength": 400,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Caveats",
+      "type": "array"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "request_id",
+    "status",
+    "mode",
+    "meaning",
+    "likely_causes",
+    "next_steps",
+    "caveats"
+  ],
+  "title": "BridgeExplanationResultModel",
+  "type": "object"
+}
