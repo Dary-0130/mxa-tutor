@@ -55,10 +55,9 @@ check_env_example_fields() {
 }
 
 check_no_key_leaks() {
-    local pattern="your-api-key\|sk-real\|sk-prod\|sk-live"
+    local pattern="your-api-key|sk-real|sk-prod|sk-live"
 
-    if hits=$(grep -rn "$pattern" --include="*.example" --include="*.toml" \
-        --exclude-dir=".venv" --exclude-dir=".git" . 2>/dev/null); then
+    if hits=$(git grep -n -E -e "$pattern" -- "*.example" "*.toml" 2>/dev/null); then
         fail "no leaked real-looking API keys" "$hits"
     else
         pass "no leaked real-looking API keys"
@@ -66,10 +65,9 @@ check_no_key_leaks() {
 }
 
 check_no_todos() {
-    local pattern="TODO\|FIXME\|XXX"
+    local pattern="TODO|FIXME|XXX"
 
-    if hits=$(grep -rn "$pattern" --include="*.py" \
-        --exclude-dir=".venv" --exclude-dir=".git" . 2>/dev/null); then
+    if hits=$(git grep -n -E -e "$pattern" -- "*.py" 2>/dev/null); then
         fail "no TODO/FIXME/XXX in .py files" "$hits"
     else
         pass "no TODO/FIXME/XXX in .py files"
@@ -77,9 +75,11 @@ check_no_todos() {
 }
 
 check_no_print_calls() {
-    if hits=$(grep -rn "print(" --include="*.py" --exclude-dir=".venv" \
-        --exclude-dir=".git" --exclude-dir="tests" --exclude-dir="eval" \
-        --exclude-dir="scripts" --exclude-dir="tools" . 2>/dev/null); then
+    if hits=$(git grep -n -F -e "print(" -- "*.py" \
+        ":(glob,exclude)tests/**" ":(glob,exclude)**/tests/**" \
+        ":(glob,exclude)eval/**" ":(glob,exclude)**/eval/**" \
+        ":(glob,exclude)scripts/**" ":(glob,exclude)**/scripts/**" \
+        ":(glob,exclude)tools/**" ":(glob,exclude)**/tools/**" 2>/dev/null); then
         fail "no print calls in non-test .py files" "$hits"
     else
         pass "no print calls in non-test .py files"
@@ -87,8 +87,7 @@ check_no_print_calls() {
 }
 
 check_no_bare_except() {
-    if hits=$(grep -rn "^[[:space:]]*except:" --include="*.py" \
-        --exclude-dir=".venv" --exclude-dir=".git" . 2>/dev/null); then
+    if hits=$(git grep -n -E -e "^[[:space:]]*except:" -- "*.py" 2>/dev/null); then
         fail "no bare except in .py files" "$hits"
     else
         pass "no bare except in .py files"
