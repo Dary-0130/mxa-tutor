@@ -51,18 +51,26 @@ def _valid_result(**overrides: object) -> dict[str, object]:
     return payload
 
 
-def test_request_strips_error_text_and_converts_to_domain() -> None:
-    request = BridgeExplanationRequest.model_validate(_valid_request(error_text="  manual error  "))
+@pytest.mark.parametrize("diagnostic_kind", ["manual_error", "auto_captured_error"])
+def test_request_strips_error_text_and_converts_to_domain(diagnostic_kind: str) -> None:
+    request = BridgeExplanationRequest.model_validate(
+        _valid_request(diagnostic_kind=diagnostic_kind, error_text="  manual error  ")
+    )
 
     domain = request.to_domain()
 
     assert domain.protocol_version == "0.3-b1"
     assert domain.request_id == UUID(REQUEST_ID)
-    assert domain.diagnostic_kind == "manual_error"
+    assert domain.diagnostic_kind == diagnostic_kind
     assert domain.matlab_release == "R2026a"
     assert domain.client_version == "0.1.0"
     assert domain.error_text == "manual error"
     assert domain.llm_processing_consent_confirmed is True
+
+
+def test_request_rejects_unknown_diagnostic_kind() -> None:
+    with pytest.raises(ValidationError):
+        BridgeExplanationRequest.model_validate(_valid_request(diagnostic_kind="diagnostic_stub"))
 
 
 @pytest.mark.parametrize("value", [False, 1, "true"])

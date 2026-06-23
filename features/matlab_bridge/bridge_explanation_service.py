@@ -30,6 +30,14 @@ DEFAULT_BRIDGE_EXPLANATION_MAX_TOKENS = 2048
 _BRIDGE_EXPLANATION_FAILED_MESSAGE = "报错解释生成失败,请稍后重试"
 _BRIDGE_EXPLANATION_UNAVAILABLE_MESSAGE = "报错解释服务暂时不可用,请稍后重试"
 _BRIDGE_EXPLANATION_TIMEOUT_MESSAGE = "报错解释超时,请稍后重试"
+_DIAGNOSTIC_SOURCE_DESCRIPTIONS = {
+    "manual_error": "用户手动粘贴并确认的 MATLAB 报错文本",
+    "auto_captured_error": "客户端自动采集、脱敏、截断并经用户确认的 MATLAB 报错文本",
+}
+_REQUIRED_SOURCE_CAVEAT_FRAGMENTS = {
+    "manual_error": "粘贴的报错文本",
+    "auto_captured_error": "自动采集的报错文本",
+}
 
 _REDACTION_PLACEHOLDERS = {"[REDACTED_PATH]", "[REDACTED_SECRET]", "[REDACTED_SOURCE]"}
 _BUILTIN_IDENTIFIER_ALLOWLIST = {
@@ -107,11 +115,12 @@ class BridgeExplanationService:
         logger.info(
             (
                 "Bridge explanation LLM call: request_id={} matlab_release={} "
-                "client_version={} prompt_version={} payload_chars={}"
+                "client_version={} diagnostic_kind={} prompt_version={} payload_chars={}"
             ),
             str(request.request_id),
             request.matlab_release,
             request.client_version,
+            request.diagnostic_kind,
             self._prompt_template.version,
             len(redacted_error_text),
         )
@@ -164,6 +173,12 @@ class BridgeExplanationService:
                 "MATLAB_RELEASE": request.matlab_release,
                 "CLIENT_VERSION": request.client_version,
                 "DIAGNOSTIC_KIND": request.diagnostic_kind,
+                "DIAGNOSTIC_SOURCE_DESCRIPTION": _DIAGNOSTIC_SOURCE_DESCRIPTIONS[
+                    request.diagnostic_kind
+                ],
+                "SOURCE_CAVEAT_FRAGMENT": _REQUIRED_SOURCE_CAVEAT_FRAGMENTS[
+                    request.diagnostic_kind
+                ],
                 "REDACTED_ERROR_TEXT": redacted_error_text,
             },
         )
@@ -193,6 +208,7 @@ class BridgeExplanationService:
             if model.request_id != request.request_id:
                 raise ValueError("request_id_mismatch")
             _validate_grounding(model, redacted_error_text)
+            _validate_source_caveat(model, request.diagnostic_kind)
             _validate_output_privacy(model)
         except (ValidationError, ValueError) as exc:
             _log_validation_error(request, type(exc).__name__)
@@ -265,6 +281,12 @@ def _validate_output_privacy(model: BridgeExplanationResultModel) -> None:
     output_text = "\n".join(_iter_output_strings(model))
     if contains_private_text(output_text):
         raise ValueError("privacy_scan_failed")
+
+
+def _validate_source_caveat(model: BridgeExplanationResultModel, diagnostic_kind: str) -> None:
+    required_fragment = _REQUIRED_SOURCE_CAVEAT_FRAGMENTS[diagnostic_kind]
+    if not any(required_fragment in caveat for caveat in model.caveats):
+        raise ValueError("source_caveat_missing")
 
 
 def contains_private_text(text: str) -> bool:

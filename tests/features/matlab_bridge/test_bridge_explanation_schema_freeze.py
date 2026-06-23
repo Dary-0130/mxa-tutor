@@ -69,6 +69,7 @@ def test_literals_are_frozen() -> None:
     )
     assert get_args(BridgeExplanationRequestModel.model_fields["diagnostic_kind"].annotation) == (
         "manual_error",
+        "auto_captured_error",
     )
     assert get_args(BridgeExplanationResultModel.model_fields["status"].annotation) == (
         "completed",

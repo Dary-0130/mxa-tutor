@@ -1,4 +1,4 @@
-"""Run the TASK-510 MATLAB bridge headless E2E against a real FastAPI app."""
+"""Run the MATLAB bridge headless E2E against a real FastAPI app."""
 
 from __future__ import annotations
 
@@ -50,6 +50,13 @@ class FakeTextProvider:
         _ = json_mode, timeout, max_tokens
         text = "\n".join(message.content for message in messages)
         request_id = _extract_request_id(text)
+        diagnostic_kind = _extract_diagnostic_kind(text)
+        if diagnostic_kind == "auto_captured_error":
+            supporting_signal = "Undefined function or variable Kp_ctrl"
+            caveat = "这里只基于自动采集的报错文本,没有运行仿真。"
+        else:
+            supporting_signal = "Error in [REDACTED_PATH] at line 1"
+            caveat = "这里只基于粘贴的报错文本,没有运行仿真。"
         payload = {
             "protocol_version": "0.3-b1",
             "request_id": request_id,
@@ -61,11 +68,11 @@ class FakeTextProvider:
                     "cause": "错误可能与报错中提到的位置或调用链有关。",
                     "is_inference": True,
                     "confidence": "low",
-                    "supporting_signals": ["Error in [REDACTED_PATH] at line 1"],
+                    "supporting_signals": [supporting_signal],
                 }
             ],
             "next_steps": [{"action": "先运行 `which` 查看相关名称解析,再检查初始化脚本。"}],
-            "caveats": ["这里只基于粘贴的报错文本,没有运行仿真。"],
+            "caveats": [caveat],
         }
         return LLMResponse(
             text=json.dumps(payload, ensure_ascii=False),
@@ -130,14 +137,16 @@ def main() -> int:
         except subprocess.CalledProcessError:
             print(f"bridge_requests_seen={bridge_counter}")
             raise
-        if bridge_counter != {"diagnostic": 1, "explanation": 1}:
+        if bridge_counter != {"diagnostic": 1, "explanation": 2}:
             raise AssertionError(f"unexpected bridge request counts: {bridge_counter}")
     finally:
         for server, _ in servers:
             server.should_exit = True
         for _, thread in servers:
             thread.join(timeout=15)
-    print("TASK-510 E2E passed: " f"mltbx={mltbx_path} size={mltbx_path.stat().st_size} bytes")
+    print(
+        "TASK-514 bridge E2E passed: " f"mltbx={mltbx_path} size={mltbx_path.stat().st_size} bytes"
+    )
     return 0
 
 
@@ -208,6 +217,13 @@ def _extract_request_id(text: str) -> str:
     )
     if match is None:
         raise RuntimeError("request_id missing from bridge prompt")
+    return match.group(1)
+
+
+def _extract_diagnostic_kind(text: str) -> str:
+    match = re.search(r"diagnostic_kind:\s*([A-Za-z0-9_]+)", text)
+    if match is None:
+        raise RuntimeError("diagnostic_kind missing from bridge prompt")
     return match.group(1)
 
 

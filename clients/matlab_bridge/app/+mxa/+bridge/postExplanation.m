@@ -1,5 +1,5 @@
 function response = postExplanation(baseUrl, payload, timeoutSeconds)
-%POSTEXPLANATION Send a manual diagnostic payload to the explanation endpoint.
+%POSTEXPLANATION Send a diagnostic payload to the explanation endpoint.
 
 mxa.bridge.validateBaseUrl(baseUrl);
 base = char(strip(string(baseUrl)));

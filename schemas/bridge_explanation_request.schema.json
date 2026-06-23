@@ -12,7 +12,10 @@
       "type": "string"
     },
     "diagnostic_kind": {
-      "const": "manual_error",
+      "enum": [
+        "manual_error",
+        "auto_captured_error"
+      ],
       "title": "Diagnostic Kind",
       "type": "string"
     },

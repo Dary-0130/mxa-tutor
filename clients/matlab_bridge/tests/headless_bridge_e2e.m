@@ -33,6 +33,23 @@ assert(~contains(responseText, "不提供报错解释"));
 assert(~contains(app.LastSanitizedText, "C:\Users\alice"));
 delete(appCleanup);
 
+autoApp = mxaMatlabBridgeApp( ...
+    BaseUrl=baseUrlText, ...
+    Visible="off", ...
+    ConfirmFunction=@(~, ~) true);
+autoCleanup = onCleanup(@() delete(autoApp));
+autoSubmitted = autoApp.runAndExplain(@throwAutoCaptureError);
+if ~autoSubmitted
+    error("mxa:bridge:E2EAutoSubmitFailed", "auto submit failed: %s", autoApp.LastErrorIdentifier);
+end
+autoResponseText = strjoin(string(autoApp.ResponseTextArea.Value), newline);
+assert(contains(autoResponseText, "报错解释已生成"));
+assert(isempty(autoApp.LastReceipt));
+assert(~contains(autoApp.LastSanitizedText, "C:\Users\alice"));
+assert(~contains(autoApp.LastSanitizedText, "sk-"));
+assert(contains(autoApp.LastSanitizedText, "Undefined function or variable Kp_ctrl"));
+delete(autoCleanup);
+
 cancelApp = mxaMatlabBridgeApp( ...
     BaseUrl=baseUrlText, ...
     Visible="off", ...
@@ -43,6 +60,17 @@ cancelSubmitted = cancelApp.submitManualError();
 assert(~cancelSubmitted);
 assert(isempty(cancelApp.LastReceipt));
 delete(cancelCleanup);
+
+autoCancelApp = mxaMatlabBridgeApp( ...
+    BaseUrl=baseUrlText, ...
+    Visible="off", ...
+    ConfirmFunction=@(~, ~) false);
+autoCancelCleanup = onCleanup(@() delete(autoCancelApp));
+autoCancelSubmitted = autoCancelApp.runAndExplain(@throwAutoCaptureError);
+assert(~autoCancelSubmitted);
+assert(isempty(autoCancelApp.LastReceipt));
+assert(isempty(autoCancelApp.LastExplanation));
+delete(autoCancelCleanup);
 
 cleanupToolbox(toolbox);
 delete(cleanup);
@@ -63,4 +91,11 @@ if isstruct(toolbox)
 else
     value = string(toolbox.(name));
 end
+end
+
+function throwAutoCaptureError()
+error( ...
+    "mxa:bridge:E2EAutoError", ...
+    "Undefined function or variable Kp_ctrl in %s token=sk-SECRET1234567890", ...
+    "C:\Users\alice\secret\model.m");
 end

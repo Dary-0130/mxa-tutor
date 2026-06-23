@@ -186,6 +186,39 @@ def test_valid_explanation_request_uses_fake_provider_and_redacts_input(
     assert "SECRET123456789" not in provider_input
 
 
+def test_auto_captured_explanation_request_is_accepted_without_diagnostic_ack(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    provider = FakeExplanationProvider(
+        text=json.dumps(
+            _valid_result(caveats=["这里只基于自动采集的报错文本,没有运行仿真。"]),
+            ensure_ascii=False,
+        )
+    )
+    app = _create_app(monkeypatch, tmp_path, provider=provider)
+
+    response = _request(
+        app,
+        "POST",
+        EXPLANATION_PATH,
+        json=_valid_request(
+            diagnostic_kind="auto_captured_error",
+            error_text=(
+                "identifier: Simulink:Config\n"
+                "message:\n"
+                f"{SIGNAL} C:\\Users\\alice\\secret\\model.m"
+            ),
+        ),
+    )
+
+    provider_input = "\n".join(message.content for message in provider.messages)
+    assert response.status_code == 200
+    assert provider.calls == 1
+    assert "diagnostic_kind: auto_captured_error" in provider_input
+    assert "C:\\Users\\alice" not in provider_input
+
+
 @pytest.mark.parametrize("host", ["8.8.8.8", "not-an-ip"])
 def test_explanation_uses_same_loopback_guard(
     monkeypatch: pytest.MonkeyPatch,
@@ -308,19 +341,18 @@ def test_explanation_pydantic_failures_keep_global_422_shape(
 ) -> None:
     app = _create_app(monkeypatch, tmp_path, provider=FakeExplanationProvider())
 
-    response = _request(
-        app,
-        "POST",
-        EXPLANATION_PATH,
-        json=_valid_request(source_code=SECRET),
-    )
+    for payload in (
+        _valid_request(source_code=SECRET),
+        _valid_request(diagnostic_kind="diagnostic_stub"),
+    ):
+        response = _request(app, "POST", EXPLANATION_PATH, json=payload)
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "error": "validation_error",
-        "message": "请求参数有问题,请检查后重试",
-    }
-    assert SECRET not in response.text
+        assert response.status_code == 422
+        assert response.json() == {
+            "error": "validation_error",
+            "message": "请求参数有问题,请检查后重试",
+        }
+        assert SECRET not in response.text
 
 
 def test_openapi_declares_explanation_error_responses(

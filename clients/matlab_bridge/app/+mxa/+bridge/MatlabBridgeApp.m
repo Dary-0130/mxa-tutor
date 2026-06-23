@@ -6,6 +6,7 @@ classdef MatlabBridgeApp < handle
         DiagnosticProtocolVersion = "0.3-a"
         ExplanationProtocolVersion = "0.3-b1"
         DiagnosticKind = "manual_error"
+        AutoCapturedDiagnosticKind = "auto_captured_error"
         ClientVersion = "0.1.0"
         SafetyPrompt = "请勿粘贴源码、账号、密钥或其他敏感信息"
         NetworkErrorMessage = "连接失败,请稍后重试。"
@@ -28,6 +29,7 @@ classdef MatlabBridgeApp < handle
         LastReceipt = []
         LastExplanation = []
         LastSanitizedText (1,1) string = ""
+        LastConfirmedSnapshot (1,1) string = ""
         LastErrorIdentifier (1,1) string = ""
     end
 
@@ -76,6 +78,7 @@ classdef MatlabBridgeApp < handle
             submitted = false;
             obj.LastReceipt = [];
             obj.LastExplanation = [];
+            obj.LastConfirmedSnapshot = "";
             obj.LastErrorIdentifier = "";
 
             if strlength(strtrim(snapshot)) == 0
@@ -100,6 +103,7 @@ classdef MatlabBridgeApp < handle
                 return
             end
 
+            obj.LastConfirmedSnapshot = snapshot;
             requestId = char(java.util.UUID.randomUUID);
             diagnosticPayload = obj.buildDiagnosticPayload(snapshot, requestId);
             try
@@ -145,6 +149,83 @@ classdef MatlabBridgeApp < handle
             obj.ResponseTextArea.Value = cellstr(splitlines( ...
                 ackText + newline + mxa.bridge.formatExplanation(explanation)));
             obj.setStatus("解释完成。");
+        end
+
+        function submitted = runAndExplain(obj, runnable)
+            arguments
+                obj
+                runnable function_handle
+            end
+
+            submitted = false;
+            try
+                runnable();
+            catch ME
+                submitted = obj.submitAutoCapturedError(ME);
+                return
+            end
+
+            obj.setStatus("未捕获到 MATLAB 报错。");
+            obj.ResponseTextArea.Value = cellstr("未捕获到 MATLAB 报错。");
+        end
+
+        function submitted = submitAutoCapturedError(obj, caughtException)
+            submitted = false;
+            obj.LastReceipt = [];
+            obj.LastExplanation = [];
+            obj.LastSanitizedText = "";
+            obj.LastConfirmedSnapshot = "";
+            obj.LastErrorIdentifier = "";
+
+            try
+                snapshot = mxa.bridge.captureExceptionSnapshot(caughtException);
+            catch ME
+                obj.LastErrorIdentifier = string(ME.identifier);
+                obj.setStatus("自动采集失败,未发送。");
+                obj.ResponseTextArea.Value = cellstr("自动采集失败,未发送。");
+                return
+            end
+
+            obj.LastSanitizedText = snapshot;
+            obj.PreviewTextArea.Value = cellstr(splitlines(snapshot));
+            confirmed = false;
+            try
+                confirmed = logical(obj.ConfirmFunction(obj.UIFigure, snapshot));
+            catch ME
+                obj.LastErrorIdentifier = string(ME.identifier);
+                obj.setStatus("已取消发送。");
+                obj.ResponseTextArea.Value = cellstr("已取消发送。");
+                return
+            end
+
+            if ~confirmed
+                obj.setStatus("已取消发送。");
+                obj.ResponseTextArea.Value = cellstr("已取消发送。");
+                return
+            end
+
+            obj.LastConfirmedSnapshot = snapshot;
+            requestId = char(java.util.UUID.randomUUID);
+            explanationPayload = obj.buildExplanationPayload( ...
+                snapshot, ...
+                requestId, ...
+                obj.AutoCapturedDiagnosticKind);
+            try
+                explanation = obj.ExplanationPostFunction( ...
+                    obj.BaseUrl, ...
+                    explanationPayload, ...
+                    obj.ExplanationTimeoutSeconds);
+            catch ME
+                obj.LastErrorIdentifier = string(ME.identifier);
+                obj.setStatus(obj.ExplanationErrorMessage);
+                obj.ResponseTextArea.Value = cellstr(obj.ExplanationErrorMessage);
+                return
+            end
+
+            obj.LastExplanation = explanation;
+            obj.ResponseTextArea.Value = cellstr(splitlines(mxa.bridge.formatExplanation(explanation)));
+            obj.setStatus("解释完成。");
+            submitted = true;
         end
     end
 
@@ -207,11 +288,14 @@ classdef MatlabBridgeApp < handle
             payload.consent_confirmed = true;
         end
 
-        function payload = buildExplanationPayload(obj, sanitizedText, requestId)
+        function payload = buildExplanationPayload(obj, sanitizedText, requestId, diagnosticKind)
+            if ~exist("diagnosticKind", "var")
+                diagnosticKind = obj.DiagnosticKind;
+            end
             payload = struct();
             payload.protocol_version = char(obj.ExplanationProtocolVersion);
             payload.request_id = char(requestId);
-            payload.diagnostic_kind = char(obj.DiagnosticKind);
+            payload.diagnostic_kind = char(diagnosticKind);
             payload.matlab_release = char("R" + string(version("-release")));
             payload.client_version = char(obj.ClientVersion);
             payload.error_text = char(sanitizedText);

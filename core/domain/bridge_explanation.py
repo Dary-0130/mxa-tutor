@@ -11,7 +11,7 @@ from uuid import UUID
 class BridgeExplanationRequest:
     protocol_version: Literal["0.3-b1"]
     request_id: UUID
-    diagnostic_kind: Literal["manual_error"]
+    diagnostic_kind: Literal["manual_error", "auto_captured_error"]
     matlab_release: str
     client_version: str
     error_text: str

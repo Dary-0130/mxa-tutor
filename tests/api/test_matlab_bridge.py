@@ -310,6 +310,7 @@ def test_body_limiter_still_rejects_after_starlette_base_body_cache() -> None:
         _valid_payload(error_text=""),
         _valid_payload(error_text="\x00"),
         _valid_payload(client_version="bad version!"),
+        _valid_payload(diagnostic_kind="auto_captured_error"),
         _valid_payload(source_code=SECRET),
     ],
 )
