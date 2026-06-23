@@ -198,6 +198,6 @@ async def bridge_explanation(
         Depends(get_matlab_bridge_explanation_service),
     ],
 ) -> BridgeExplanationResultModel:
-    """Explain one user-confirmed MATLAB manual_error diagnostic."""
+    """Explain one user-confirmed MATLAB bridge error diagnostic."""
     result = await service.explain(request_body.to_domain())
     return BridgeExplanationResultModel.from_domain(result)

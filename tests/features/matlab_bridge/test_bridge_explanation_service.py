@@ -83,11 +83,15 @@ class FakeProvider(TextProvider):
         return ModelCapability(model_name="fake")
 
 
-def _request(error_text: str = RAW_ERROR) -> BridgeExplanationRequest:
+def _request(
+    error_text: str = RAW_ERROR,
+    *,
+    diagnostic_kind: str = "manual_error",
+) -> BridgeExplanationRequest:
     return BridgeExplanationRequest(
         protocol_version="0.3-b1",
         request_id=UUID(REQUEST_ID),
-        diagnostic_kind="manual_error",
+        diagnostic_kind=diagnostic_kind,  # type: ignore[arg-type]
         matlab_release="R2026a",
         client_version="0.1.0",
         error_text=error_text,
@@ -138,6 +142,37 @@ async def test_explain_redacts_before_provider_and_passes_locked_call_options() 
     assert "sk-SECRET12345" not in provider_input
     assert "[REDACTED_PATH]" in provider_input
     assert "[REDACTED_SECRET]" in provider_input
+
+
+async def test_auto_captured_source_reuses_same_redaction_and_prompt_guardrails() -> None:
+    provider = FakeProvider(
+        text=json.dumps(
+            _valid_result(caveats=["这里只基于自动采集的报错文本,没有运行仿真。"]),
+            ensure_ascii=False,
+        )
+    )
+    service = BridgeExplanationService(provider)
+
+    result = await service.explain(
+        _request(
+            (
+                "identifier: Simulink:Config\n"
+                "message:\n"
+                "token=sk-SECRET12345 in C:\\Users\\alice\\secret\\model.m\n"
+                f"{REDACTED_SIGNAL}"
+            ),
+            diagnostic_kind="auto_captured_error",
+        )
+    )
+
+    provider_input = "\n".join(message.content for message in provider.messages)
+    assert result.status == "completed"
+    assert "diagnostic_kind: auto_captured_error" in provider_input
+    assert "required_caveat_phrase: 自动采集的报错文本" in provider_input
+    assert "sk-SECRET12345" not in provider_input
+    assert "C:\\Users\\alice" not in provider_input
+    assert "[REDACTED_SECRET]" in provider_input
+    assert "[REDACTED_PATH]" in provider_input
 
 
 @pytest.mark.parametrize(
@@ -194,6 +229,7 @@ async def test_server_deadline_timeout_maps_to_timeout() -> None:
         "[]",
         json.dumps(_valid_result(request_id="7ce7c327-0c4e-441f-ae0f-850b0f990636")),
         json.dumps(_valid_result(caveats=[]), ensure_ascii=False),
+        json.dumps(_valid_result(caveats=["这里只基于自动采集的报错文本。"]), ensure_ascii=False),
     ],
 )
 async def test_bad_json_schema_or_request_id_fail_closed(text: str) -> None:

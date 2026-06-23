@@ -603,9 +603,9 @@ Bridge guard 错误响应只含 `{error,message}`:
 
 Bridge route 使用 path-scoped custom `APIRoute` / `Request`,顺序固定为:feature flag 注册路由 → loopback → Content-Type → 实际 body 字节数 `>32768` → JSON → Pydantic → service。不得用普通 dependency 替代前三个请求边界。
 
-## 14. MATLAB Bridge Error Explanation 契约(TASK-511 b1)
+## 14. MATLAB Bridge Error Explanation 契约(TASK-511 b1 / TASK-514 b2-1B)
 
-`BridgeExplanation` 在 v0.3-a 连接回执之后,用同一个 `request_id` 请求一次 LLM 报错解释。它只解释用户手动粘贴的 `manual_error` 文本,不接 MATLAB Engine、不运行仿真、不验证文件或工具箱状态。质量评估和真实 case 覆盖留到后续 seam;本契约只冻结传输、结构、安全护栏和错误映射。
+`BridgeExplanation` 用于一次 LLM 报错解释。`manual_error` 保持 v0.3-a 连接回执之后用同一个 `request_id` 请求解释;`auto_captured_error` 由客户端自动采集、脱敏、截断并经用户确认后直发 `/explanation`,不走 `/diagnostic` ACK。两种来源都不接 MATLAB Engine、不运行仿真、不验证文件或工具箱状态。质量评估和真实 case 覆盖留到后续 seam;本契约只冻结传输、结构、安全护栏和错误映射。
 
 **状态**:v0.3-b1 冻结。
 
@@ -625,14 +625,14 @@ Bridge route 使用 path-scoped custom `APIRoute` / `Request`,顺序固定为:fe
 | 字段 | 类型 | 约束 | 语义 |
 |---|---|---|---|
 | `protocol_version` | `Literal["0.3-b1"]` | 必填 | 报错解释协议 |
-| `request_id` | UUID4 | 与 ACK 同一个 ID | 两段请求关联 |
-| `diagnostic_kind` | `Literal["manual_error"]` | 必填 | 用户手动粘贴错误文本 |
+| `request_id` | UUID4 | manual 与 ACK 同一个 ID;auto 为客户端本次解释请求 ID | 请求关联 |
+| `diagnostic_kind` | `Literal["manual_error","auto_captured_error"]` | 必填 | 输入来源标签:`manual_error`=用户手动粘贴错误文本;`auto_captured_error`=客户端自动采集的错误文本 |
 | `matlab_release` | string | `^R20[0-9]{2}[ab]$` | MATLAB release |
 | `client_version` | string | `^[A-Za-z0-9.\-]{1,32}$` | Add-on 版本 |
-| `error_text` | string | strip 后 1-4096 Unicode 字符,拒 NUL | 用户确认后的脱敏文本;服务端调 provider 前会再次脱敏 |
-| `llm_processing_consent_confirmed` | StrictBool | 必须为 `true` | 用户确认允许进行 LLM 解释 |
+| `error_text` | string | strip 后 1-4096 Unicode 字符,拒 NUL | 用户确认后的脱敏文本;auto 超限必须带 `[TRUNCATED_AUTO_CAPTURE]` 截断标记;服务端调 provider 前会再次脱敏 |
+| `llm_processing_consent_confirmed` | StrictBool | 必须为 `true` | 用户确认允许进行 LLM 解释,且确认的是最终发送的同一脱敏快照 |
 
-`extra="forbid"`。显式拒绝字段与 diagnostic 一致:`file_path` / `source_code` / `slx_path` / `workspace` / `stack` / `project_files` / `model_content` / `files`。
+`extra="forbid"`。显式拒绝字段与 diagnostic 一致:`file_path` / `source_code` / `slx_path` / `workspace` / `stack` / `project_files` / `model_content` / `files`。`diagnostic_kind` 只表示输入来源,不得提高解释置信度;`/diagnostic` v0.3-a stub 仍只接受 `manual_error`。
 
 ### 14.2 BridgeExplanationResult
 
@@ -645,7 +645,7 @@ Bridge route 使用 path-scoped custom `APIRoute` / `Request`,顺序固定为:fe
 | `meaning` | string | 1-1500 字 | 解释报错含义,不得新增环境事实 |
 | `likely_causes` | array[`LikelyCause`] | 1-4 个 | 可能原因 |
 | `next_steps` | array[`NextStep`] | 1-5 个 | 非破坏性排查动作 |
-| `caveats` | array[string] | 1-3 个,每项 1-400 字 | 风险提示;必须说明仅基于粘贴报错文本 |
+| `caveats` | array[string] | 1-3 个,每项 1-400 字 | 风险提示;manual 必须说明仅基于粘贴报错文本,auto 必须说明仅基于自动采集的报错文本 |
 
 `LikelyCause`:
 

@@ -32,7 +32,7 @@ from core.domain.bridge_explanation import (
 from features.matlab_bridge.bridge_diagnostic_schemas import SENSITIVE_EXTRA_FIELDS
 
 BridgeExplanationProtocolVersion = Literal["0.3-b1"]
-BridgeExplanationDiagnosticKind = Literal["manual_error"]
+BridgeExplanationDiagnosticKind = Literal["manual_error", "auto_captured_error"]
 BridgeExplanationStatus = Literal["completed"]
 BridgeExplanationMode = Literal["llm_error_explanation"]
 BridgeExplanationErrorCode = Literal[

@@ -35,6 +35,7 @@ toolboxOptions.OutputFile = fullfile(outputDir, "mxa-matlab-bridge-0.1.0.mltbx")
 toolboxFiles = [
     fullfile(appDir, "mxaMatlabBridgeApp.m")
     fullfile(appDir, "+mxa", "+bridge", "MatlabBridgeApp.m")
+    fullfile(appDir, "+mxa", "+bridge", "captureExceptionSnapshot.m")
     fullfile(appDir, "+mxa", "+bridge", "defaultConfirm.m")
     fullfile(appDir, "+mxa", "+bridge", "formatExplanation.m")
     fullfile(appDir, "+mxa", "+bridge", "formatReceipt.m")
