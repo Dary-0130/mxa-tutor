@@ -99,6 +99,7 @@ function testCaptureExceptionSnapshotUsesWhitelistAndRedactsUntrustedMessage(tes
 try
     localThrowingFunction("C:\Users\alice\secret\model.m", "api_key=SECRET123456789");
 catch ME
+    reportText = getReport(ME, "extended", "hyperlinks", "off");
     snapshot = mxa.bridge.captureExceptionSnapshot(ME);
 end
 
@@ -109,6 +110,7 @@ verifyTrue(testCase, contains(snapshot, "name: localThrowingFunction"));
 verifyFalse(testCase, contains(snapshot, "C:\Users\alice"));
 verifyFalse(testCase, contains(snapshot, "SECRET123456789"));
 verifyFalse(testCase, contains(snapshot, mfilename("fullpath")));
+verifyFalse(testCase, contains(snapshot, reportText));
 verifyTrue(testCase, contains(snapshot, "[REDACTED_PATH]"));
 verifyTrue(testCase, contains(snapshot, "[REDACTED_SECRET]"));
 end
