@@ -5,12 +5,14 @@ classdef MatlabBridgeApp < handle
         DefaultBaseUrl = "http://localhost:8000"
         DiagnosticProtocolVersion = "0.3-a"
         ExplanationProtocolVersion = "0.3-b1"
+        RunStateProtocolVersion = "0.3-b3"
         DiagnosticKind = "manual_error"
         AutoCapturedDiagnosticKind = "auto_captured_error"
         ClientVersion = "0.1.0"
         SafetyPrompt = "请勿粘贴源码、账号、密钥或其他敏感信息"
         NetworkErrorMessage = "连接失败,请稍后重试。"
         ExplanationErrorMessage = "解释失败,请稍后重试。"
+        RunStateErrorMessage = "运行状态发送失败,请稍后重试。"
     end
 
     properties
@@ -18,6 +20,7 @@ classdef MatlabBridgeApp < handle
         ConfirmFunction function_handle = @mxa.bridge.defaultConfirm
         DiagnosticPostFunction function_handle = @mxa.bridge.postDiagnostic
         ExplanationPostFunction function_handle = @mxa.bridge.postExplanation
+        RunStatePostFunction function_handle = @mxa.bridge.postRunState
         TimeoutSeconds (1,1) double = 10
         ExplanationTimeoutSeconds (1,1) double = 60
         UIFigure
@@ -28,8 +31,11 @@ classdef MatlabBridgeApp < handle
         StatusLabel
         LastReceipt = []
         LastExplanation = []
+        LastRunStateReceipt = []
         LastSanitizedText (1,1) string = ""
         LastConfirmedSnapshot (1,1) string = ""
+        LastRunStateFrozenJson (1,1) string = ""
+        LastRunStateFrozenBytes = uint8.empty(1, 0)
         LastErrorIdentifier (1,1) string = ""
     end
 
@@ -40,6 +46,7 @@ classdef MatlabBridgeApp < handle
                 options.ConfirmFunction function_handle = @mxa.bridge.defaultConfirm
                 options.DiagnosticPostFunction function_handle = @mxa.bridge.postDiagnostic
                 options.ExplanationPostFunction function_handle = @mxa.bridge.postExplanation
+                options.RunStatePostFunction function_handle = @mxa.bridge.postRunState
                 options.Visible (1,1) string {mustBeMember(options.Visible, ["on", "off"])} = "on"
                 options.TimeoutSeconds (1,1) double {mustBePositive} = 10
                 options.ExplanationTimeoutSeconds (1,1) double {mustBePositive} = 60
@@ -50,6 +57,7 @@ classdef MatlabBridgeApp < handle
             obj.ConfirmFunction = options.ConfirmFunction;
             obj.DiagnosticPostFunction = options.DiagnosticPostFunction;
             obj.ExplanationPostFunction = options.ExplanationPostFunction;
+            obj.RunStatePostFunction = options.RunStatePostFunction;
             obj.TimeoutSeconds = options.TimeoutSeconds;
             obj.ExplanationTimeoutSeconds = options.ExplanationTimeoutSeconds;
             obj.createComponents(options.Visible);
@@ -227,6 +235,70 @@ classdef MatlabBridgeApp < handle
             obj.setStatus("解释完成。");
             submitted = true;
         end
+
+        function submitted = submitRunState(obj, simulationOutput, sessionId, runSequence)
+            submitted = false;
+            obj.LastRunStateReceipt = [];
+            obj.LastRunStateFrozenJson = "";
+            obj.LastRunStateFrozenBytes = uint8.empty(1, 0);
+            obj.LastConfirmedSnapshot = "";
+            obj.LastErrorIdentifier = "";
+
+            requestId = char(java.util.UUID.randomUUID);
+            runId = char(java.util.UUID.randomUUID);
+            try
+                payload = mxa.bridge.captureRunStateSnapshot( ...
+                    simulationOutput, sessionId, runSequence, requestId, runId);
+                [frozenJson, frozenBytes] = mxa.bridge.freezeRunStatePayload(payload);
+            catch ME
+                obj.LastErrorIdentifier = string(ME.identifier);
+                obj.setStatus("运行状态采集失败,未发送。");
+                obj.ResponseTextArea.Value = cellstr("运行状态采集失败,未发送。");
+                return
+            end
+
+            obj.PreviewTextArea.Value = cellstr(splitlines(frozenJson));
+            confirmed = false;
+            try
+                confirmed = logical(obj.ConfirmFunction(obj.UIFigure, frozenJson));
+            catch ME
+                obj.LastErrorIdentifier = string(ME.identifier);
+                obj.setStatus("已取消发送。");
+                obj.ResponseTextArea.Value = cellstr("已取消发送。");
+                return
+            end
+
+            if ~confirmed
+                obj.setStatus("已取消发送。");
+                obj.ResponseTextArea.Value = cellstr("已取消发送。");
+                return
+            end
+
+            obj.LastConfirmedSnapshot = frozenJson;
+            obj.LastRunStateFrozenJson = frozenJson;
+            obj.LastRunStateFrozenBytes = frozenBytes;
+            try
+                receipt = obj.RunStatePostFunction( ...
+                    obj.BaseUrl, frozenJson, obj.TimeoutSeconds);
+            catch ME
+                obj.LastErrorIdentifier = string(ME.identifier);
+                obj.setStatus(obj.RunStateErrorMessage);
+                obj.ResponseTextArea.Value = cellstr(obj.RunStateErrorMessage);
+                return
+            end
+
+            if ~obj.isValidRunStateReceipt(receipt, payload)
+                obj.LastErrorIdentifier = "mxa:bridge:InvalidRunStateReceipt";
+                obj.setStatus("运行状态回执校验失败。");
+                obj.ResponseTextArea.Value = cellstr("运行状态回执校验失败。");
+                return
+            end
+
+            obj.LastRunStateReceipt = receipt;
+            obj.ResponseTextArea.Value = cellstr("运行状态已校验。");
+            obj.setStatus("运行状态已校验。");
+            submitted = true;
+        end
     end
 
     methods (Access = private)
@@ -316,6 +388,26 @@ classdef MatlabBridgeApp < handle
             valid = strcmp(string(receipt.request_id), string(requestId)) && ...
                 strcmp(string(receipt.status), "received") && ...
                 strcmp(string(receipt.mode), "connectivity_stub");
+        end
+
+        function valid = isValidRunStateReceipt(~, receipt, payload)
+            valid = false;
+            if ~isstruct(receipt)
+                return
+            end
+            requiredFields = ["request_id", "run_id", "run_sequence", "status", "mode", "durable"];
+            for index = 1:numel(requiredFields)
+                if ~isfield(receipt, requiredFields(index))
+                    return
+                end
+            end
+            durableFalse = isequal(receipt.durable, false) || isequal(receipt.durable, 0);
+            valid = strcmp(string(receipt.request_id), string(payload.request_id)) && ...
+                strcmp(string(receipt.run_id), string(payload.run_id)) && ...
+                double(receipt.run_sequence) == double(payload.run_sequence) && ...
+                strcmp(string(receipt.status), "validated") && ...
+                strcmp(string(receipt.mode), "ephemeral_validation") && ...
+                durableFalse;
         end
 
         function setStatus(obj, text)

@@ -1,0 +1,411 @@
+{
+  "$defs": {
+    "BridgeRunStateEnvelopeSeriesModel": {
+      "additionalProperties": false,
+      "properties": {
+        "representation": {
+          "const": "min_max_envelope_uniform_v1",
+          "title": "Representation",
+          "type": "string"
+        },
+        "series_id": {
+          "pattern": "^[A-Za-z0-9._\\-]{1,32}$",
+          "title": "Series Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "time_unit": {
+          "enum": [
+            "s",
+            "ms",
+            "us",
+            "unknown"
+          ],
+          "title": "Time Unit",
+          "type": "string"
+        },
+        "value_unit_status": {
+          "enum": [
+            "known",
+            "unknown",
+            "not_applicable"
+          ],
+          "title": "Value Unit Status",
+          "type": "string"
+        },
+        "sample_order": {
+          "const": "chronological",
+          "title": "Sample Order",
+          "type": "string"
+        },
+        "source_point_count": {
+          "exclusiveMinimum": 192,
+          "title": "Source Point Count",
+          "type": "integer"
+        },
+        "t_start": {
+          "title": "T Start",
+          "type": "number"
+        },
+        "bucket_width": {
+          "exclusiveMinimum": 0,
+          "title": "Bucket Width",
+          "type": "number"
+        },
+        "y_min": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 96,
+          "minItems": 96,
+          "title": "Y Min",
+          "type": "array"
+        },
+        "y_max": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 96,
+          "minItems": 96,
+          "title": "Y Max",
+          "type": "array"
+        },
+        "value_unit": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Unit"
+        }
+      },
+      "required": [
+        "representation",
+        "series_id",
+        "label",
+        "time_unit",
+        "value_unit_status",
+        "sample_order",
+        "source_point_count",
+        "t_start",
+        "bucket_width",
+        "y_min",
+        "y_max"
+      ],
+      "title": "BridgeRunStateEnvelopeSeriesModel",
+      "type": "object"
+    },
+    "BridgeRunStateIdentitySeriesModel": {
+      "additionalProperties": false,
+      "properties": {
+        "representation": {
+          "const": "identity_uniform_v1",
+          "title": "Representation",
+          "type": "string"
+        },
+        "series_id": {
+          "pattern": "^[A-Za-z0-9._\\-]{1,32}$",
+          "title": "Series Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "time_unit": {
+          "enum": [
+            "s",
+            "ms",
+            "us",
+            "unknown"
+          ],
+          "title": "Time Unit",
+          "type": "string"
+        },
+        "value_unit_status": {
+          "enum": [
+            "known",
+            "unknown",
+            "not_applicable"
+          ],
+          "title": "Value Unit Status",
+          "type": "string"
+        },
+        "sample_order": {
+          "const": "chronological",
+          "title": "Sample Order",
+          "type": "string"
+        },
+        "source_point_count": {
+          "maximum": 192,
+          "minimum": 2,
+          "title": "Source Point Count",
+          "type": "integer"
+        },
+        "t_start": {
+          "title": "T Start",
+          "type": "number"
+        },
+        "t_step": {
+          "exclusiveMinimum": 0,
+          "title": "T Step",
+          "type": "number"
+        },
+        "y": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 192,
+          "minItems": 2,
+          "title": "Y",
+          "type": "array"
+        },
+        "value_unit": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Unit"
+        }
+      },
+      "required": [
+        "representation",
+        "series_id",
+        "label",
+        "time_unit",
+        "value_unit_status",
+        "sample_order",
+        "source_point_count",
+        "t_start",
+        "t_step",
+        "y"
+      ],
+      "title": "BridgeRunStateIdentitySeriesModel",
+      "type": "object"
+    },
+    "BridgeRunStateMetricModel": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "unit_status": {
+          "enum": [
+            "known",
+            "unknown",
+            "not_applicable"
+          ],
+          "title": "Unit Status",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "maxLength": 16,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "unit_status"
+      ],
+      "title": "BridgeRunStateMetricModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {
+      "const": "0.3-b3",
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "request_id": {
+      "format": "uuid",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "session_id": {
+      "format": "uuid",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "run_id": {
+      "format": "uuid",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "run_sequence": {
+      "maximum": 1000000,
+      "minimum": 0,
+      "title": "Run Sequence",
+      "type": "integer"
+    },
+    "matlab_release": {
+      "pattern": "^R20[0-9]{2}[ab]$",
+      "title": "Matlab Release",
+      "type": "string"
+    },
+    "client_version": {
+      "pattern": "^[A-Za-z0-9.\\-]{1,32}$",
+      "title": "Client Version",
+      "type": "string"
+    },
+    "run_state_sharing_consent_confirmed": {
+      "title": "Run State Sharing Consent Confirmed",
+      "type": "boolean"
+    },
+    "run_status": {
+      "enum": [
+        "completed",
+        "stopped",
+        "execution_error",
+        "unknown"
+      ],
+      "title": "Run Status",
+      "type": "string"
+    },
+    "convergence_status": {
+      "enum": [
+        "converged",
+        "not_converged",
+        "not_applicable",
+        "unknown"
+      ],
+      "title": "Convergence Status",
+      "type": "string"
+    },
+    "stop_reason": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Stop Reason"
+    },
+    "solver": {
+      "anyOf": [
+        {
+          "maxLength": 32,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Solver"
+    },
+    "metrics_status": {
+      "enum": [
+        "available",
+        "unavailable",
+        "not_applicable",
+        "unknown"
+      ],
+      "title": "Metrics Status",
+      "type": "string"
+    },
+    "metrics": {
+      "items": {
+        "$ref": "#/$defs/BridgeRunStateMetricModel"
+      },
+      "maxItems": 16,
+      "title": "Metrics",
+      "type": "array"
+    },
+    "series_status": {
+      "enum": [
+        "available",
+        "unavailable",
+        "not_applicable",
+        "unknown"
+      ],
+      "title": "Series Status",
+      "type": "string"
+    },
+    "series": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "identity_uniform_v1": "#/$defs/BridgeRunStateIdentitySeriesModel",
+            "min_max_envelope_uniform_v1": "#/$defs/BridgeRunStateEnvelopeSeriesModel"
+          },
+          "propertyName": "representation"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/BridgeRunStateIdentitySeriesModel"
+          },
+          {
+            "$ref": "#/$defs/BridgeRunStateEnvelopeSeriesModel"
+          }
+        ]
+      },
+      "maxItems": 4,
+      "title": "Series",
+      "type": "array"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "request_id",
+    "session_id",
+    "run_id",
+    "run_sequence",
+    "matlab_release",
+    "client_version",
+    "run_state_sharing_consent_confirmed",
+    "run_status",
+    "convergence_status",
+    "metrics_status",
+    "metrics",
+    "series_status",
+    "series"
+  ],
+  "title": "BridgeRunStateRequest",
+  "type": "object"
+}

@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "const": "validated",
+      "title": "Status",
+      "type": "string"
+    },
+    "mode": {
+      "const": "ephemeral_validation",
+      "title": "Mode",
+      "type": "string"
+    },
+    "durable": {
+      "const": false,
+      "title": "Durable",
+      "type": "boolean"
+    },
+    "request_id": {
+      "format": "uuid",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "run_id": {
+      "format": "uuid",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "run_sequence": {
+      "maximum": 1000000,
+      "minimum": 0,
+      "title": "Run Sequence",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "status",
+    "mode",
+    "durable",
+    "request_id",
+    "run_id",
+    "run_sequence"
+  ],
+  "title": "BridgeRunStateReceiptModel",
+  "type": "object"
+}

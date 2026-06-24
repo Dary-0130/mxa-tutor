@@ -669,3 +669,63 @@ Explanation 错误响应独立于旧 `BridgeErrorResponse` 的 Literal,但 shape
 | 坏 JSON / schema / validator / 输出隐私扫描命中 | 502 | `bridge_explanation_failed` |
 
 所有错误文案为固定中文友好文案,不得包含用户 `error_text` 正文、绝对路径或源码。隐私扫描命中时 fail-closed,不做替换后返回。
+
+## 15. MATLAB Bridge Run-State 契约(TASK-516 b3-1)
+
+`BridgeRunState` 用于一次用户确认后的 MATLAB/Simulink run-state 快照校验。客户端在用户本机 MATLAB 进程内经固定白名单 adapter 采集 `Simulink.SimulationOutput`,脱敏、降采样、冻结 canonical JSON 并经用户确认后,发送到独立端点 `POST /api/v1/bridge/run-state`。服务端只做结构校验、二次脱敏、隐私 fail-closed 与最小回执;不持久化、不调 LLM、不运行用户模型。
+
+**状态**:v0.3-b3 冻结。`/run-state` 与 `/diagnostic`、`/explanation` 挂在同一个 `MatlabBridgeRoute`,共享固定 guard 顺序:loopback → `Content-Type: application/json` → 实际 body 字节数 `>32768` → JSON → Pydantic → service。`MAX_BRIDGE_BODY_BYTES` 保持 `32 * 1024` 不变;客户端另做 `28 * 1024` UTF-8 字节预检。
+
+| 同步项 | 路径 |
+|---|---|
+| Domain | `core/domain/bridge_run_state.py` |
+| Pydantic wrapper | `features/matlab_bridge/bridge_run_state_schemas.py` |
+| JSON Schema | `schemas/bridge_run_state_request.schema.json` / `schemas/bridge_run_state_receipt.schema.json` |
+| 导出脚本 | `scripts/export_bridge_schemas.py` |
+| Freeze 测试 | `tests/features/matlab_bridge/test_bridge_run_state_schema_freeze.py` |
+| 边界测试 | `tests/features/matlab_bridge/test_bridge_run_state_schemas.py` |
+
+### 15.1 BridgeRunStateRequest
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `protocol_version` | `Literal["0.3-b3"]` | 必填 | 独立 run-state 协议 |
+| `request_id` | UUID | 每个 HTTP 尝试一个 | 请求关联 |
+| `session_id` | UUID | 必填 | 会话 scope 输入,非鉴权证明 |
+| `run_id` | UUID | 一个逻辑快照一个;重试沿用 | 快照关联 |
+| `run_sequence` | StrictInt | `0..1_000_000`,拒 bool/string | 会话内序号 |
+| `matlab_release` | string | `^R20[0-9]{2}[ab]$` | MATLAB release |
+| `client_version` | string | `^[A-Za-z0-9.\-]{1,32}$` | Add-on 版本 |
+| `run_state_sharing_consent_confirmed` | StrictBool | 必须为 `true` | 用户确认共享 run-state 快照 |
+| `run_status` | enum | `completed` / `stopped` / `execution_error` / `unknown` | 运行状态 |
+| `convergence_status` | enum | `converged` / `not_converged` 仅允许配 `completed`;另有 `not_applicable` / `unknown` | 收敛状态 |
+| `stop_reason` | string/null | ≤160 chars 且 ≤480 UTF-8 bytes,脱敏 | 非可信文本 |
+| `solver` | string/null | ≤32 chars 且 ≤96 UTF-8 bytes,脱敏 | 求解器摘要 |
+| `metrics_status` / `series_status` | enum | `available` 当且仅当对应容器非空;其它状态当且仅当容器为空 | 容器恒在 |
+| `metrics` | array | ≤16,列表内 `name` 去重 | 有界指标 |
+| `series` | array | ≤4,列表内 `series_id` 去重 | 有界波形摘要 |
+
+`metrics[]`: `name` ≤32 chars/≤96 bytes;`value` 为有限 JSON number,拒 bool/string/null/NaN/Inf;`unit_status` 为 `known` / `unknown` / `not_applicable`;`unit` 当且仅当 `unit_status="known"` 存在,≤16 chars/≤48 bytes。
+
+`series[]` 只接受两种表示:`identity_uniform_v1` 与 `min_max_envelope_uniform_v1`。公共字段:`series_id` 匹配 `^[A-Za-z0-9._\-]{1,32}$`;`label` ≤32 chars/≤96 bytes;`time_unit` 为 `s` / `ms` / `us` / `unknown`;`value_unit_status` 为 `known` / `unknown` / `not_applicable`;`value_unit` 当且仅当 `value_unit_status="known"` 存在,≤16 chars/≤48 bytes;`sample_order` 固定 `chronological`;`source_point_count` 为 StrictInt。
+
+`identity_uniform_v1`: `2 ≤ source_point_count ≤ 192`;`t_start` 有限;`t_step > 0`;`y` 长度等于 `source_point_count`,每项有限。`min_max_envelope_uniform_v1`: `source_point_count > 192`;固定 96 桶;`bucket_width > 0`;`y_min` / `y_max` 各 96 项且 `y_min[i] ≤ y_max[i]`。
+
+所有层级 `extra="forbid"`。敏感字段硬拒绝覆盖 diagnostic 字段并扩展 `mat_path` / `csv_path` / `raw_mat` / `raw_csv` / `base64` / `blob` / `compressed` / `archive` / `model_content` 等;所有字符串字段 Unicode NFC 规范化,拒 NUL、控制符和双向文本控制符。
+
+### 15.2 客户端冻结与降采样
+
+客户端顺序固定:白名单读取 run-state → 所有字符串脱敏 → 有界截断/降采样 → 生成 `run_id` → 固定字段顺序构造 → `jsonencode` 一次得到 `frozen_json` / UTF-8 `frozen_bytes` → ≤28KB 预检 → 向用户预览同一份 JSON → 用户确认 → 发送同一份 `frozen_json`。取消确认、采集失败、脱敏失败、非有限数值、预检超限均 fail-closed 且零网络。
+
+波形源序列必须为有限实数、严格递增、均匀时间轴。均匀判定常量固定为 `rel_tol = 1e-6`: `max(abs(diff(Time)-median(diff(Time)))) ≤ rel_tol * median(diff(Time))`。单点、非严格递增、非均匀源均不发出。≤192 点完整保留为 identity;>192 点降为 96 桶 min/max envelope,`bucket_width=(Time[end]-Time[0])/96`,MATLAB 1-based 入桶为 `idx=min(96,floor((t-t_start)/bucket_width)+1)`,末桶右闭。
+
+### 15.3 BridgeRunStateReceipt
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `status` | `Literal["validated"]` | 本次请求通过校验 |
+| `mode` | `Literal["ephemeral_validation"]` | 仅临时校验消费 |
+| `durable` | `Literal[false]` | 未保存 |
+| `request_id` / `run_id` / `run_sequence` | echo | 只回显关联 id 与序号 |
+
+200 只表示本次请求已通过校验并被消费,不代表已保存、可恢复、可查询或已进入跨轮状态。回执、错误响应和日志不得回显 run-state 内容、原始序列、路径、源码或客户端指纹。
