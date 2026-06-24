@@ -4,18 +4,29 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from ipaddress import ip_address
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
+from loguru import logger
+from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import Message, Receive
 
 from api.dependencies import (
+    get_matlab_bridge_auth_service,
     get_matlab_bridge_diagnostic_service,
     get_matlab_bridge_explanation_service,
     get_matlab_bridge_run_state_service,
+)
+from core.domain.bridge_auth import RUN_STATE_WRITE_CAPABILITY, BridgeAuthContext
+from core.domain.bridge_run_state import canonical_run_state_session_id
+from features.matlab_bridge.bridge_auth_service import (
+    BridgeAuthForbiddenError,
+    BridgeAuthRevocationStoreUnavailableError,
+    BridgeAuthService,
+    BridgeAuthTokenError,
 )
 from features.matlab_bridge.bridge_diagnostic_schemas import (
     BridgeDiagnosticReceiptModel,
@@ -32,12 +43,17 @@ from features.matlab_bridge.bridge_explanation_service import (
     bridge_explanation_error_payloads,
 )
 from features.matlab_bridge.bridge_run_state_schemas import (
+    BridgeRunStateAuthErrorResponse,
     BridgeRunStateReceiptModel,
     BridgeRunStateRequest,
 )
 from features.matlab_bridge.bridge_run_state_service import BridgeRunStateService
 
 MAX_BRIDGE_BODY_BYTES = 32 * 1024
+MAX_BRIDGE_BEARER_BYTES = 8192
+BRIDGE_RUN_STATE_PATH = "/api/v1/bridge/run-state"
+BRIDGE_RUN_STATE_SECURITY_SCHEME = "BridgeRunStateBearerAuth"
+_BRIDGE_AUTH_DENIED_MESSAGE = "bridge auth request denied"
 
 
 class BridgePayloadTooLargeError(Exception):
@@ -80,6 +96,33 @@ def _bridge_error(status_code: int, error: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=payload.model_dump())
 
 
+def _bridge_validation_error(request: Request) -> JSONResponse:
+    logger.error(
+        "API error: exception={} status={} path={} method={}",
+        "RequestValidationError",
+        422,
+        request.url.path,
+        request.method,
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"error": "validation_error", "message": "请求参数有问题,请检查后重试"},
+    )
+
+
+def _bridge_auth_error(status_code: int, error: str, status: str) -> JSONResponse:
+    logger.info(
+        "Bridge run-state auth rejected: event_code={} status={}",
+        "bridge_run_state_auth",
+        status,
+    )
+    payload = BridgeRunStateAuthErrorResponse.model_validate(
+        {"error": error, "message": _BRIDGE_AUTH_DENIED_MESSAGE}
+    )
+    headers = {"WWW-Authenticate": "Bearer"} if status_code == 401 else None
+    return JSONResponse(status_code=status_code, content=payload.model_dump(), headers=headers)
+
+
 def _replay_receive(body: bytes) -> Receive:
     sent = False
 
@@ -91,6 +134,73 @@ def _replay_receive(body: bytes) -> Receive:
         return {"type": "http.request", "body": body, "more_body": False}
 
     return receive
+
+
+def _extract_bearer_token(request: Request) -> str:
+    values = [
+        value
+        for name, value in request.scope.get("headers", [])
+        if name.lower() == b"authorization"
+    ]
+    if len(values) != 1:
+        raise BridgeAuthTokenError("invalid_authorization")
+    try:
+        header_value = values[0].decode("ascii")
+    except UnicodeDecodeError:
+        raise BridgeAuthTokenError("invalid_authorization") from None
+    if "," in header_value:
+        raise BridgeAuthTokenError("invalid_authorization")
+    parts = header_value.split(" ")
+    if len(parts) != 2 or parts[0] != "Bearer" or not parts[1]:
+        raise BridgeAuthTokenError("invalid_authorization")
+    token = parts[1]
+    try:
+        token_size = len(token.encode("ascii"))
+    except UnicodeEncodeError:
+        raise BridgeAuthTokenError("invalid_authorization") from None
+    if token_size > MAX_BRIDGE_BEARER_BYTES:
+        raise BridgeAuthTokenError("invalid_authorization")
+    return token
+
+
+def _get_auth_service(request: Request) -> BridgeAuthService:
+    overrides = getattr(request.app, "dependency_overrides", {})
+    override = overrides.get(get_matlab_bridge_auth_service)
+    if override is not None:
+        return cast(BridgeAuthService, override())
+    return get_matlab_bridge_auth_service()
+
+
+def _verify_run_state_request(request: Request, body: bytes) -> JSONResponse | None:
+    try:
+        run_state_request = BridgeRunStateRequest.model_validate_json(body)
+    except ValidationError:
+        return _bridge_validation_error(request)
+
+    try:
+        token = _extract_bearer_token(request)
+        auth_context = _get_auth_service(request).verify_token(
+            token,
+            required_capability=RUN_STATE_WRITE_CAPABILITY,
+        )
+    except BridgeAuthRevocationStoreUnavailableError:
+        return _bridge_auth_error(503, "bridge_auth_unavailable", "unavailable")
+    except BridgeAuthForbiddenError:
+        return _bridge_auth_error(403, "bridge_auth_forbidden", "forbidden")
+    except BridgeAuthTokenError:
+        return _bridge_auth_error(401, "bridge_auth_invalid_token", "denied")
+
+    try:
+        body_session_id = canonical_run_state_session_id(run_state_request.session_id)
+        token_session_id = canonical_run_state_session_id(auth_context.session_id)
+    except ValueError:
+        return _bridge_auth_error(403, "bridge_auth_forbidden", "scope_mismatch")
+    if body_session_id != token_session_id:
+        return _bridge_auth_error(403, "bridge_auth_forbidden", "scope_mismatch")
+
+    request.state.bridge_run_state_request = run_state_request
+    request.state.bridge_auth_context = auth_context
+    return None
 
 
 class MatlabBridgeRoute(APIRoute):
@@ -122,9 +232,39 @@ class MatlabBridgeRoute(APIRoute):
                     "诊断内容过大",
                 )
             replay_request = MatlabBridgeRequest(request.scope, _replay_receive(body))
+            if replay_request.scope.get("path") == BRIDGE_RUN_STATE_PATH:
+                auth_response = _verify_run_state_request(replay_request, body)
+                if auth_response is not None:
+                    return auth_response
             return await original_handler(replay_request)
 
         return handler
+
+
+def install_matlab_bridge_openapi(app: FastAPI) -> None:
+    """Add route-wrapper auth OpenAPI metadata that has no FastAPI dependency hook."""
+    original_openapi = app.openapi
+
+    def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return cast(dict[str, Any], app.openapi_schema)
+        schema = cast(dict[str, Any], original_openapi())
+        components = schema.setdefault("components", {})
+        component_schemas = components.setdefault("schemas", {})
+        component_schemas.setdefault(
+            "BridgeRunStateRequest",
+            BridgeRunStateRequest.model_json_schema(ref_template="#/components/schemas/{model}"),
+        )
+        security_schemes = components.setdefault("securitySchemes", {})
+        security_schemes[BRIDGE_RUN_STATE_SECURITY_SCHEME] = {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
 
 
 router = APIRouter(tags=["matlab-bridge"], route_class=MatlabBridgeRoute)
@@ -210,10 +350,31 @@ async def bridge_explanation(
 
 
 @router.post(
-    "/api/v1/bridge/run-state",
+    BRIDGE_RUN_STATE_PATH,
     response_model=BridgeRunStateReceiptModel,
     responses={
-        403: {"model": BridgeErrorResponse},
+        401: {
+            "model": BridgeRunStateAuthErrorResponse,
+            "headers": {
+                "WWW-Authenticate": {
+                    "description": "Bearer challenge",
+                    "schema": {"type": "string"},
+                }
+            },
+        },
+        403: {
+            "description": "Loopback guard or run-state auth scope denied",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/BridgeErrorResponse"},
+                            {"$ref": "#/components/schemas/" "BridgeRunStateAuthErrorResponse"},
+                        ]
+                    }
+                }
+            },
+        },
         413: {"model": BridgeErrorResponse},
         415: {"model": BridgeErrorResponse},
         422: {
@@ -227,15 +388,29 @@ async def bridge_explanation(
                 }
             },
         },
+        503: {"model": BridgeRunStateAuthErrorResponse},
+    },
+    openapi_extra={
+        "security": [{BRIDGE_RUN_STATE_SECURITY_SCHEME: []}],
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/BridgeRunStateRequest"}
+                }
+            },
+        },
     },
 )
 async def bridge_run_state(
-    request_body: BridgeRunStateRequest,
+    request: Request,
     service: Annotated[
         BridgeRunStateService,
         Depends(get_matlab_bridge_run_state_service),
     ],
 ) -> BridgeRunStateReceiptModel:
     """Validate one user-confirmed run-state snapshot without persistence."""
-    receipt = service.consume(request_body.to_domain())
+    request_body = cast(BridgeRunStateRequest, request.state.bridge_run_state_request)
+    auth_context = cast(BridgeAuthContext, request.state.bridge_auth_context)
+    receipt = service.consume(request_body.to_domain(), auth_context)
     return BridgeRunStateReceiptModel.from_domain(receipt)

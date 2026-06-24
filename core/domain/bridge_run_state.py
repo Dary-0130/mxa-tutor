@@ -13,6 +13,13 @@ UnitStatus = Literal["known", "unknown", "not_applicable"]
 TimeUnit = Literal["s", "ms", "us", "unknown"]
 
 
+def canonical_run_state_session_id(value: UUID | str) -> str:
+    """Return the canonical run-state session identifier used for scope checks."""
+    if isinstance(value, UUID):
+        return str(value)
+    return str(UUID(value))
+
+
 @dataclass(frozen=True)
 class BridgeRunStateMetric:
     name: str

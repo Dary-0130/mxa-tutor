@@ -103,6 +103,7 @@ def main() -> int:
             "DEEPSEEK_API_KEY": "fake-for-e2e",
             "APP_ENV": "test",
             "MATLAB_BRIDGE_ENABLED": "true",
+            "MATLAB_BRIDGE_AUTH_SIGNING_KEY": "test-bridge-signing-key-32-bytes-ok",
             "DB_PATH": str(tmp_dir / "mxa.db"),
             "UPLOAD_DIR": str(tmp_dir / "uploads"),
         }

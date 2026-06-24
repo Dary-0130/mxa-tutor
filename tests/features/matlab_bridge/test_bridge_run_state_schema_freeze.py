@@ -15,6 +15,7 @@ from core.domain.bridge_run_state import (
     BridgeRunStateRequest,
 )
 from features.matlab_bridge.bridge_run_state_schemas import (
+    BridgeRunStateAuthErrorResponse,
     BridgeRunStateEnvelopeSeriesModel,
     BridgeRunStateIdentitySeriesModel,
     BridgeRunStateMetricModel,
@@ -107,21 +108,28 @@ def test_domain_contract_does_not_import_pydantic() -> None:
     assert "pydantic" not in source.lower()
 
 
-def test_export_bridge_schemas_now_exports_thirteen_bridge_schemas() -> None:
+def test_export_bridge_schemas_now_exports_fourteen_bridge_schemas() -> None:
     bridge_paths = [path for path in OUTPUTS if path.name.startswith("bridge_")]
 
-    assert len(bridge_paths) == 13
+    assert len(bridge_paths) == 14
     assert Path("schemas/bridge_run_state_request.schema.json") in bridge_paths
     assert Path("schemas/bridge_run_state_receipt.schema.json") in bridge_paths
+    assert Path("schemas/bridge_run_state_auth_error_response.schema.json") in bridge_paths
 
 
 def test_exported_run_state_schemas_do_not_drift() -> None:
     run_state_paths = {
         Path("schemas/bridge_run_state_request.schema.json"),
         Path("schemas/bridge_run_state_receipt.schema.json"),
+        Path("schemas/bridge_run_state_auth_error_response.schema.json"),
     }
     for path, model in OUTPUTS.items():
         if path not in run_state_paths:
             continue
         actual = json.loads(path.read_text(encoding="utf-8"))
         assert actual == model.model_json_schema()
+
+
+def test_run_state_auth_error_model_is_isolated_from_transport_error_model() -> None:
+    assert set(BridgeRunStateAuthErrorResponse.model_fields) == {"error", "message"}
+    assert BridgeRunStateAuthErrorResponse.__name__ == "BridgeRunStateAuthErrorResponse"

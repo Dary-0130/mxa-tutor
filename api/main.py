@@ -35,7 +35,12 @@ from api.dependencies import get_settings
 from api.middleware.error_handler import register_error_handlers
 from api.routes.chat import router as chat_router
 from api.routes.health import router as health_router
-from api.routes.matlab_bridge import router as matlab_bridge_router
+from api.routes.matlab_bridge import (
+    install_matlab_bridge_openapi,
+)
+from api.routes.matlab_bridge import (
+    router as matlab_bridge_router,
+)
 from api.routes.matlab_bridge_auth import router as matlab_bridge_auth_router
 from api.routes.overview import router as overview_router
 from api.routes.paper_query import router as paper_query_router
@@ -327,6 +332,7 @@ def create_app() -> FastAPI:
     app.include_router(paper_user_supply_router)
     if settings.matlab_bridge_enabled:
         app.include_router(matlab_bridge_router)
+        install_matlab_bridge_openapi(app)
         if settings.matlab_bridge_dev_auth_enabled:
             app.include_router(matlab_bridge_auth_router)
     app.include_router(overview_router)

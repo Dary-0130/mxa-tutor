@@ -4,6 +4,11 @@ from pathlib import Path
 
 import pytest
 
+from core.domain.bridge_auth import (
+    RUN_STATE_WRITE_CAPABILITY,
+    BridgeAuthClaims,
+    BridgeAuthContext,
+)
 from core.domain.exceptions import BridgeRunStateValidationError
 from features.matlab_bridge.bridge_run_state_schemas import BridgeRunStateRequest
 from features.matlab_bridge.bridge_run_state_service import (
@@ -16,6 +21,28 @@ from features.matlab_bridge.bridge_run_state_service import (
 REQUEST_ID = "2690af3d-9cfe-4442-900e-c86af37a6244"
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
 RUN_ID = "22222222-2222-4222-8222-222222222222"
+
+
+def _auth_context() -> BridgeAuthContext:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 6, 24, 12, 0, tzinfo=UTC)
+    return BridgeAuthContext(
+        claims=BridgeAuthClaims(
+            issuer="mxa-tutor-dev",
+            audience="mxa-matlab-bridge",
+            subject="user-alpha",
+            user_id="user-alpha",
+            project_id="project-alpha",
+            session_id=SESSION_ID,
+            capabilities=frozenset({RUN_STATE_WRITE_CAPABILITY}),
+            token_id="token-alpha",
+            issued_at=now,
+            not_before=now,
+            expires_at=now + timedelta(minutes=5),
+            process_generation="generation-1",
+        )
+    )
 
 
 def _valid_payload(**overrides: object) -> dict[str, object]:
@@ -64,7 +91,7 @@ def _valid_payload(**overrides: object) -> dict[str, object]:
 def test_service_returns_minimal_ephemeral_receipt() -> None:
     request = BridgeRunStateRequest.model_validate(_valid_payload()).to_domain()
 
-    receipt = BridgeRunStateService().consume(request)
+    receipt = BridgeRunStateService().consume(request, _auth_context())
 
     assert receipt.status == "validated"
     assert receipt.mode == "ephemeral_validation"
@@ -135,7 +162,7 @@ def test_privacy_fail_closed_if_redaction_misses_private_text(
     ).to_domain()
 
     with pytest.raises(BridgeRunStateValidationError):
-        BridgeRunStateService().consume(request)
+        BridgeRunStateService().consume(request, _auth_context())
 
 
 def test_redact_run_state_text_redacts_model_metadata() -> None:

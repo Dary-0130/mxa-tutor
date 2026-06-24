@@ -7,6 +7,7 @@ from dataclasses import replace
 
 from loguru import logger
 
+from core.domain.bridge_auth import BridgeAuthContext
 from core.domain.bridge_run_state import (
     BridgeRunStateEnvelopeSeries,
     BridgeRunStateIdentitySeries,
@@ -39,7 +40,12 @@ _MODEL_METADATA_PATTERNS = (
 class BridgeRunStateService:
     """Validate one run-state payload and return an ephemeral receipt."""
 
-    def consume(self, request: BridgeRunStateRequest) -> BridgeRunStateReceipt:
+    def consume(
+        self,
+        request: BridgeRunStateRequest,
+        auth_context: BridgeAuthContext,
+    ) -> BridgeRunStateReceipt:
+        _ = auth_context
         redacted_request = redact_run_state_request(request)
         if contains_run_state_private_text("\n".join(_iter_request_strings(redacted_request))):
             logger.error(
