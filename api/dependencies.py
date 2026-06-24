@@ -45,9 +45,14 @@ from features.chat.chat_service import ChatService
 from features.chunking import ChunkingService
 from features.ingest.upload_service import ExtractFn, UploadService
 from features.matlab_bridge import (
+    BridgeAuthService,
     BridgeExplanationService,
     BridgeRunStateService,
     DiagnosticService,
+)
+from features.matlab_bridge.bridge_auth_service import (
+    InMemoryBridgeRevocationStore,
+    build_bridge_auth_config,
 )
 from features.overview import OverviewCache
 from features.overview._teaching_level_policy import TeachingLevelPolicy
@@ -87,6 +92,22 @@ def get_matlab_bridge_explanation_service(request: Request) -> BridgeExplanation
 def get_matlab_bridge_run_state_service() -> BridgeRunStateService:
     """Return the stateless MATLAB bridge run-state validation service."""
     return BridgeRunStateService()
+
+
+@lru_cache(maxsize=1)
+def get_matlab_bridge_auth_service() -> BridgeAuthService:
+    """Return the process-local MATLAB bridge auth service for dev/test mode."""
+    settings = get_settings()
+    config = build_bridge_auth_config(
+        signing_key=settings.matlab_bridge_auth_signing_key or "",
+        key_id=settings.matlab_bridge_auth_key_id,
+        issuer=settings.matlab_bridge_auth_issuer,
+        audience=settings.matlab_bridge_auth_audience,
+        token_ttl_seconds=settings.matlab_bridge_auth_token_ttl_seconds,
+        max_token_lifetime_seconds=settings.matlab_bridge_auth_max_lifetime_seconds,
+        clock_skew_seconds=settings.matlab_bridge_auth_clock_skew_seconds,
+    )
+    return BridgeAuthService(config, revocation_store=InMemoryBridgeRevocationStore())
 
 
 def get_matlab_engine_provider(request: Request) -> MatlabEngineProvider:

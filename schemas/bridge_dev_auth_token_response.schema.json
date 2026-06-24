@@ -1,0 +1,44 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "enum": [
+        "issued",
+        "revoked"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "access_token": {
+      "maxLength": 8192,
+      "minLength": 1,
+      "title": "Access Token",
+      "type": "string"
+    },
+    "token_type": {
+      "const": "Bearer",
+      "title": "Token Type",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "expires_in_seconds": {
+      "maximum": 3600,
+      "minimum": 1,
+      "title": "Expires In Seconds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "status",
+    "access_token",
+    "token_type",
+    "expires_at",
+    "expires_in_seconds"
+  ],
+  "title": "BridgeDevAuthTokenResponse",
+  "type": "object"
+}

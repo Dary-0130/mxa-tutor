@@ -1,0 +1,24 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "error": {
+      "enum": [
+        "bridge_auth_forbidden",
+        "bridge_auth_invalid_token",
+        "bridge_auth_unavailable"
+      ],
+      "title": "Error",
+      "type": "string"
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    }
+  },
+  "required": [
+    "error",
+    "message"
+  ],
+  "title": "BridgeDevAuthErrorResponse",
+  "type": "object"
+}

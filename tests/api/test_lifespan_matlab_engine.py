@@ -22,6 +22,8 @@ from core.domain.exceptions import (
     MatlabEngineTimeoutError,
 )
 
+TEST_BRIDGE_SIGNING_KEY = "test-bridge-signing-key-32-bytes-ok"
+
 
 def test_flag_off_create_app_does_not_import_concrete_adapter() -> None:
     code = textwrap.dedent(
@@ -79,6 +81,8 @@ def test_create_app_matlab_engine_truth_table(
     monkeypatch.setenv("APP_ENV", app_env)
     monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", bridge_enabled)
     monkeypatch.setenv("MATLAB_ENGINE_ENABLED", engine_enabled)
+    if bridge_enabled == "true":
+        monkeypatch.setenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", TEST_BRIDGE_SIGNING_KEY)
     monkeypatch.setenv("DB_PATH", str(tmp_path / "mxa.db"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     get_settings.cache_clear()
@@ -228,6 +232,7 @@ def _enable_engine_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", "true")
     monkeypatch.setenv("MATLAB_ENGINE_ENABLED", "true")
+    monkeypatch.setenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", TEST_BRIDGE_SIGNING_KEY)
     monkeypatch.setenv("DB_PATH", str(tmp_path / "mxa.db"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     get_settings.cache_clear()

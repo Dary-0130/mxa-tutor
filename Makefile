@@ -41,6 +41,11 @@ verify-schema: export-schema
 		|| (echo "schemas/project_overview.schema.json drifted. Regenerate with 'make export-schema' and commit." && exit 1)
 	@git diff --exit-code schemas/bridge_diagnostic_request.schema.json \
 		schemas/bridge_diagnostic_receipt.schema.json \
+		schemas/bridge_dev_auth_error_response.schema.json \
+		schemas/bridge_dev_auth_revoke_request.schema.json \
+		schemas/bridge_dev_auth_revoke_response.schema.json \
+		schemas/bridge_dev_auth_token_request.schema.json \
+		schemas/bridge_dev_auth_token_response.schema.json \
 		schemas/bridge_error_response.schema.json \
 		schemas/bridge_explanation_request.schema.json \
 		schemas/bridge_explanation_result.schema.json \

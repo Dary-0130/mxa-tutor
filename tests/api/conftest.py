@@ -11,7 +11,7 @@ from collections.abc import Iterator  # noqa: E402
 
 import pytest  # noqa: E402
 
-from api.dependencies import get_settings  # noqa: E402
+from api.dependencies import get_matlab_bridge_auth_service, get_settings  # noqa: E402
 from core.interfaces.embedder import EmbeddingProvider  # noqa: E402
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability  # noqa: E402
 from features.overview import InMemoryOverviewCache  # noqa: E402
@@ -66,6 +66,7 @@ def _isolate_test_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """测试前后清理 ``get_settings`` 缓存 + ``dependency_overrides``。"""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-for-test")
     get_settings.cache_clear()
+    get_matlab_bridge_auth_service.cache_clear()
 
     import api.main as api_main
 
@@ -80,6 +81,7 @@ def _isolate_test_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     yield
 
     get_settings.cache_clear()
+    get_matlab_bridge_auth_service.cache_clear()
 
     leaked = dict(app.dependency_overrides)
     app.dependency_overrides.clear()

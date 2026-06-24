@@ -1,0 +1,18 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "enum": [
+        "issued",
+        "revoked"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "title": "BridgeDevAuthRevokeResponse",
+  "type": "object"
+}
