@@ -110,13 +110,34 @@ def main() -> int:
     )
 
     import api.main as api_main
-    from api.dependencies import get_settings
+    from api.dependencies import get_matlab_bridge_auth_service, get_settings
+    from core.domain.bridge_auth import RUN_STATE_WRITE_CAPABILITY
 
     get_settings.cache_clear()
+    get_matlab_bridge_auth_service.cache_clear()
     api_main.SentenceTransformerEmbedder = FakeEmbedder
     api_main.DeepSeekTextProvider = FakeTextProvider
     app = api_main.create_app()
-    bridge_counter = {"diagnostic": 0, "explanation": 0}
+    session_id = "11111111-1111-4111-8111-111111111111"
+    auth_service = get_matlab_bridge_auth_service()
+    valid_token = auth_service.issue_token(
+        user_id="user-alpha",
+        project_id="project-alpha",
+        session_id=session_id,
+    ).access_token
+    verified_context = auth_service.verify_token(
+        valid_token,
+        required_capability=RUN_STATE_WRITE_CAPABILITY,
+    )
+    if verified_context.session_id != session_id:
+        raise AssertionError("Python verifier returned the wrong session scope")
+    revoked_token = auth_service.issue_token(
+        user_id="user-alpha",
+        project_id="project-alpha",
+        session_id=session_id,
+    ).access_token
+    auth_service.revoke_token(revoked_token)
+    bridge_counter = {"diagnostic": 0, "explanation": 0, "run_state": 0}
 
     @app.middleware("http")
     async def count_bridge_requests(request, call_next):
@@ -124,6 +145,8 @@ def main() -> int:
             bridge_counter["diagnostic"] += 1
         if request.url.path == "/api/v1/bridge/explanation":
             bridge_counter["explanation"] += 1
+        if request.url.path == "/api/v1/bridge/run-state":
+            bridge_counter["run_state"] += 1
         return await call_next(request)
 
     servers = [
@@ -134,17 +157,29 @@ def main() -> int:
         _wait_for_server("127.0.0.1", port)
         _wait_for_server("::1", port)
         try:
-            _run_matlab_e2e(repo_root, mltbx_path, port)
+            _run_matlab_e2e(
+                repo_root,
+                mltbx_path,
+                port,
+                valid_token,
+                revoked_token,
+                session_id,
+            )
         except subprocess.CalledProcessError:
             print(f"bridge_requests_seen={bridge_counter}")
             raise
-        if bridge_counter != {"diagnostic": 1, "explanation": 2}:
+        if bridge_counter != {"diagnostic": 1, "explanation": 2, "run_state": 4}:
             raise AssertionError(f"unexpected bridge request counts: {bridge_counter}")
     finally:
         for server, _ in servers:
             server.should_exit = True
         for _, thread in servers:
             thread.join(timeout=15)
+    print(
+        "run_state_token_verified_by_python=true "
+        f"session_id={verified_context.session_id} "
+        f"capabilities={sorted(verified_context.capabilities)}"
+    )
     print(
         "TASK-514 bridge E2E passed: " f"mltbx={mltbx_path} size={mltbx_path.stat().st_size} bytes"
     )
@@ -197,17 +232,28 @@ def _wait_for_server(host: str, port: int) -> None:
     raise RuntimeError(f"server did not become healthy: {last_error}")
 
 
-def _run_matlab_e2e(repo_root: Path, mltbx_path: Path, port: int) -> None:
+def _run_matlab_e2e(
+    repo_root: Path,
+    mltbx_path: Path,
+    port: int,
+    valid_token: str,
+    revoked_token: str,
+    session_id: str,
+) -> None:
     matlab_code = (
         f"cd('{_matlab_quote(repo_root)}'); "
         "addpath('clients/matlab_bridge/tests'); "
-        f"headless_bridge_e2e('{_matlab_quote(mltbx_path)}', 'http://localhost:{port}');"
+        f"headless_bridge_e2e('{_matlab_quote(mltbx_path)}', "
+        f"'http://localhost:{port}', "
+        f"'{_matlab_quote(valid_token)}', "
+        f"'{_matlab_quote(revoked_token)}', "
+        f"'{_matlab_quote(session_id)}');"
     )
     subprocess.run(["matlab", "-batch", matlab_code], cwd=repo_root, check=True)
 
 
-def _matlab_quote(path: Path) -> str:
-    return str(path).replace("'", "''").replace("\\", "/")
+def _matlab_quote(value: object) -> str:
+    return str(value).replace("'", "''").replace("\\", "/")
 
 
 def _extract_request_id(text: str) -> str:
