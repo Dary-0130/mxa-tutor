@@ -15,6 +15,7 @@ from starlette.types import Message, Receive
 from api.dependencies import (
     get_matlab_bridge_diagnostic_service,
     get_matlab_bridge_explanation_service,
+    get_matlab_bridge_run_state_service,
 )
 from features.matlab_bridge.bridge_diagnostic_schemas import (
     BridgeDiagnosticReceiptModel,
@@ -30,6 +31,11 @@ from features.matlab_bridge.bridge_explanation_service import (
     BridgeExplanationService,
     bridge_explanation_error_payloads,
 )
+from features.matlab_bridge.bridge_run_state_schemas import (
+    BridgeRunStateReceiptModel,
+    BridgeRunStateRequest,
+)
+from features.matlab_bridge.bridge_run_state_service import BridgeRunStateService
 
 MAX_BRIDGE_BODY_BYTES = 32 * 1024
 
@@ -201,3 +207,35 @@ async def bridge_explanation(
     """Explain one user-confirmed MATLAB bridge error diagnostic."""
     result = await service.explain(request_body.to_domain())
     return BridgeExplanationResultModel.from_domain(result)
+
+
+@router.post(
+    "/api/v1/bridge/run-state",
+    response_model=BridgeRunStateReceiptModel,
+    responses={
+        403: {"model": BridgeErrorResponse},
+        413: {"model": BridgeErrorResponse},
+        415: {"model": BridgeErrorResponse},
+        422: {
+            "description": "Global validation error shape",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "validation_error",
+                        "message": "请求参数有问题,请检查后重试",
+                    }
+                }
+            },
+        },
+    },
+)
+async def bridge_run_state(
+    request_body: BridgeRunStateRequest,
+    service: Annotated[
+        BridgeRunStateService,
+        Depends(get_matlab_bridge_run_state_service),
+    ],
+) -> BridgeRunStateReceiptModel:
+    """Validate one user-confirmed run-state snapshot without persistence."""
+    receipt = service.consume(request_body.to_domain())
+    return BridgeRunStateReceiptModel.from_domain(receipt)

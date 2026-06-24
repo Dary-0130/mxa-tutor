@@ -383,6 +383,105 @@ verifyEqual(testCase, app.LastErrorIdentifier, "mxa:bridge:InvalidReceipt");
     end
 end
 
+function testRunStateStringRedactionAndUnsafeControls(testCase)
+sanitized = mxa.bridge.redactRunStateString( ...
+    "C:\Users\a\m.slx token=SECRET12", 64, 128);
+
+verifyFalse(testCase, contains(sanitized, "C:\Users\a"));
+verifyFalse(testCase, contains(sanitized, "SECRET12"));
+verifyTrue(testCase, contains(sanitized, "[REDACTED_PATH]"));
+verifyTrue(testCase, contains(sanitized, "[REDACTED_SECRET]"));
+verifyError( ...
+    testCase, ...
+    @() mxa.bridge.redactRunStateString("bad" + newline + char(0) + "text"), ...
+    "mxa:bridge:RunStateUnsafeString");
+end
+
+function testRunStateSummarizeSkipsInvalidSourceSeries(testCase)
+verifyEmpty(testCase, mxa.bridge.summarizeRunStateSeries( ...
+    "s1", "single", 0, 1));
+verifyEmpty(testCase, mxa.bridge.summarizeRunStateSeries( ...
+    "s1", "duplicate", [0 0.1 0.1], [1 2 3]));
+verifyEmpty(testCase, mxa.bridge.summarizeRunStateSeries( ...
+    "s1", "nonuniform", [0 0.1 0.25], [1 2 3]));
+verifyEmpty(testCase, mxa.bridge.summarizeRunStateSeries( ...
+    "s1", "nan", [0 0.1 0.2], [1 NaN 3]));
+end
+
+function testRunStateSummarizeIdentityGolden(testCase)
+series = mxa.bridge.summarizeRunStateSeries( ...
+    "simout", "simout", [0 0.1 0.2 0.3], [0 1 0 -1], "seconds", "unknown", "");
+
+verifyEqual(testCase, string(series.representation), "identity_uniform_v1");
+verifyEqual(testCase, string(series.series_id), "simout");
+verifyEqual(testCase, string(series.time_unit), "s");
+verifyEqual(testCase, string(series.value_unit_status), "unknown");
+verifyFalse(testCase, isfield(series, "value_unit"));
+verifyEqual(testCase, double(series.source_point_count), 4);
+verifyEqual(testCase, series.t_start, 0);
+verifyEqual(testCase, series.t_step, 0.1, "AbsTol", 1e-12);
+verifyEqual(testCase, series.y, [0 1 0 -1]);
+end
+
+function testRunStateSummarizeEnvelopeGolden(testCase)
+time = 0:0.5:96;
+data = 1:numel(time);
+series = mxa.bridge.summarizeRunStateSeries( ...
+    "long_series", "long", time, data, "seconds", "known", "V");
+
+verifyEqual(testCase, string(series.representation), "min_max_envelope_uniform_v1");
+verifyEqual(testCase, string(series.value_unit), "V");
+verifyEqual(testCase, double(series.source_point_count), 193);
+verifyEqual(testCase, series.bucket_width, 1, "AbsTol", 1e-12);
+verifyEqual(testCase, numel(series.y_min), 96);
+verifyEqual(testCase, numel(series.y_max), 96);
+verifyEqual(testCase, series.y_min(1), 1);
+verifyEqual(testCase, series.y_max(1), 2);
+verifyEqual(testCase, series.y_min(96), 191);
+verifyEqual(testCase, series.y_max(96), 193);
+end
+
+function testRunStateFreezeMatchesCrossLanguageGolden(testCase)
+payload = makeRunStateGoldenPayload();
+repoRoot = fileparts(fileparts(fileparts(fileparts(mfilename("fullpath")))));
+fixturePath = fullfile(repoRoot, "tests", "fixtures", "matlab_bridge", ...
+    "run_state_golden_payload.json");
+expectedJson = strip(string(fileread(fixturePath)));
+
+[frozenJson, frozenBytes] = mxa.bridge.freezeRunStatePayload(payload);
+
+verifyEqual(testCase, frozenJson, expectedJson);
+verifyEqual(testCase, frozenBytes, unicode2native(char(expectedJson), "UTF-8"));
+end
+
+function testRunStateFreezeRejectsPayloadOver28Kb(testCase)
+payload = struct();
+payload.protocol_version = "0.3-b3";
+payload.padding = repmat("a", 1, 28 * 1024);
+
+verifyError( ...
+    testCase, ...
+    @() mxa.bridge.freezeRunStatePayload(payload), ...
+    "mxa:bridge:RunStatePayloadTooLarge");
+end
+
+function testRunStateFreezeRejectsNonFiniteBeforeJsonEncode(testCase)
+payload = makeRunStateGoldenPayload();
+payload.series{1}.y = [0 NaN];
+
+verifyError( ...
+    testCase, ...
+    @() mxa.bridge.freezeRunStatePayload(payload), ...
+    "mxa:bridge:RunStateNonFiniteValue");
+
+payload = makeRunStateGoldenPayload();
+payload.metrics{1}.value = Inf;
+verifyError( ...
+    testCase, ...
+    @() mxa.bridge.freezeRunStatePayload(payload), ...
+    "mxa:bridge:RunStateNonFiniteValue");
+end
+
 function localThrowingFunction(pathText, secretText)
 error("mxa:test:AutoCapture", "Failure at %s with %s", pathText, secretText);
 end
@@ -406,4 +505,42 @@ explanation = struct( ...
     "likely_causes", cause, ...
     "next_steps", step, ...
     "caveats", {{"这里只基于" + caveatSource + ",没有运行仿真。"}});
+end
+
+function payload = makeRunStateGoldenPayload()
+metric = struct();
+metric.name = "wall_clock_elapsed";
+metric.value = 1.25;
+metric.unit_status = "known";
+metric.unit = "s";
+
+series = struct();
+series.representation = "identity_uniform_v1";
+series.series_id = "simout";
+series.label = "simout";
+series.time_unit = "s";
+series.value_unit_status = "unknown";
+series.sample_order = "chronological";
+series.source_point_count = int32(4);
+series.t_start = 0;
+series.t_step = 0.1;
+series.y = [0 1 0 -1];
+
+payload = struct();
+payload.protocol_version = "0.3-b3";
+payload.request_id = "2690af3d-9cfe-4442-900e-c86af37a6244";
+payload.session_id = "11111111-1111-4111-8111-111111111111";
+payload.run_id = "22222222-2222-4222-8222-222222222222";
+payload.run_sequence = int32(7);
+payload.matlab_release = "R2026a";
+payload.client_version = "0.1.0";
+payload.run_state_sharing_consent_confirmed = true;
+payload.run_status = "completed";
+payload.convergence_status = "not_applicable";
+payload.stop_reason = "ReachedStopTime";
+payload.solver = "ode45";
+payload.metrics_status = "available";
+payload.metrics = {metric};
+payload.series_status = "available";
+payload.series = {series};
 end

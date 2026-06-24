@@ -20,6 +20,10 @@ from features.matlab_bridge.bridge_explanation_schemas import (
     BridgeExplanationRequest,
     BridgeExplanationResultModel,
 )
+from features.matlab_bridge.bridge_run_state_schemas import (
+    BridgeRunStateReceiptModel,
+    BridgeRunStateRequest,
+)
 
 OUTPUTS = {
     Path("schemas/bridge_diagnostic_request.schema.json"): BridgeDiagnosticRequest,
@@ -28,6 +32,8 @@ OUTPUTS = {
     Path("schemas/bridge_explanation_request.schema.json"): BridgeExplanationRequest,
     Path("schemas/bridge_explanation_result.schema.json"): BridgeExplanationResultModel,
     Path("schemas/bridge_explanation_error.schema.json"): BridgeExplanationErrorResponse,
+    Path("schemas/bridge_run_state_request.schema.json"): BridgeRunStateRequest,
+    Path("schemas/bridge_run_state_receipt.schema.json"): BridgeRunStateReceiptModel,
 }
 
 

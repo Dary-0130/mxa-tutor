@@ -37,6 +37,7 @@ from core.domain.exceptions import (
     BridgeExplanationError,
     BridgeExplanationTimeoutError,
     BridgeExplanationUnavailableError,
+    BridgeRunStateValidationError,
     ChatGenerationError,
     ChatSessionNotFoundError,
     DocumentParseError,
@@ -275,6 +276,10 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         (
             BridgeExplanationTimeoutError,
             _make_handler(504, "bridge_explanation_timeout", "报错解释超时,请稍后重试"),
+        ),
+        (
+            BridgeRunStateValidationError,
+            _make_handler(422, "validation_error", "请求参数有问题,请检查后重试"),
         ),
         (
             ChatSessionNotFoundError,

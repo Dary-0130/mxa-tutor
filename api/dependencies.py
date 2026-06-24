@@ -44,7 +44,11 @@ from core.interfaces.vector_store import VectorStore
 from features.chat.chat_service import ChatService
 from features.chunking import ChunkingService
 from features.ingest.upload_service import ExtractFn, UploadService
-from features.matlab_bridge import BridgeExplanationService, DiagnosticService
+from features.matlab_bridge import (
+    BridgeExplanationService,
+    BridgeRunStateService,
+    DiagnosticService,
+)
 from features.overview import OverviewCache
 from features.overview._teaching_level_policy import TeachingLevelPolicy
 from features.overview._teaching_unit_builder import TeachingUnitBuilder
@@ -78,6 +82,11 @@ def get_matlab_bridge_explanation_service(request: Request) -> BridgeExplanation
     if text_provider is None:
         raise BridgeExplanationUnavailableError("text_provider_unavailable") from None
     return BridgeExplanationService(text_provider=cast(TextProvider, text_provider))
+
+
+def get_matlab_bridge_run_state_service() -> BridgeRunStateService:
+    """Return the stateless MATLAB bridge run-state validation service."""
+    return BridgeRunStateService()
 
 
 def get_matlab_engine_provider(request: Request) -> MatlabEngineProvider:

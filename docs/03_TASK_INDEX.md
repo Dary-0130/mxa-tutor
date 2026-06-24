@@ -349,16 +349,16 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅]    9/9  (paper-to-model TASK-500~503;MATLAB bridge/engine TASK-510~514)
+Week 5+: [✅✅✅✅✅✅✅✅✅🔍]   9/10 (paper-to-model TASK-500~503;MATLAB bridge/engine TASK-510~516)
 
-总计: 40/45
+总计: 40/46
 ```
 
 ---
 
 ## 下一步
 
-**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 5/5;MATLAB bridge/engine 线 TASK-510~514 均已合并并验收通过。总进度为 40/45。下一步进入 paper-to-model 后续 task / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
+**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 5/5;MATLAB bridge/engine 线 TASK-510~514 均已合并并验收通过,TASK-516 run-state 采集 + 独立通道契约建设中。总进度为 40/46。下一步进入 paper-to-model 后续 task / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
 
 ## Week 5+:paper-to-model 主线占位
 
@@ -375,6 +375,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-512 | MATLAB Engine substrate gate(v0.3-b b2-0) | ✅ | Codex | 已合并 main(PR #110 / merge 2026-06-22);只证独立 Engine substrate,不接 bridge runtime |
 | TASK-513 | MATLAB Engine 接入服务运行时(v0.3-b b2-1 块 A) | ✅ | Codex | 已合并 main(PR #114 / 0fdd631);make check 绿 + R6 真机硬证 + G-A13 b2-0 无回归 |
 | TASK-514 | MATLAB bridge 自动采集报错 → 解释(v0.3-b b2-1 块 B) | ✅ | Codex | 已合并 main(PR #116 / 29df60a / merge 2026-06-23);自动采集 MException 白名单字段 + 用户确认冻结快照 + auto 直发 `/explanation` |
+| TASK-516 | MATLAB run-state 采集 + 独立 `/run-state` 通道契约(b3-1) | 🔍 | Codex | 本轮建设中;无持久化、无 LLM、独立新通道 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):

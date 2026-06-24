@@ -176,6 +176,10 @@ class BridgeExplanationTimeoutError(BridgeExplanationError):
     """MATLAB bridge 报错解释调用超时。"""
 
 
+class BridgeRunStateValidationError(MxaError):
+    """MATLAB bridge run-state payload failed privacy validation."""
+
+
 class ChatSessionNotFoundError(ProjectError):
     """指定对话会话不存在。"""
 
