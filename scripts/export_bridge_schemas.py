@@ -28,6 +28,7 @@ from features.matlab_bridge.bridge_explanation_schemas import (
     BridgeExplanationResultModel,
 )
 from features.matlab_bridge.bridge_run_state_schemas import (
+    BridgeRunStateAuthErrorResponse,
     BridgeRunStateReceiptModel,
     BridgeRunStateRequest,
 )
@@ -46,6 +47,9 @@ OUTPUTS = {
     Path("schemas/bridge_explanation_error.schema.json"): BridgeExplanationErrorResponse,
     Path("schemas/bridge_run_state_request.schema.json"): BridgeRunStateRequest,
     Path("schemas/bridge_run_state_receipt.schema.json"): BridgeRunStateReceiptModel,
+    Path("schemas/bridge_run_state_auth_error_response.schema.json"): (
+        BridgeRunStateAuthErrorResponse
+    ),
 }
 
 

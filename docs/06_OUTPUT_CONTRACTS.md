@@ -674,13 +674,13 @@ Explanation 错误响应独立于旧 `BridgeErrorResponse` 的 Literal,但 shape
 
 `BridgeRunState` 用于一次用户确认后的 MATLAB/Simulink run-state 快照校验。客户端在用户本机 MATLAB 进程内经固定白名单 adapter 采集 `Simulink.SimulationOutput`,脱敏、降采样、冻结 canonical JSON 并经用户确认后,发送到独立端点 `POST /api/v1/bridge/run-state`。服务端只做结构校验、二次脱敏、隐私 fail-closed 与最小回执;不持久化、不调 LLM、不运行用户模型。
 
-**状态**:v0.3-b3 冻结。`/run-state` 与 `/diagnostic`、`/explanation` 挂在同一个 `MatlabBridgeRoute`,共享固定 guard 顺序:loopback → `Content-Type: application/json` → 实际 body 字节数 `>32768` → JSON → Pydantic → service。`MAX_BRIDGE_BODY_BYTES` 保持 `32 * 1024` 不变;客户端另做 `28 * 1024` UTF-8 字节预检。
+**状态**:v0.3-b3 + TASK-517-B run-state auth gate。`/diagnostic`、`/explanation` 仍共享原固定 guard 顺序:loopback → `Content-Type: application/json` → 实际 body 字节数 `>32768` → JSON → Pydantic → service。`/run-state` 在同一 `MatlabBridgeRoute` 中扩展为:loopback → `Content-Type: application/json` → 实际 body 字节数 `>32768` → replay → JSON/Pydantic → Bearer scoped-token 密码学校验/撤销 → capability/session scope → verified auth context → service。`MAX_BRIDGE_BODY_BYTES` 保持 `32 * 1024` 不变;客户端另做 `28 * 1024` UTF-8 字节预检。
 
 | 同步项 | 路径 |
 |---|---|
 | Domain | `core/domain/bridge_run_state.py` |
 | Pydantic wrapper | `features/matlab_bridge/bridge_run_state_schemas.py` |
-| JSON Schema | `schemas/bridge_run_state_request.schema.json` / `schemas/bridge_run_state_receipt.schema.json` |
+| JSON Schema | `schemas/bridge_run_state_request.schema.json` / `schemas/bridge_run_state_receipt.schema.json` / `schemas/bridge_run_state_auth_error_response.schema.json` |
 | 导出脚本 | `scripts/export_bridge_schemas.py` |
 | Freeze 测试 | `tests/features/matlab_bridge/test_bridge_run_state_schema_freeze.py` |
 | 边界测试 | `tests/features/matlab_bridge/test_bridge_run_state_schemas.py` |
@@ -713,13 +713,35 @@ Explanation 错误响应独立于旧 `BridgeErrorResponse` 的 Literal,但 shape
 
 所有层级 `extra="forbid"`。敏感字段硬拒绝覆盖 diagnostic 字段并扩展 `mat_path` / `csv_path` / `raw_mat` / `raw_csv` / `base64` / `blob` / `compressed` / `archive` / `model_content` 等;所有字符串字段 Unicode NFC 规范化,拒 NUL、控制符和双向文本控制符。
 
-### 15.2 客户端冻结与降采样
+### 15.2 Run-State Auth Gate(TASK-517-B)
 
-客户端顺序固定:白名单读取 run-state → 所有字符串脱敏 → 有界截断/降采样 → 生成 `run_id` → 固定字段顺序构造 → `jsonencode` 一次得到 `frozen_json` / UTF-8 `frozen_bytes` → ≤28KB 预检 → 向用户预览同一份 JSON → 用户确认 → 发送同一份 `frozen_json`。取消确认、采集失败、脱敏失败、非有限数值、预检超限均 fail-closed 且零网络。
+`POST /api/v1/bridge/run-state` 必须携带单个 `Authorization: Bearer <access_token>` header。只接受一个 Authorization header、只接受 Bearer scheme、拒绝空值、重复 header、逗号拼接、多凭据、非法结构和超过独立 bearer 字节上限的 token。32KB body limit 不覆盖 header。
+
+token scope 必须包含精确 capability `run_state:write`,并绑定 user/project/session。`body.session_id` 与 token `session_id` 经同一 run-state session 解析器得到 canonical value 后精确比较;鉴权层不得自行 trim、大小写折叠或做宽松等价。比较失败只返回 auth 403,不查 session、不写库、不进入 service。
+
+auth 错误响应使用独立 `BridgeRunStateAuthErrorResponse`,不扩展旧 `BridgeErrorResponse` 的 transport error literal,也不污染 `/diagnostic` 或 `/explanation` 的 OpenAPI/response:
+
+| 状态码 | `error` | header | 语义 |
+|---|---|---|---|
+| 401 | `bridge_auth_invalid_token` | `WWW-Authenticate: Bearer` | 缺失、格式错、签名错、过期、`nbf` 未到、撤销、issuer/audience 错 |
+| 403 | `bridge_auth_forbidden` | 无 | token 有效但 capability 不足,或 body/session scope 不符 |
+| 503 | `bridge_auth_unavailable` | 无 | 撤销/verifier 基础设施不可用,fail-closed |
+
+外部文案固定为 `bridge auth request denied`,不得回显 token、claim、`jti`、header、异常文本、traceback、payload、路径、源码或原始序列。既有 loopback 403 仍返回 `BridgeErrorResponse` 的 `matlab_bridge_forbidden` 与中文文案,与 auth 403 区分。
+
+authorization 不等于 consent:`run_state:write` 只表示非生产 scoped-token 写入门通过,不代表持久化同意、LLM 处理同意、read/explain 能力、权威 session active/owner 校验或 b/c 的最终写事务授权。`run_state_sharing_consent_confirmed=true` 仍是独立的用户确认字段。
+
+OpenAPI 只在 `/run-state` operation 挂 `BridgeRunStateBearerAuth` security scheme,并声明 401/403/503;`/diagnostic` 与 `/explanation` 不挂该 security scheme。
+
+### 15.3 客户端冻结、鉴权携带与降采样
+
+客户端顺序固定:白名单读取 run-state → 所有字符串脱敏 → 有界截断/降采样 → 生成 `run_id` → 固定字段顺序构造 → `jsonencode` 一次得到 `frozen_json` / UTF-8 `frozen_bytes` → ≤28KB 预检 → 向用户预览同一份 JSON → 用户确认 → 运行期 token provider 取 access token → `Authorization` header 发送同一份 `frozen_json`。取消确认、采集失败、脱敏失败、非有限数值、预检超限、取 token 失败均 fail-closed。
+
+access token 只允许在 app 运行期私有内存/局部变量中流转,不得进入 base workspace、preferences、命令历史、日志、`.mltbx` 静态文件或 run-state JSON payload。bootstrap 凭据不得编进 `.mltbx`。`401` 时客户端最多重新向 provider 取一次 token,并重发同一份 `frozen_json` / 同一 `run_id`;网络结果不明时不得生成新 `run_id` 伪装新快照。
 
 波形源序列必须为有限实数、严格递增、均匀时间轴。均匀判定常量固定为 `rel_tol = 1e-6`: `max(abs(diff(Time)-median(diff(Time)))) ≤ rel_tol * median(diff(Time))`。单点、非严格递增、非均匀源均不发出。≤192 点完整保留为 identity;>192 点降为 96 桶 min/max envelope,`bucket_width=(Time[end]-Time[0])/96`,MATLAB 1-based 入桶为 `idx=min(96,floor((t-t_start)/bucket_width)+1)`,末桶右闭。
 
-### 15.3 BridgeRunStateReceipt
+### 15.4 BridgeRunStateReceipt
 
 | 字段 | 类型 | 语义 |
 |---|---|---|

@@ -64,6 +64,14 @@ verifyError( ...
     "mxa:bridge:InvalidBaseUrl");
 end
 
+function testDefaultTokenProviderFailsClosed(testCase)
+verifyError( ...
+    testCase, ...
+    @() mxa.bridge.defaultTokenProvider("user-alpha", "project-alpha", ...
+        "11111111-1111-4111-8111-111111111111"), ...
+    "mxa:bridge:TokenProviderMissing");
+end
+
 function testCancelDoesNotSend(testCase)
 diagnosticCalls = 0;
 explanationCalls = 0;
@@ -482,6 +490,105 @@ verifyError( ...
     "mxa:bridge:RunStateNonFiniteValue");
 end
 
+function testSubmitRunStateRefreshesOnceAndResendsSameFrozenPayload(testCase)
+tokenCalls = 0;
+postCalls = 0;
+postedJson = strings(1, 2);
+postedTokens = strings(1, 2);
+app = mxa.bridge.MatlabBridgeApp( ...
+    BaseUrl="http://localhost:8000", ...
+    Visible="off", ...
+    ConfirmFunction=@(~, ~) true, ...
+    TokenProviderFunction=@fakeTokenProvider, ...
+    RunStatePostFunction=@fakePostRunState);
+cleanup = onCleanup(@() delete(app));
+
+submitted = app.submitRunState( ...
+    Simulink.SimulationOutput, ...
+    "user-alpha", ...
+    "project-alpha", ...
+    "11111111-1111-4111-8111-111111111111", ...
+    7);
+
+verifyTrue(testCase, submitted);
+verifyEqual(testCase, tokenCalls, 2);
+verifyEqual(testCase, postCalls, 2);
+verifyEqual(testCase, postedJson(1), postedJson(2));
+verifyEqual(testCase, postedTokens, ["token-1", "token-2"]);
+verifyEqual(testCase, app.LastConfirmedSnapshot, postedJson(1));
+verifyEqual(testCase, app.LastRunStateFrozenJson, postedJson(1));
+verifyFalse(testCase, contains(postedJson(1), "token-1"));
+verifyFalse(testCase, contains(postedJson(1), "token-2"));
+
+firstPayload = jsondecode(char(postedJson(1)));
+secondPayload = jsondecode(char(postedJson(2)));
+verifyEqual(testCase, string(firstPayload.run_id), string(secondPayload.run_id));
+verifyEqual(testCase, string(app.LastRunStateReceipt.run_id), string(firstPayload.run_id));
+
+    function token = fakeTokenProvider(userId, projectId, sessionId)
+        verifyEqual(testCase, string(userId), "user-alpha");
+        verifyEqual(testCase, string(projectId), "project-alpha");
+        verifyEqual(testCase, string(sessionId), "11111111-1111-4111-8111-111111111111");
+        tokenCalls = tokenCalls + 1;
+        token = "token-" + string(tokenCalls);
+    end
+
+    function receipt = fakePostRunState(~, frozenJson, timeoutSeconds, accessToken)
+        postCalls = postCalls + 1;
+        postedJson(postCalls) = string(frozenJson);
+        postedTokens(postCalls) = string(accessToken);
+        verifyEqual(testCase, timeoutSeconds, 10);
+        if postCalls == 1
+            error("mxa:bridge:HTTP401", "401 unauthorized");
+        end
+        payload = jsondecode(char(frozenJson));
+        receipt = makeRunStateReceipt(payload);
+    end
+end
+
+function testSubmitRunStateStopsAfterSecond401WithoutNewRunId(testCase)
+tokenCalls = 0;
+postCalls = 0;
+postedJson = strings(1, 2);
+app = mxa.bridge.MatlabBridgeApp( ...
+    BaseUrl="http://localhost:8000", ...
+    Visible="off", ...
+    ConfirmFunction=@(~, ~) true, ...
+    TokenProviderFunction=@fakeTokenProvider, ...
+    RunStatePostFunction=@fakePostRunState);
+cleanup = onCleanup(@() delete(app));
+
+submitted = app.submitRunState( ...
+    Simulink.SimulationOutput, ...
+    "user-alpha", ...
+    "project-alpha", ...
+    "11111111-1111-4111-8111-111111111111", ...
+    7);
+
+verifyFalse(testCase, submitted);
+verifyEqual(testCase, tokenCalls, 2);
+verifyEqual(testCase, postCalls, 2);
+verifyEqual(testCase, postedJson(1), postedJson(2));
+verifyEqual(testCase, app.LastRunStateFrozenJson, postedJson(1));
+verifyEqual(testCase, app.LastErrorIdentifier, "mxa:bridge:HTTP401");
+
+firstPayload = jsondecode(char(postedJson(1)));
+secondPayload = jsondecode(char(postedJson(2)));
+verifyEqual(testCase, string(firstPayload.run_id), string(secondPayload.run_id));
+
+    function token = fakeTokenProvider(~, ~, ~)
+        tokenCalls = tokenCalls + 1;
+        token = "expired-token-" + string(tokenCalls);
+    end
+
+    function receipt = fakePostRunState(~, frozenJson, ~, ~)
+        postCalls = postCalls + 1;
+        postedJson(postCalls) = string(frozenJson);
+        receipt = struct();
+        error("mxa:bridge:HTTP401", "401 unauthorized");
+    end
+end
+
 function localThrowingFunction(pathText, secretText)
 error("mxa:test:AutoCapture", "Failure at %s with %s", pathText, secretText);
 end
@@ -543,4 +650,14 @@ payload.metrics_status = "available";
 payload.metrics = {metric};
 payload.series_status = "available";
 payload.series = {series};
+end
+
+function receipt = makeRunStateReceipt(payload)
+receipt = struct( ...
+    "status", "validated", ...
+    "mode", "ephemeral_validation", ...
+    "durable", false, ...
+    "request_id", payload.request_id, ...
+    "run_id", payload.run_id, ...
+    "run_sequence", payload.run_sequence);
 end

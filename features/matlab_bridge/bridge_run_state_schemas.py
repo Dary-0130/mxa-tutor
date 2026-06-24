@@ -51,6 +51,11 @@ BridgeRunStateTimeUnit = Literal["s", "ms", "us", "unknown"]
 BridgeRunStateSampleOrder = Literal["chronological"]
 BridgeRunStateReceiptStatus = Literal["validated"]
 BridgeRunStateReceiptMode = Literal["ephemeral_validation"]
+BridgeRunStateAuthErrorCode = Literal[
+    "bridge_auth_invalid_token",
+    "bridge_auth_forbidden",
+    "bridge_auth_unavailable",
+]
 
 MAX_RUN_SEQUENCE = 1_000_000
 MAX_RUN_STATE_METRICS = 16
@@ -413,6 +418,11 @@ class BridgeRunStateReceiptModel(_BridgeRunStateBaseModel):
             run_id=self.run_id,
             run_sequence=self.run_sequence,
         )
+
+
+class BridgeRunStateAuthErrorResponse(_BridgeRunStateBaseModel):
+    error: BridgeRunStateAuthErrorCode
+    message: str
 
 
 def _series_to_domain(series: BridgeRunStateSeriesModel) -> BridgeRunStateSeriesDomain:

@@ -21,6 +21,7 @@ classdef MatlabBridgeApp < handle
         DiagnosticPostFunction function_handle = @mxa.bridge.postDiagnostic
         ExplanationPostFunction function_handle = @mxa.bridge.postExplanation
         RunStatePostFunction function_handle = @mxa.bridge.postRunState
+        TokenProviderFunction function_handle = @mxa.bridge.defaultTokenProvider
         TimeoutSeconds (1,1) double = 10
         ExplanationTimeoutSeconds (1,1) double = 60
         UIFigure
@@ -47,6 +48,7 @@ classdef MatlabBridgeApp < handle
                 options.DiagnosticPostFunction function_handle = @mxa.bridge.postDiagnostic
                 options.ExplanationPostFunction function_handle = @mxa.bridge.postExplanation
                 options.RunStatePostFunction function_handle = @mxa.bridge.postRunState
+                options.TokenProviderFunction function_handle = @mxa.bridge.defaultTokenProvider
                 options.Visible (1,1) string {mustBeMember(options.Visible, ["on", "off"])} = "on"
                 options.TimeoutSeconds (1,1) double {mustBePositive} = 10
                 options.ExplanationTimeoutSeconds (1,1) double {mustBePositive} = 60
@@ -58,6 +60,7 @@ classdef MatlabBridgeApp < handle
             obj.DiagnosticPostFunction = options.DiagnosticPostFunction;
             obj.ExplanationPostFunction = options.ExplanationPostFunction;
             obj.RunStatePostFunction = options.RunStatePostFunction;
+            obj.TokenProviderFunction = options.TokenProviderFunction;
             obj.TimeoutSeconds = options.TimeoutSeconds;
             obj.ExplanationTimeoutSeconds = options.ExplanationTimeoutSeconds;
             obj.createComponents(options.Visible);
@@ -236,7 +239,8 @@ classdef MatlabBridgeApp < handle
             submitted = true;
         end
 
-        function submitted = submitRunState(obj, simulationOutput, sessionId, runSequence)
+        function submitted = submitRunState( ...
+                obj, simulationOutput, userId, projectId, sessionId, runSequence)
             submitted = false;
             obj.LastRunStateReceipt = [];
             obj.LastRunStateFrozenJson = "";
@@ -278,13 +282,26 @@ classdef MatlabBridgeApp < handle
             obj.LastRunStateFrozenJson = frozenJson;
             obj.LastRunStateFrozenBytes = frozenBytes;
             try
+                accessToken = obj.fetchRunStateToken(userId, projectId, sessionId);
                 receipt = obj.RunStatePostFunction( ...
-                    obj.BaseUrl, frozenJson, obj.TimeoutSeconds);
+                    obj.BaseUrl, frozenJson, obj.TimeoutSeconds, accessToken);
             catch ME
-                obj.LastErrorIdentifier = string(ME.identifier);
-                obj.setStatus(obj.RunStateErrorMessage);
-                obj.ResponseTextArea.Value = cellstr(obj.RunStateErrorMessage);
-                return
+                if ~obj.isUnauthorizedError(ME)
+                    obj.LastErrorIdentifier = string(ME.identifier);
+                    obj.setStatus(obj.RunStateErrorMessage);
+                    obj.ResponseTextArea.Value = cellstr(obj.RunStateErrorMessage);
+                    return
+                end
+                try
+                    accessToken = obj.fetchRunStateToken(userId, projectId, sessionId);
+                    receipt = obj.RunStatePostFunction( ...
+                        obj.BaseUrl, frozenJson, obj.TimeoutSeconds, accessToken);
+                catch refreshME
+                    obj.LastErrorIdentifier = string(refreshME.identifier);
+                    obj.setStatus(obj.RunStateErrorMessage);
+                    obj.ResponseTextArea.Value = cellstr(obj.RunStateErrorMessage);
+                    return
+                end
             end
 
             if ~obj.isValidRunStateReceipt(receipt, payload)
@@ -408,6 +425,22 @@ classdef MatlabBridgeApp < handle
                 strcmp(string(receipt.status), "validated") && ...
                 strcmp(string(receipt.mode), "ephemeral_validation") && ...
                 durableFalse;
+        end
+
+        function token = fetchRunStateToken(obj, userId, projectId, sessionId)
+            token = string(obj.TokenProviderFunction( ...
+                string(userId), string(projectId), string(sessionId)));
+            if strlength(token) == 0
+                error("mxa:bridge:AuthTokenMissing", "run-state access token is required.");
+            end
+        end
+
+        function unauthorized = isUnauthorizedError(~, caughtException)
+            identifier = string(caughtException.identifier);
+            message = string(caughtException.message);
+            unauthorized = contains(identifier, "HTTP401") || ...
+                contains(identifier, "Unauthorized", "IgnoreCase", true) || ...
+                contains(message, "401");
         end
 
         function setStatus(obj, text)

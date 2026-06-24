@@ -52,4 +52,5 @@ verify-schema: export-schema
 		schemas/bridge_explanation_error.schema.json \
 		schemas/bridge_run_state_request.schema.json \
 		schemas/bridge_run_state_receipt.schema.json \
+		schemas/bridge_run_state_auth_error_response.schema.json \
 		|| (echo "bridge schemas drifted. Regenerate with 'make export-schema' and commit." && exit 1)
