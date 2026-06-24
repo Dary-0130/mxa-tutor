@@ -3,6 +3,9 @@ from pydantic import ValidationError
 
 from app.config import AppSettings
 
+TEST_BRIDGE_SIGNING_KEY = "test-bridge-signing-key-32-bytes-ok"
+TEST_BRIDGE_BOOTSTRAP_TOKEN = "test-bridge-bootstrap-token-32-bytes"
+
 ENV_KEYS = [
     "DEEPSEEK_API_KEY",
     "DEEPSEEK_BASE_URL",
@@ -29,6 +32,19 @@ ENV_KEYS = [
     "APP_ENV",
     "MATLAB_BRIDGE_ENABLED",
     "MATLAB_ENGINE_ENABLED",
+    "MATLAB_BRIDGE_AUTH_SIGNING_KEY",
+    "MATLAB_BRIDGE_AUTH_KEY_ID",
+    "MATLAB_BRIDGE_AUTH_ISSUER",
+    "MATLAB_BRIDGE_AUTH_AUDIENCE",
+    "MATLAB_BRIDGE_AUTH_TOKEN_TTL_SECONDS",
+    "MATLAB_BRIDGE_AUTH_MAX_LIFETIME_SECONDS",
+    "MATLAB_BRIDGE_AUTH_CLOCK_SKEW_SECONDS",
+    "MATLAB_BRIDGE_WORKER_COUNT",
+    "WEB_CONCURRENCY",
+    "UVICORN_WORKERS",
+    "MATLAB_BRIDGE_INSTANCE_COUNT",
+    "MATLAB_BRIDGE_DEV_AUTH_ENABLED",
+    "MATLAB_BRIDGE_DEV_AUTH_BOOTSTRAP_TOKEN",
 ]
 
 
@@ -71,6 +87,17 @@ def test_default_values(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     assert cfg.app_environment == "production"
     assert cfg.matlab_bridge_enabled is False
     assert cfg.matlab_engine_enabled is False
+    assert cfg.matlab_bridge_auth_signing_key is None
+    assert cfg.matlab_bridge_auth_key_id == "mxa-bridge-dev-v1"
+    assert cfg.matlab_bridge_auth_issuer == "mxa-tutor-dev"
+    assert cfg.matlab_bridge_auth_audience == "mxa-matlab-bridge"
+    assert cfg.matlab_bridge_auth_token_ttl_seconds == 300
+    assert cfg.matlab_bridge_auth_max_lifetime_seconds == 900
+    assert cfg.matlab_bridge_auth_clock_skew_seconds == 10
+    assert cfg.matlab_bridge_worker_count == 1
+    assert cfg.matlab_bridge_instance_count == 1
+    assert cfg.matlab_bridge_dev_auth_enabled is False
+    assert cfg.matlab_bridge_dev_auth_bootstrap_token is None
 
 
 def test_env_override_and_type_conversion(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -83,6 +110,8 @@ def test_env_override_and_type_conversion(monkeypatch: pytest.MonkeyPatch, tmp_p
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", "true")
     monkeypatch.setenv("MATLAB_ENGINE_ENABLED", "true")
+    monkeypatch.setenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", TEST_BRIDGE_SIGNING_KEY)
+    monkeypatch.setenv("MATLAB_BRIDGE_AUTH_TOKEN_TTL_SECONDS", "120")
     monkeypatch.chdir(tmp_path)
 
     cfg = AppSettings()
@@ -94,6 +123,7 @@ def test_env_override_and_type_conversion(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert cfg.app_environment == "test"
     assert cfg.matlab_bridge_enabled is True
     assert cfg.matlab_engine_enabled is True
+    assert cfg.matlab_bridge_auth_token_ttl_seconds == 120
 
 
 @pytest.mark.parametrize(
@@ -102,7 +132,7 @@ def test_env_override_and_type_conversion(monkeypatch: pytest.MonkeyPatch, tmp_p
         ("production", "false", "false", True),
         ("development", "true", "false", True),
         ("test", "true", "false", True),
-        ("production", "true", "false", True),
+        ("production", "true", "false", False),
         ("development", "false", "true", False),
         ("test", "false", "true", False),
         ("production", "true", "true", False),
@@ -123,6 +153,8 @@ def test_matlab_engine_config_guard(
     monkeypatch.setenv("APP_ENV", app_env)
     monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", bridge_enabled)
     monkeypatch.setenv("MATLAB_ENGINE_ENABLED", engine_enabled)
+    if bridge_enabled == "true":
+        monkeypatch.setenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", TEST_BRIDGE_SIGNING_KEY)
     monkeypatch.chdir(tmp_path)
 
     if valid:
@@ -133,6 +165,73 @@ def test_matlab_engine_config_guard(
     else:
         with pytest.raises(ValidationError):
             AppSettings()
+
+
+@pytest.mark.parametrize("signing_key", [None, "short", "default", "replace-me"])
+def test_matlab_bridge_signing_key_guard(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    signing_key: str | None,
+) -> None:
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", "true")
+    if signing_key is None:
+        monkeypatch.delenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", raising=False)
+    else:
+        monkeypatch.setenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", signing_key)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValidationError):
+        AppSettings()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("MATLAB_BRIDGE_WORKER_COUNT", "2"),
+        ("WEB_CONCURRENCY", "2"),
+        ("UVICORN_WORKERS", "2"),
+        ("MATLAB_BRIDGE_INSTANCE_COUNT", "2"),
+    ],
+)
+def test_matlab_bridge_single_worker_single_instance_guard(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    key: str,
+    value: str,
+) -> None:
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", "true")
+    monkeypatch.setenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", TEST_BRIDGE_SIGNING_KEY)
+    monkeypatch.setenv(key, value)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValidationError):
+        AppSettings()
+
+
+def test_dev_bridge_auth_requires_bootstrap_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _clean_env(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", "true")
+    monkeypatch.setenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", TEST_BRIDGE_SIGNING_KEY)
+    monkeypatch.setenv("MATLAB_BRIDGE_DEV_AUTH_ENABLED", "true")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValidationError):
+        AppSettings()
+
+    monkeypatch.setenv("MATLAB_BRIDGE_DEV_AUTH_BOOTSTRAP_TOKEN", TEST_BRIDGE_BOOTSTRAP_TOKEN)
+    cfg = AppSettings()
+    assert cfg.matlab_bridge_dev_auth_enabled is True
 
 
 def test_missing_required_raises(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

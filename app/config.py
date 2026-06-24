@@ -2,8 +2,22 @@
 
 from typing import Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_MIN_BRIDGE_SECRET_BYTES = 32
+_UNSAFE_BRIDGE_SECRET_VALUES = frozenset(
+    {
+        "",
+        "change-me",
+        "changeme",
+        "default",
+        "dev-secret",
+        "development-secret",
+        "replace-me",
+        "test-secret",
+    }
+)
 
 
 class AppSettings(BaseSettings):
@@ -77,6 +91,25 @@ class AppSettings(BaseSettings):
     )
     matlab_bridge_enabled: bool = False
     matlab_engine_enabled: bool = Field(default=False, validation_alias="MATLAB_ENGINE_ENABLED")
+    matlab_bridge_auth_signing_key: str | None = None
+    matlab_bridge_auth_key_id: str = "mxa-bridge-dev-v1"
+    matlab_bridge_auth_issuer: str = "mxa-tutor-dev"
+    matlab_bridge_auth_audience: str = "mxa-matlab-bridge"
+    matlab_bridge_auth_token_ttl_seconds: int = Field(default=300, ge=30, le=900)
+    matlab_bridge_auth_max_lifetime_seconds: int = Field(default=900, ge=30, le=3600)
+    matlab_bridge_auth_clock_skew_seconds: int = Field(default=10, ge=0, le=60)
+    matlab_bridge_worker_count: int = Field(
+        default=1,
+        ge=1,
+        validation_alias=AliasChoices(
+            "MATLAB_BRIDGE_WORKER_COUNT",
+            "WEB_CONCURRENCY",
+            "UVICORN_WORKERS",
+        ),
+    )
+    matlab_bridge_instance_count: int = Field(default=1, ge=1)
+    matlab_bridge_dev_auth_enabled: bool = False
+    matlab_bridge_dev_auth_bootstrap_token: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -85,11 +118,41 @@ class AppSettings(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def _validate_matlab_engine_guard(self) -> Self:
+    def _validate_matlab_bridge_guards(self) -> Self:
+        if self.matlab_bridge_dev_auth_enabled and not self.matlab_bridge_enabled:
+            raise ValueError("matlab_bridge_dev_auth_enabled requires MATLAB_BRIDGE_ENABLED=true")
+        if self.matlab_bridge_enabled:
+            if self.app_environment not in {"development", "test"}:
+                raise ValueError(
+                    "matlab_bridge_enabled requires APP_ENV=development or APP_ENV=test"
+                )
+            if _is_unsafe_bridge_secret(self.matlab_bridge_auth_signing_key):
+                raise ValueError("matlab_bridge_enabled requires a non-default signing key")
+            if self.matlab_bridge_worker_count != 1:
+                raise ValueError("matlab_bridge_enabled requires a single worker")
+            if self.matlab_bridge_instance_count != 1:
+                raise ValueError("matlab_bridge_enabled requires a single instance")
+            if (
+                self.matlab_bridge_auth_token_ttl_seconds
+                > self.matlab_bridge_auth_max_lifetime_seconds
+            ):
+                raise ValueError("token ttl must not exceed max token lifetime")
+        if self.matlab_bridge_dev_auth_enabled and _is_unsafe_bridge_secret(
+            self.matlab_bridge_dev_auth_bootstrap_token
+        ):
+            raise ValueError("dev bridge auth requires a non-default bootstrap token")
         if not self.matlab_engine_enabled:
             return self
         if not self.matlab_bridge_enabled:
             raise ValueError("matlab_engine_enabled requires MATLAB_BRIDGE_ENABLED=true")
-        if self.app_environment not in {"development", "test"}:
-            raise ValueError("matlab_engine_enabled requires APP_ENV=development or APP_ENV=test")
         return self
+
+
+def _is_unsafe_bridge_secret(value: str | None) -> bool:
+    if value is None:
+        return True
+    stripped = value.strip()
+    return (
+        stripped.casefold() in _UNSAFE_BRIDGE_SECRET_VALUES
+        or len(stripped.encode("utf-8")) < _MIN_BRIDGE_SECRET_BYTES
+    )

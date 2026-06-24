@@ -24,6 +24,7 @@ EXPLANATION_PATH = "/api/v1/bridge/explanation"
 REQUEST_ID = "2690af3d-9cfe-4442-900e-c86af37a6244"
 SIGNAL = "Undefined function or variable Kp_ctrl"
 SECRET = "SECRET_BRIDGE_SENTINEL"
+TEST_BRIDGE_SIGNING_KEY = "test-bridge-signing-key-32-bytes-ok"
 
 
 class FakeExplanationProvider(TextProvider):
@@ -114,6 +115,8 @@ def _configure_bridge_env(
     monkeypatch.setenv("DB_PATH", str(tmp_path / "mxa.db"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", "true" if enabled else "false")
+    if enabled:
+        monkeypatch.setenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", TEST_BRIDGE_SIGNING_KEY)
     if app_env is None:
         monkeypatch.delenv("APP_ENV", raising=False)
     else:

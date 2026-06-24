@@ -1,0 +1,16 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "access_token": {
+      "maxLength": 8192,
+      "minLength": 1,
+      "title": "Access Token",
+      "type": "string"
+    }
+  },
+  "required": [
+    "access_token"
+  ],
+  "title": "BridgeDevAuthRevokeRequest",
+  "type": "object"
+}

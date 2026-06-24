@@ -10,6 +10,13 @@ import json
 import sys
 from pathlib import Path
 
+from features.matlab_bridge.bridge_auth_schemas import (
+    BridgeDevAuthErrorResponse,
+    BridgeDevAuthRevokeRequest,
+    BridgeDevAuthRevokeResponse,
+    BridgeDevAuthTokenRequest,
+    BridgeDevAuthTokenResponse,
+)
 from features.matlab_bridge.bridge_diagnostic_schemas import (
     BridgeDiagnosticReceiptModel,
     BridgeDiagnosticRequest,
@@ -29,6 +36,11 @@ OUTPUTS = {
     Path("schemas/bridge_diagnostic_request.schema.json"): BridgeDiagnosticRequest,
     Path("schemas/bridge_diagnostic_receipt.schema.json"): BridgeDiagnosticReceiptModel,
     Path("schemas/bridge_error_response.schema.json"): BridgeErrorResponse,
+    Path("schemas/bridge_dev_auth_token_request.schema.json"): BridgeDevAuthTokenRequest,
+    Path("schemas/bridge_dev_auth_token_response.schema.json"): BridgeDevAuthTokenResponse,
+    Path("schemas/bridge_dev_auth_revoke_request.schema.json"): BridgeDevAuthRevokeRequest,
+    Path("schemas/bridge_dev_auth_revoke_response.schema.json"): BridgeDevAuthRevokeResponse,
+    Path("schemas/bridge_dev_auth_error_response.schema.json"): BridgeDevAuthErrorResponse,
     Path("schemas/bridge_explanation_request.schema.json"): BridgeExplanationRequest,
     Path("schemas/bridge_explanation_result.schema.json"): BridgeExplanationResultModel,
     Path("schemas/bridge_explanation_error.schema.json"): BridgeExplanationErrorResponse,

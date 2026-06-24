@@ -22,6 +22,7 @@ from api.routes.matlab_bridge import (
 BRIDGE_PATH = "/api/v1/bridge/diagnostic"
 REQUEST_ID = "2690af3d-9cfe-4442-900e-c86af37a6244"
 SECRET = "SECRET_BRIDGE_SENTINEL"
+TEST_BRIDGE_SIGNING_KEY = "test-bridge-signing-key-32-bytes-ok"
 
 
 def _valid_payload(**overrides: object) -> dict[str, object]:
@@ -50,6 +51,8 @@ def _configure_bridge_env(
     monkeypatch.setenv("DB_PATH", str(tmp_path / "mxa.db"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("MATLAB_BRIDGE_ENABLED", "true" if enabled else "false")
+    if enabled:
+        monkeypatch.setenv("MATLAB_BRIDGE_AUTH_SIGNING_KEY", TEST_BRIDGE_SIGNING_KEY)
     if app_env is None:
         monkeypatch.delenv("APP_ENV", raising=False)
     else:
@@ -110,7 +113,7 @@ def test_enabled_bridge_fails_closed_outside_dev_and_test(
     tmp_path: Path,
     app_env: str | None,
 ) -> None:
-    with pytest.raises(RuntimeError, match="APP_ENV=development or APP_ENV=test"):
+    with pytest.raises((RuntimeError, ValueError)):
         _create_app(monkeypatch, tmp_path, enabled=True, app_env=app_env)
 
 

@@ -1,0 +1,41 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "user_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "User Id",
+      "type": "string"
+    },
+    "project_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Project Id",
+      "type": "string"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Session Id",
+      "type": "string"
+    },
+    "capabilities": {
+      "default": [
+        "run_state:write"
+      ],
+      "items": {
+        "const": "run_state:write",
+        "type": "string"
+      },
+      "title": "Capabilities",
+      "type": "array"
+    }
+  },
+  "required": [
+    "user_id",
+    "project_id",
+    "session_id"
+  ],
+  "title": "BridgeDevAuthTokenRequest",
+  "type": "object"
+}
