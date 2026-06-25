@@ -358,7 +358,7 @@ Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅] 12/12 (paper-to-model TASK-500~5
 
 ## 下一步
 
-**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 5/5;MATLAB bridge/engine 线 TASK-510~514 均已合并并验收通过,TASK-516 run-state 采集 + 独立通道契约已合并 main(PR #118 / df383c8)并验收完;TASK-517 b3-2a = 517-A substrate(PR #120)+517-B enforcement(PR #121)均已合并 main;TASK-518-A substrate 已合并 main(PR #123),TASK-518-B wiring 在做。总进度为 42/48。下一步进入 paper-to-model 后续 task / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
+**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 5/5;MATLAB bridge/engine 线 TASK-510~514 均已合并并验收通过,TASK-516 run-state 采集 + 独立通道契约已合并 main(PR #118 / df383c8)并验收完;TASK-517 b3-2a = 517-A substrate(PR #120)+517-B enforcement(PR #121)均已合并 main;TASK-518-A substrate 已合并 main(PR #123),TASK-518-B wiring 已合并 main(PR #124)。总进度为 43/48。下一步进入 paper-to-model 后续 task / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
 
 ## Week 5+:paper-to-model 主线占位
 
