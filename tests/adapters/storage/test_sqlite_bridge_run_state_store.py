@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -8,6 +10,7 @@ from uuid import uuid4
 import aiosqlite
 import pytest
 
+import adapters.storage.sqlite_bridge_run_state_store as store_module
 from adapters.storage._connection import open_connection
 from adapters.storage.sqlite_bridge_run_state_store import (
     BridgeRunStateScope,
@@ -236,6 +239,7 @@ async def test_project_expiry_marks_session_gone_and_rejects_read_write(
 
 async def test_sweep_clears_snapshots_before_ttl_cutoff(initialized_db_path: str) -> None:
     await _insert_project(initialized_db_path, created_at="2026-06-01T00:00:00")
+    await _insert_chat_session(initialized_db_path)
     clock = MutableClock(datetime(2026, 6, 1, 23, 0, 0))
     store = SqliteBridgeRunStateStore(initialized_db_path, clock=clock)
     await store.establish_session(_scope())
@@ -248,6 +252,8 @@ async def test_sweep_clears_snapshots_before_ttl_cutoff(initialized_db_path: str
     assert session is not None
     assert session.status == "gone"
     assert await _run_count(initialized_db_path) == 0
+    assert await _project_count(initialized_db_path) == 1
+    assert await _chat_session_count(initialized_db_path) == 1
 
 
 async def test_project_delete_cascades_run_state_tables(initialized_db_path: str) -> None:
@@ -295,6 +301,7 @@ async def test_current_pointer_trigger_rejects_drift(initialized_db_path: str) -
 
 async def test_concurrent_writes_with_two_connections_leave_single_current(
     initialized_db_path: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await _insert_project(initialized_db_path)
     first_store = SqliteBridgeRunStateStore(initialized_db_path)
@@ -302,11 +309,31 @@ async def test_concurrent_writes_with_two_connections_leave_single_current(
     await first_store.establish_session(_scope())
     first = _request(run_id=str(uuid4()), run_sequence=1)
     second = _request(run_id=str(uuid4()), run_sequence=1)
+    entered_connections = 0
+    connection_ids: set[int] = set()
+    both_connections_open = asyncio.Event()
+    release_barrier = asyncio.Event()
+    original_open_connection = store_module.open_connection
 
-    first_result, second_result = await asyncio.gather(
-        first_store.persist_run(first, _scope()),
-        second_store.persist_run(second, _scope()),
-    )
+    @asynccontextmanager
+    async def barrier_open_connection(db_path: str) -> AsyncIterator[aiosqlite.Connection]:
+        nonlocal entered_connections
+        async with original_open_connection(db_path) as conn:
+            entered_connections += 1
+            connection_ids.add(id(conn))
+            if entered_connections == 2:
+                both_connections_open.set()
+            await release_barrier.wait()
+            yield conn
+
+    monkeypatch.setattr(store_module, "open_connection", barrier_open_connection)
+
+    first_task = asyncio.create_task(first_store.persist_run(first, _scope()))
+    second_task = asyncio.create_task(second_store.persist_run(second, _scope()))
+    await asyncio.wait_for(both_connections_open.wait(), timeout=5)
+    assert len(connection_ids) == 2
+    release_barrier.set()
+    first_result, second_result = await asyncio.gather(first_task, second_task)
     kinds = {first_result.decision.kind, second_result.decision.kind}
     current = await first_store.current(_scope())
 
@@ -352,6 +379,32 @@ async def _insert_project(
             ("project-alpha", created_at, created_at),
         )
         await conn.commit()
+
+
+async def _insert_chat_session(db_path: str) -> None:
+    async with open_connection(db_path) as conn:
+        await conn.execute(
+            """
+            INSERT INTO chat_session(session_id, project_id, created_at, updated_at, title)
+            VALUES ('chat-alpha', 'project-alpha', '2026-06-01T00:00:00',
+                '2026-06-01T00:00:00', NULL)
+            """
+        )
+        await conn.commit()
+
+
+async def _project_count(db_path: str) -> int:
+    async with open_connection(db_path) as conn:
+        row = await (
+            await conn.execute("SELECT COUNT(*) AS count FROM project_status_record")
+        ).fetchone()
+    return int(row["count"])
+
+
+async def _chat_session_count(db_path: str) -> int:
+    async with open_connection(db_path) as conn:
+        row = await (await conn.execute("SELECT COUNT(*) AS count FROM chat_session")).fetchone()
+    return int(row["count"])
 
 
 async def _run_count(db_path: str) -> int:

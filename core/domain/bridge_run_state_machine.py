@@ -70,7 +70,8 @@ def fingerprint_run_state_request(request: BridgeRunStateRequest) -> RunStateSna
 
     canonical_bytes = canonicalize_run_state_request(request)
     digest = hashlib.sha256(canonical_bytes).hexdigest()
-    return RunStateSnapshotFingerprint(
+    snapshot_type = RunStateSnapshotFingerprint
+    return snapshot_type(
         fingerprint=f"sha256:{digest}",
         fingerprint_version=FINGERPRINT_VERSION,
         canonical_bytes=canonical_bytes,
