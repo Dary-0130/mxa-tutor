@@ -16,6 +16,7 @@ from loguru import logger
 from api.dependencies import (
     get_matlab_bridge_auth_service,
     get_matlab_bridge_run_state_service,
+    get_matlab_bridge_run_state_store,
     get_settings,
 )
 from api.routes.matlab_bridge import MAX_BRIDGE_BODY_BYTES, bridge_run_state
@@ -221,6 +222,29 @@ def test_valid_run_state_request_returns_minimal_ephemeral_receipt(
         "run_sequence": 7,
     }
     assert SECRET not in response.text
+
+
+def test_run_state_route_does_not_resolve_persistence_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+
+    async def fail_if_store_is_resolved() -> None:
+        raise AssertionError("run-state must remain b3 ephemeral")
+
+    app.dependency_overrides[get_matlab_bridge_run_state_store] = fail_if_store_is_resolved
+
+    response = _request(
+        app,
+        "POST",
+        RUN_STATE_PATH,
+        json=_valid_payload(),
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["durable"] is False
 
 
 def test_run_state_missing_authorization_fails_with_bearer_challenge(
