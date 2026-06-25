@@ -7,7 +7,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header
 from starlette.responses import JSONResponse
 
-from api.dependencies import get_matlab_bridge_auth_service, get_settings
+from adapters.storage.sqlite_bridge_run_state_store import (
+    BridgeRunStateScope,
+    BridgeRunStateSessionRejectedError,
+    BridgeRunStateStoreUnavailableError,
+    SqliteBridgeRunStateStore,
+)
+from api.dependencies import (
+    get_matlab_bridge_auth_service,
+    get_matlab_bridge_run_state_store,
+    get_settings,
+)
 from app.config import AppSettings
 from core.domain.bridge_auth import RUN_STATE_WRITE_CAPABILITY
 from features.matlab_bridge.bridge_auth_schemas import (
@@ -48,17 +58,33 @@ async def issue_dev_bridge_token(
     request_body: BridgeDevAuthTokenRequest,
     settings: Annotated[AppSettings, Depends(get_settings)],
     service: Annotated[BridgeAuthService, Depends(get_matlab_bridge_auth_service)],
+    run_state_store: Annotated[
+        SqliteBridgeRunStateStore,
+        Depends(get_matlab_bridge_run_state_store),
+    ],
     bootstrap_token: Annotated[str | None, Header(alias="X-MXA-Bridge-Dev-Bootstrap")] = None,
 ) -> BridgeDevAuthTokenResponse | JSONResponse:
     if not _bootstrap_allowed(settings, bootstrap_token):
         return _auth_error(403, "bridge_auth_forbidden")
     try:
+        await run_state_store.establish_session(
+            BridgeRunStateScope(
+                user_id=request_body.user_id,
+                project_id=request_body.project_id,
+                session_id=request_body.session_id,
+                process_generation=service.process_generation,
+            )
+        )
         issued = service.issue_token(
             user_id=request_body.user_id,
             project_id=request_body.project_id,
             session_id=request_body.session_id,
             capabilities=request_body.capabilities,
         )
+    except BridgeRunStateStoreUnavailableError:
+        return _auth_error(503, "bridge_auth_unavailable")
+    except BridgeRunStateSessionRejectedError:
+        return _auth_error(403, "bridge_auth_forbidden")
     except BridgeAuthForbiddenError:
         return _auth_error(403, "bridge_auth_forbidden")
     except BridgeAuthTokenError:

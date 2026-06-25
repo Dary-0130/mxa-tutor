@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
+from adapters.storage._connection import open_connection
+from adapters.storage.schema import init_schema
+from adapters.storage.sqlite_bridge_run_state_store import (
+    BridgeRunStateScope,
+    SqliteBridgeRunStateStore,
+)
 from api.dependencies import get_matlab_bridge_auth_service, get_settings
 from core.domain.bridge_auth import RUN_STATE_WRITE_CAPABILITY
 from features.matlab_bridge.bridge_auth_service import (
@@ -48,6 +55,39 @@ def _create_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **env: Any):
     from api.main import create_app
 
     return create_app()
+
+
+async def _prepare_schema_async(tmp_path: Path) -> None:
+    async with open_connection(str(tmp_path / "mxa.db")) as conn:
+        await init_schema(conn)
+
+
+def _prepare_schema(tmp_path: Path) -> None:
+    asyncio.run(_prepare_schema_async(tmp_path))
+
+
+async def _prepare_project_async(
+    tmp_path: Path,
+    *,
+    project_id: str = "project-alpha",
+    created_at: str | None = None,
+) -> None:
+    created_at = created_at or datetime.now(UTC).replace(tzinfo=None).isoformat()
+    async with open_connection(str(tmp_path / "mxa.db")) as conn:
+        await init_schema(conn)
+        await conn.execute(
+            """
+            INSERT INTO project_status_record(
+                project_id, name, status, created_at, updated_at
+            ) VALUES (?, 'demo.zip', 'parsing', ?, ?)
+            """,
+            (project_id, created_at, created_at),
+        )
+        await conn.commit()
+
+
+def _prepare_project(tmp_path: Path, **kwargs: object) -> None:
+    asyncio.run(_prepare_project_async(tmp_path, **kwargs))
 
 
 async def _request_async(app, method: str, path: str, host: str = "127.0.0.1", **kwargs: Any):
@@ -112,6 +152,7 @@ def test_dev_auth_issues_token_with_only_run_state_write_capability(
     tmp_path: Path,
 ) -> None:
     app = _create_app(monkeypatch, tmp_path)
+    _prepare_project(tmp_path)
 
     response = _request(
         app,
@@ -136,6 +177,84 @@ def test_dev_auth_issues_token_with_only_run_state_write_capability(
     assert context.project_id == "project-alpha"
     assert context.session_id == "11111111-1111-4111-8111-111111111111"
     assert context.capabilities == frozenset({RUN_STATE_WRITE_CAPABILITY})
+
+
+def test_dev_auth_establishes_run_state_session_before_issuing_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path)
+    _prepare_project(tmp_path)
+
+    response = _request(
+        app,
+        "POST",
+        TOKEN_PATH,
+        json=_token_request(),
+        headers={"X-MXA-Bridge-Dev-Bootstrap": BOOTSTRAP},
+    )
+    store = SqliteBridgeRunStateStore(str(tmp_path / "mxa.db"))
+    session = asyncio.run(store.get_session("11111111-1111-4111-8111-111111111111"))
+
+    assert response.status_code == 200
+    assert session is not None
+    assert session.status == "active"
+    assert session.project_id == "project-alpha"
+
+
+def test_dev_auth_refuses_missing_project_without_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path)
+    _prepare_schema(tmp_path)
+
+    response = _request(
+        app,
+        "POST",
+        TOKEN_PATH,
+        json=_token_request(),
+        headers={"X-MXA-Bridge-Dev-Bootstrap": BOOTSTRAP},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "error": "bridge_auth_forbidden",
+        "message": "bridge auth request denied",
+    }
+    assert "access_token" not in response.text
+
+
+def test_dev_auth_does_not_revive_ended_run_state_session(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path)
+    _prepare_project(tmp_path)
+    service = get_matlab_bridge_auth_service()
+    store = SqliteBridgeRunStateStore(str(tmp_path / "mxa.db"))
+    scope = BridgeRunStateScope(
+        user_id="user-alpha",
+        project_id="project-alpha",
+        session_id="11111111-1111-4111-8111-111111111111",
+        process_generation=service.process_generation,
+    )
+    asyncio.run(store.establish_session(scope))
+    asyncio.run(store.end_session(scope))
+
+    response = _request(
+        app,
+        "POST",
+        TOKEN_PATH,
+        json=_token_request(),
+        headers={"X-MXA-Bridge-Dev-Bootstrap": BOOTSTRAP},
+    )
+    session = asyncio.run(store.get_session("11111111-1111-4111-8111-111111111111"))
+
+    assert response.status_code == 403
+    assert "access_token" not in response.text
+    assert session is not None
+    assert session.status == "ended"
 
 
 def test_dev_auth_rejects_capability_outside_allowlist(
@@ -164,6 +283,7 @@ def test_dev_auth_revoke_invalidates_token(
     tmp_path: Path,
 ) -> None:
     app = _create_app(monkeypatch, tmp_path)
+    _prepare_project(tmp_path)
     token = _request(
         app,
         "POST",

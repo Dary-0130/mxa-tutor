@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime
 
 import aiosqlite
 from loguru import logger
 
 from core.domain.exceptions import StoreError
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 _SCHEMA_VERSION_DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -155,6 +155,99 @@ _CHUNKS_DDL = ";\n".join(_CHUNKS_STATEMENTS) + ";"
 _TEACHING_UNITS_DDL = ";\n".join(_TEACHING_UNITS_STATEMENTS) + ";"
 _PAPER_CACHE_DDL = ";\n".join(_PAPER_CACHE_STATEMENTS) + ";"
 
+_RUN_STATE_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS bridge_run_state_session (
+        session_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        process_generation TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'ended', 'gone')),
+        current_run_id TEXT,
+        established_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        ended_at TEXT,
+        CHECK (current_run_id IS NULL OR status = 'active'),
+        CHECK (
+            (status = 'active' AND ended_at IS NULL)
+            OR (status IN ('ended', 'gone') AND ended_at IS NOT NULL)
+        ),
+        FOREIGN KEY (project_id)
+            REFERENCES project_status_record(project_id)
+            ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_bridge_run_state_session_project
+        ON bridge_run_state_session(project_id, status)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS bridge_run_state_run (
+        run_row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        run_sequence INTEGER NOT NULL CHECK (run_sequence >= 0 AND run_sequence <= 1000000),
+        request_id TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        fingerprint_version INTEGER NOT NULL,
+        canonical_bytes BLOB NOT NULL,
+        run_status TEXT NOT NULL CHECK (
+            run_status IN ('completed', 'stopped', 'execution_error', 'unknown')
+        ),
+        convergence_status TEXT NOT NULL CHECK (
+            convergence_status IN (
+                'converged',
+                'not_converged',
+                'not_applicable',
+                'unknown'
+            )
+        ),
+        snapshot_json TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        UNIQUE (session_id, run_id),
+        UNIQUE (session_id, run_sequence),
+        UNIQUE (session_id, request_id),
+        FOREIGN KEY (session_id)
+            REFERENCES bridge_run_state_session(session_id)
+            ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_bridge_run_state_run_session_received
+        ON bridge_run_state_run(session_id, received_at)
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS bridge_run_state_current_run_exists
+    BEFORE UPDATE OF current_run_id ON bridge_run_state_session
+    WHEN NEW.current_run_id IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1
+            FROM bridge_run_state_run
+            WHERE session_id = NEW.session_id
+                AND run_id = NEW.current_run_id
+        )
+    BEGIN
+        SELECT RAISE(ABORT, 'bridge_run_state_current_run_missing');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS bridge_run_state_current_run_exists_on_insert
+    BEFORE INSERT ON bridge_run_state_session
+    WHEN NEW.current_run_id IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1
+            FROM bridge_run_state_run
+            WHERE session_id = NEW.session_id
+                AND run_id = NEW.current_run_id
+        )
+    BEGIN
+        SELECT RAISE(ABORT, 'bridge_run_state_current_run_missing');
+    END
+    """,
+)
+
+_RUN_STATE_DDL = ";\n".join(_RUN_STATE_STATEMENTS) + ";"
+
 _DDL = "\n".join(
     (
         _SCHEMA_VERSION_DDL,
@@ -162,6 +255,7 @@ _DDL = "\n".join(
         _CHUNKS_DDL,
         _TEACHING_UNITS_DDL,
         _PAPER_CACHE_DDL,
+        _RUN_STATE_DDL,
     )
 )
 
@@ -191,10 +285,17 @@ async def _migrate_v3_to_v4(conn: aiosqlite.Connection) -> None:
     await _execute_all(conn, _PAPER_CACHE_STATEMENTS)
 
 
+async def _migrate_v4_to_v5(conn: aiosqlite.Connection) -> None:
+    """Add MATLAB bridge run-state session and run tables."""
+
+    await _execute_all(conn, _RUN_STATE_STATEMENTS)
+
+
 _MIGRATIONS: dict[int, Migration] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
     3: _migrate_v3_to_v4,
+    4: _migrate_v4_to_v5,
 }
 
 
@@ -209,7 +310,7 @@ async def init_schema(conn: aiosqlite.Connection) -> None:
         await conn.executescript(_DDL)
         await conn.execute(
             "INSERT INTO schema_version(id, version, applied_at) VALUES (1, ?, ?)",
-            (CURRENT_SCHEMA_VERSION, datetime.utcnow().isoformat()),
+            (CURRENT_SCHEMA_VERSION, _utcnow_iso()),
         )
         await conn.commit()
         return
@@ -238,7 +339,7 @@ async def init_schema(conn: aiosqlite.Connection) -> None:
 
         await conn.execute(
             "UPDATE schema_version SET version=?, applied_at=? WHERE id=1",
-            (CURRENT_SCHEMA_VERSION, datetime.utcnow().isoformat()),
+            (CURRENT_SCHEMA_VERSION, _utcnow_iso()),
         )
         await conn.commit()
     except Exception:
@@ -250,3 +351,7 @@ async def init_schema(conn: aiosqlite.Connection) -> None:
                 type(rollback_exc).__name__,
             )
         raise
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(UTC).replace(tzinfo=None).isoformat()
