@@ -31,6 +31,7 @@ from features.matlab_bridge.bridge_run_state_schemas import (
     BridgeRunStateAuthErrorResponse,
     BridgeRunStateReceiptModel,
     BridgeRunStateRequest,
+    BridgeRunStateWriteErrorResponse,
 )
 
 OUTPUTS = {
@@ -50,6 +51,7 @@ OUTPUTS = {
     Path("schemas/bridge_run_state_auth_error_response.schema.json"): (
         BridgeRunStateAuthErrorResponse
     ),
+    Path("schemas/bridge_run_state_write_error.schema.json"): BridgeRunStateWriteErrorResponse,
 }
 
 

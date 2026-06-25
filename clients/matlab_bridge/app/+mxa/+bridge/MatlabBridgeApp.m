@@ -5,7 +5,8 @@ classdef MatlabBridgeApp < handle
         DefaultBaseUrl = "http://localhost:8000"
         DiagnosticProtocolVersion = "0.3-a"
         ExplanationProtocolVersion = "0.3-b1"
-        RunStateProtocolVersion = "0.3-b3"
+        RunStateProtocolVersion = "0.3-b4"
+        RunStateConsentNoticeVersion = "run_state_persistence_v1"
         DiagnosticKind = "manual_error"
         AutoCapturedDiagnosticKind = "auto_captured_error"
         ClientVersion = "0.1.0"
@@ -100,7 +101,7 @@ classdef MatlabBridgeApp < handle
 
             confirmed = false;
             try
-                confirmed = logical(obj.ConfirmFunction(obj.UIFigure, snapshot));
+                confirmed = obj.confirmSnapshot(snapshot, "diagnostic");
             catch ME
                 obj.LastErrorIdentifier = string(ME.identifier);
                 obj.setStatus("已取消发送。");
@@ -201,7 +202,7 @@ classdef MatlabBridgeApp < handle
             obj.PreviewTextArea.Value = cellstr(splitlines(snapshot));
             confirmed = false;
             try
-                confirmed = logical(obj.ConfirmFunction(obj.UIFigure, snapshot));
+                confirmed = obj.confirmSnapshot(snapshot, "diagnostic");
             catch ME
                 obj.LastErrorIdentifier = string(ME.identifier);
                 obj.setStatus("已取消发送。");
@@ -264,7 +265,7 @@ classdef MatlabBridgeApp < handle
             obj.PreviewTextArea.Value = cellstr(splitlines(frozenJson));
             confirmed = false;
             try
-                confirmed = logical(obj.ConfirmFunction(obj.UIFigure, frozenJson));
+                confirmed = obj.confirmSnapshot(frozenJson, "run_state_persistence");
             catch ME
                 obj.LastErrorIdentifier = string(ME.identifier);
                 obj.setStatus("已取消发送。");
@@ -286,6 +287,18 @@ classdef MatlabBridgeApp < handle
                 receipt = obj.RunStatePostFunction( ...
                     obj.BaseUrl, frozenJson, obj.TimeoutSeconds, accessToken);
             catch ME
+                if obj.isConflictError(ME)
+                    obj.LastErrorIdentifier = string(ME.identifier);
+                    obj.setStatus("运行状态冲突,请重新运行后再发送。");
+                    obj.ResponseTextArea.Value = cellstr("运行状态冲突,请重新运行后再发送。");
+                    return
+                end
+                if obj.isSessionUnavailableError(ME)
+                    obj.LastErrorIdentifier = string(ME.identifier);
+                    obj.setStatus("运行状态会话已失效,请新建会话后重新确认。");
+                    obj.ResponseTextArea.Value = cellstr("运行状态会话已失效,请新建会话后重新确认。");
+                    return
+                end
                 if ~obj.isUnauthorizedError(ME)
                     obj.LastErrorIdentifier = string(ME.identifier);
                     obj.setStatus(obj.RunStateErrorMessage);
@@ -297,6 +310,18 @@ classdef MatlabBridgeApp < handle
                     receipt = obj.RunStatePostFunction( ...
                         obj.BaseUrl, frozenJson, obj.TimeoutSeconds, accessToken);
                 catch refreshME
+                    if obj.isConflictError(refreshME)
+                        obj.LastErrorIdentifier = string(refreshME.identifier);
+                        obj.setStatus("运行状态冲突,请重新运行后再发送。");
+                        obj.ResponseTextArea.Value = cellstr("运行状态冲突,请重新运行后再发送。");
+                        return
+                    end
+                    if obj.isSessionUnavailableError(refreshME)
+                        obj.LastErrorIdentifier = string(refreshME.identifier);
+                        obj.setStatus("运行状态会话已失效,请新建会话后重新确认。");
+                        obj.ResponseTextArea.Value = cellstr("运行状态会话已失效,请新建会话后重新确认。");
+                        return
+                    end
                     obj.LastErrorIdentifier = string(refreshME.identifier);
                     obj.setStatus(obj.RunStateErrorMessage);
                     obj.ResponseTextArea.Value = cellstr(obj.RunStateErrorMessage);
@@ -312,8 +337,8 @@ classdef MatlabBridgeApp < handle
             end
 
             obj.LastRunStateReceipt = receipt;
-            obj.ResponseTextArea.Value = cellstr("运行状态已校验。");
-            obj.setStatus("运行状态已校验。");
+            obj.ResponseTextArea.Value = cellstr("运行状态已保存。");
+            obj.setStatus("运行状态已保存。");
             submitted = true;
         end
     end
@@ -412,19 +437,23 @@ classdef MatlabBridgeApp < handle
             if ~isstruct(receipt)
                 return
             end
-            requiredFields = ["request_id", "run_id", "run_sequence", "status", "mode", "durable"];
+            requiredFields = [ ...
+                "protocol_version", "request_id", "run_id", "run_sequence", ...
+                "status", "mode", "durable" ...
+            ];
             for index = 1:numel(requiredFields)
                 if ~isfield(receipt, requiredFields(index))
                     return
                 end
             end
-            durableFalse = isequal(receipt.durable, false) || isequal(receipt.durable, 0);
-            valid = strcmp(string(receipt.request_id), string(payload.request_id)) && ...
+            durableTrue = isequal(receipt.durable, true) || isequal(receipt.durable, 1);
+            valid = strcmp(string(receipt.protocol_version), string(payload.protocol_version)) && ...
+                strcmp(string(receipt.request_id), string(payload.request_id)) && ...
                 strcmp(string(receipt.run_id), string(payload.run_id)) && ...
                 double(receipt.run_sequence) == double(payload.run_sequence) && ...
-                strcmp(string(receipt.status), "validated") && ...
-                strcmp(string(receipt.mode), "ephemeral_validation") && ...
-                durableFalse;
+                strcmp(string(receipt.status), "persisted") && ...
+                strcmp(string(receipt.mode), "durable_persisted") && ...
+                durableTrue;
         end
 
         function token = fetchRunStateToken(obj, userId, projectId, sessionId)
@@ -441,6 +470,27 @@ classdef MatlabBridgeApp < handle
             unauthorized = contains(identifier, "HTTP401") || ...
                 contains(identifier, "Unauthorized", "IgnoreCase", true) || ...
                 contains(message, "401");
+        end
+
+        function conflict = isConflictError(~, caughtException)
+            identifier = string(caughtException.identifier);
+            message = string(caughtException.message);
+            conflict = contains(identifier, "HTTP409") || contains(message, "409");
+        end
+
+        function unavailable = isSessionUnavailableError(~, caughtException)
+            identifier = string(caughtException.identifier);
+            message = string(caughtException.message);
+            unavailable = contains(identifier, "HTTP410") || contains(message, "410");
+        end
+
+        function confirmed = confirmSnapshot(obj, snapshot, context)
+            confirmArity = nargin(obj.ConfirmFunction);
+            if confirmArity == 2
+                confirmed = logical(obj.ConfirmFunction(obj.UIFigure, snapshot));
+            else
+                confirmed = logical(obj.ConfirmFunction(obj.UIFigure, snapshot, context));
+            end
         end
 
         function setStatus(obj, text)

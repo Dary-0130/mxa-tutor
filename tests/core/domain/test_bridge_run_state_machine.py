@@ -17,7 +17,7 @@ RUN_ID = "22222222-2222-4222-8222-222222222222"
 
 def _payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "protocol_version": "0.3-b3",
+        "protocol_version": "0.3-b4",
         "request_id": "2690af3d-9cfe-4442-900e-c86af37a6244",
         "session_id": SESSION_ID,
         "run_id": RUN_ID,
@@ -25,6 +25,7 @@ def _payload(**overrides: object) -> dict[str, object]:
         "matlab_release": "R2026a",
         "client_version": "0.1.0",
         "run_state_sharing_consent_confirmed": True,
+        "consent_notice_version": "run_state_persistence_v1",
         "run_status": "completed",
         "convergence_status": "not_applicable",
         "stop_reason": "ReachedStopTime",

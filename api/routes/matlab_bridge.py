@@ -14,14 +14,22 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import Message, Receive
 
+from adapters.storage.sqlite_bridge_run_state_store import (
+    BridgeRunStateScope,
+    BridgeRunStateSessionRejectedError,
+    BridgeRunStateStoreUnavailableError,
+    SqliteBridgeRunStateStore,
+)
 from api.dependencies import (
     get_matlab_bridge_auth_service,
     get_matlab_bridge_diagnostic_service,
     get_matlab_bridge_explanation_service,
     get_matlab_bridge_run_state_service,
+    get_matlab_bridge_run_state_store,
 )
 from core.domain.bridge_auth import RUN_STATE_WRITE_CAPABILITY, BridgeAuthContext
 from core.domain.bridge_run_state import canonical_run_state_session_id
+from core.domain.exceptions import BridgeRunStateValidationError
 from features.matlab_bridge.bridge_auth_service import (
     BridgeAuthForbiddenError,
     BridgeAuthRevocationStoreUnavailableError,
@@ -46,8 +54,13 @@ from features.matlab_bridge.bridge_run_state_schemas import (
     BridgeRunStateAuthErrorResponse,
     BridgeRunStateReceiptModel,
     BridgeRunStateRequest,
+    BridgeRunStateWriteErrorResponse,
 )
-from features.matlab_bridge.bridge_run_state_service import BridgeRunStateService
+from features.matlab_bridge.bridge_run_state_service import (
+    BridgeRunStateConflictError,
+    BridgeRunStateInternalError,
+    BridgeRunStateService,
+)
 
 MAX_BRIDGE_BODY_BYTES = 32 * 1024
 MAX_BRIDGE_BEARER_BYTES = 8192
@@ -121,6 +134,51 @@ def _bridge_auth_error(status_code: int, error: str, status: str) -> JSONRespons
     )
     headers = {"WWW-Authenticate": "Bearer"} if status_code == 401 else None
     return JSONResponse(status_code=status_code, content=payload.model_dump(), headers=headers)
+
+
+def _bridge_run_state_write_error(status_code: int, error: str, status: str) -> JSONResponse:
+    logger.info(
+        "Bridge run-state write rejected: event_code={} status={}",
+        "bridge_run_state_write",
+        status,
+    )
+    payload = BridgeRunStateWriteErrorResponse.model_validate(
+        {"error": error, "message": "bridge run-state write failed"}
+    )
+    return JSONResponse(status_code=status_code, content=payload.model_dump())
+
+
+def _run_state_scope(auth_context: BridgeAuthContext) -> BridgeRunStateScope:
+    return BridgeRunStateScope(
+        user_id=auth_context.user_id,
+        project_id=auth_context.project_id,
+        session_id=auth_context.session_id,
+        process_generation=auth_context.claims.process_generation,
+    )
+
+
+def _map_session_rejection(exc: BridgeRunStateSessionRejectedError) -> JSONResponse:
+    if exc.reason in {"invalid_scope", "scope_mismatch"}:
+        return _bridge_auth_error(403, "bridge_auth_forbidden", "scope_mismatch")
+    return _bridge_run_state_write_error(
+        410,
+        "bridge_run_state_session_unavailable",
+        "session_unavailable",
+    )
+
+
+def _map_store_unavailable(exc: BridgeRunStateStoreUnavailableError) -> JSONResponse:
+    if str(exc) in {"current_run_missing"}:
+        return _bridge_run_state_write_error(
+            500,
+            "bridge_run_state_internal_error",
+            "invariant_failed",
+        )
+    return _bridge_run_state_write_error(
+        503,
+        "bridge_run_state_store_unavailable",
+        "store_unavailable",
+    )
 
 
 def _replay_receive(body: bytes) -> Receive:
@@ -388,7 +446,22 @@ async def bridge_explanation(
                 }
             },
         },
-        503: {"model": BridgeRunStateAuthErrorResponse},
+        409: {"model": BridgeRunStateWriteErrorResponse},
+        410: {"model": BridgeRunStateWriteErrorResponse},
+        500: {"model": BridgeRunStateWriteErrorResponse},
+        503: {
+            "description": "Auth revocation store or durable run-state write unavailable",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/BridgeRunStateAuthErrorResponse"},
+                            {"$ref": "#/components/schemas/BridgeRunStateWriteErrorResponse"},
+                        ]
+                    }
+                }
+            },
+        },
     },
     openapi_extra={
         "security": [{BRIDGE_RUN_STATE_SECURITY_SCHEME: []}],
@@ -408,9 +481,42 @@ async def bridge_run_state(
         BridgeRunStateService,
         Depends(get_matlab_bridge_run_state_service),
     ],
-) -> BridgeRunStateReceiptModel:
-    """Validate one user-confirmed run-state snapshot without persistence."""
+    store: Annotated[
+        SqliteBridgeRunStateStore,
+        Depends(get_matlab_bridge_run_state_store),
+    ],
+) -> BridgeRunStateReceiptModel | JSONResponse:
+    """Persist one user-confirmed run-state snapshot."""
     request_body = cast(BridgeRunStateRequest, request.state.bridge_run_state_request)
     auth_context = cast(BridgeAuthContext, request.state.bridge_auth_context)
-    receipt = service.consume(request_body.to_domain(), auth_context)
+    scope = _run_state_scope(auth_context)
+    try:
+        receipt = await service.consume(
+            request_body.to_domain(),
+            auth_context,
+            store=store,
+            scope=scope,
+        )
+    except BridgeRunStateConflictError:
+        return _bridge_run_state_write_error(
+            409,
+            "bridge_run_state_conflict",
+            "conflict",
+        )
+    except BridgeRunStateSessionRejectedError as exc:
+        return _map_session_rejection(exc)
+    except BridgeRunStateStoreUnavailableError as exc:
+        return _map_store_unavailable(exc)
+    except BridgeRunStateValidationError:
+        return _bridge_run_state_write_error(
+            500,
+            "bridge_run_state_internal_error",
+            "invariant_failed",
+        )
+    except BridgeRunStateInternalError:
+        return _bridge_run_state_write_error(
+            500,
+            "bridge_run_state_internal_error",
+            "invariant_failed",
+        )
     return BridgeRunStateReceiptModel.from_domain(receipt)

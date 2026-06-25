@@ -1,12 +1,14 @@
-"""Stateless validation service for MATLAB bridge run-state snapshots."""
+"""Validation and durable wiring service for MATLAB bridge run-state snapshots."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import replace
+from typing import Any, Protocol
 
 from loguru import logger
 
+from adapters.storage.sqlite_bridge_run_state_store import BridgeRunStateScope
 from core.domain.bridge_auth import BridgeAuthContext
 from core.domain.bridge_run_state import (
     BridgeRunStateEnvelopeSeries,
@@ -37,39 +39,82 @@ _MODEL_METADATA_PATTERNS = (
 )
 
 
-class BridgeRunStateService:
-    """Validate one run-state payload and return an ephemeral receipt."""
+class RunStatePersistenceStore(Protocol):
+    async def persist_run(
+        self,
+        request: BridgeRunStateRequest,
+        scope: BridgeRunStateScope,
+    ) -> Any:
+        """Persist one redacted run-state snapshot in an authoritative transaction."""
 
-    def consume(
+
+class BridgeRunStateConflictError(Exception):
+    """The incoming immutable snapshot conflicts with persisted run-state."""
+
+    def __init__(self, reason: str | None) -> None:
+        self.reason = reason
+        super().__init__(reason or "conflict")
+
+
+class BridgeRunStateInternalError(Exception):
+    """The store returned a persistence state that should be unreachable."""
+
+
+class BridgeRunStateService:
+    """Validate, redact, and persist one run-state payload."""
+
+    async def consume(
         self,
         request: BridgeRunStateRequest,
         auth_context: BridgeAuthContext,
+        *,
+        store: RunStatePersistenceStore,
+        scope: BridgeRunStateScope,
     ) -> BridgeRunStateReceipt:
         _ = auth_context
         redacted_request = redact_run_state_request(request)
         if contains_run_state_private_text("\n".join(_iter_request_strings(redacted_request))):
             logger.error(
-                "Bridge run-state privacy validation failed: request_id={} run_sequence={}",
-                str(request.request_id),
-                request.run_sequence,
+                "Bridge run-state privacy validation failed: event_code={} status={}",
+                "bridge_run_state_privacy",
+                "rejected",
             )
             raise BridgeRunStateValidationError("run_state_privacy_validation_failed") from None
 
+        result = await store.persist_run(redacted_request, scope)
+        decision = result.decision
+        if decision.kind == "conflict":
+            logger.info(
+                "Bridge run-state persist rejected: event_code={} status={}",
+                "bridge_run_state_write",
+                "conflict",
+            )
+            raise BridgeRunStateConflictError(decision.reason)
+        if decision.kind == "rejected":
+            logger.error(
+                "Bridge run-state persist invariant failed: event_code={} status={}",
+                "bridge_run_state_write",
+                "rejected_decision",
+            )
+            raise BridgeRunStateInternalError("rejected_decision") from None
+        if decision.kind not in {"current", "historical", "idempotent"}:
+            logger.error(
+                "Bridge run-state persist invariant failed: event_code={} status={}",
+                "bridge_run_state_write",
+                "unknown_decision",
+            )
+            raise BridgeRunStateInternalError("unknown_decision") from None
+
         logger.info(
-            (
-                "Bridge run-state validated: request_id={} run_sequence={} run_status={} "
-                "metrics_count={} series_count={}"
-            ),
-            str(request.request_id),
-            request.run_sequence,
-            request.run_status,
-            len(request.metrics),
-            len(request.series),
+            "Bridge run-state persisted: event_code={} status={}",
+            "bridge_run_state_write",
+            decision.kind,
         )
         return BridgeRunStateReceipt(
-            status="validated",
-            mode="ephemeral_validation",
-            durable=False,
+            protocol_version="0.3-b4",
+            status="persisted",
+            mode="durable_persisted",
+            durable=True,
             request_id=request.request_id,
             run_id=request.run_id,
             run_sequence=request.run_sequence,
@@ -155,6 +200,7 @@ def _iter_request_strings(request: BridgeRunStateRequest) -> list[str]:
     values = [
         request.matlab_release,
         request.client_version,
+        request.consent_notice_version,
         request.run_status,
         request.convergence_status,
         request.metrics_status,

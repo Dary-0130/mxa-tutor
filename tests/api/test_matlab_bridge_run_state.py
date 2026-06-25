@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import inspect
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,13 @@ import httpx
 import pytest
 from loguru import logger
 
+from adapters.storage._connection import open_connection
+from adapters.storage.schema import init_schema
+from adapters.storage.sqlite_bridge_run_state_store import (
+    BridgeRunStateScope,
+    BridgeRunStateStoreUnavailableError,
+    SqliteBridgeRunStateStore,
+)
 from api.dependencies import (
     get_matlab_bridge_auth_service,
     get_matlab_bridge_run_state_service,
@@ -20,11 +28,13 @@ from api.dependencies import (
     get_settings,
 )
 from api.routes.matlab_bridge import MAX_BRIDGE_BODY_BYTES, bridge_run_state
+from core.domain.exceptions import BridgeRunStateValidationError
 from features.matlab_bridge.bridge_auth_service import (
     BridgeAuthService,
     BridgeAuthServiceConfig,
     InMemoryBridgeRevocationStore,
 )
+from features.matlab_bridge.bridge_run_state_service import BridgeRunStateInternalError
 
 RUN_STATE_PATH = "/api/v1/bridge/run-state"
 REQUEST_ID = "2690af3d-9cfe-4442-900e-c86af37a6244"
@@ -38,7 +48,7 @@ BOOTSTRAP_PROJECT_ID = "project-alpha"
 
 def _valid_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "protocol_version": "0.3-b3",
+        "protocol_version": "0.3-b4",
         "request_id": REQUEST_ID,
         "session_id": SESSION_ID,
         "run_id": RUN_ID,
@@ -46,6 +56,7 @@ def _valid_payload(**overrides: object) -> dict[str, object]:
         "matlab_release": "R2026a",
         "client_version": "0.1.0",
         "run_state_sharing_consent_confirmed": True,
+        "consent_notice_version": "run_state_persistence_v1",
         "run_status": "completed",
         "convergence_status": "not_applicable",
         "stop_reason": "ReachedStopTime",
@@ -105,7 +116,83 @@ def _create_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **env: Any):
     _configure_bridge_env(monkeypatch, tmp_path, **env)
     from api.main import create_app
 
-    return create_app()
+    app = create_app()
+    if env.get("enabled") is True:
+        _prepare_run_state_session(tmp_path)
+    return app
+
+
+async def _prepare_run_state_session_async(
+    tmp_path: Path,
+    *,
+    session_id: str = SESSION_ID,
+    project_id: str = BOOTSTRAP_PROJECT_ID,
+    user_id: str = BOOTSTRAP_USER_ID,
+    created_at: str | None = None,
+) -> None:
+    created_at = created_at or datetime.now(UTC).replace(tzinfo=None).isoformat()
+    db_path = str(tmp_path / "mxa.db")
+    async with open_connection(db_path) as conn:
+        await init_schema(conn)
+        await conn.execute(
+            """
+            INSERT INTO project_status_record(
+                project_id, name, status, created_at, updated_at
+            ) VALUES (?, 'demo.zip', 'parsing', ?, ?)
+            ON CONFLICT(project_id) DO NOTHING
+            """,
+            (project_id, created_at, created_at),
+        )
+        await conn.commit()
+    service = get_matlab_bridge_auth_service()
+    store = SqliteBridgeRunStateStore(db_path)
+    await store.establish_session(
+        BridgeRunStateScope(
+            user_id=user_id,
+            project_id=project_id,
+            session_id=session_id,
+            process_generation=service.process_generation,
+        )
+    )
+
+
+def _prepare_run_state_session(tmp_path: Path, **kwargs: object) -> None:
+    asyncio.run(_prepare_run_state_session_async(tmp_path, **kwargs))
+
+
+async def _prepare_project_async(
+    tmp_path: Path,
+    *,
+    project_id: str,
+    created_at: str | None = None,
+) -> None:
+    created_at = created_at or datetime.now(UTC).replace(tzinfo=None).isoformat()
+    async with open_connection(str(tmp_path / "mxa.db")) as conn:
+        await init_schema(conn)
+        await conn.execute(
+            """
+            INSERT INTO project_status_record(
+                project_id, name, status, created_at, updated_at
+            ) VALUES (?, 'demo.zip', 'parsing', ?, ?)
+            ON CONFLICT(project_id) DO NOTHING
+            """,
+            (project_id, created_at, created_at),
+        )
+        await conn.commit()
+
+
+def _prepare_project(tmp_path: Path, *, project_id: str) -> None:
+    asyncio.run(_prepare_project_async(tmp_path, project_id=project_id))
+
+
+def _run_state_scope() -> BridgeRunStateScope:
+    service = get_matlab_bridge_auth_service()
+    return BridgeRunStateScope(
+        user_id=BOOTSTRAP_USER_ID,
+        project_id=BOOTSTRAP_PROJECT_ID,
+        session_id=SESSION_ID,
+        process_generation=service.process_generation,
+    )
 
 
 async def _request_async(app, method: str, path: str, host: str = "127.0.0.1", **kwargs: Any):
@@ -198,7 +285,7 @@ def test_run_state_handler_uses_request_state_instead_of_body_parameter() -> Non
     assert "request_body" not in signature.parameters
 
 
-def test_valid_run_state_request_returns_minimal_ephemeral_receipt(
+def test_valid_run_state_request_persists_and_returns_durable_receipt(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -214,9 +301,10 @@ def test_valid_run_state_request_returns_minimal_ephemeral_receipt(
 
     assert response.status_code == 200
     assert response.json() == {
-        "status": "validated",
-        "mode": "ephemeral_validation",
-        "durable": False,
+        "protocol_version": "0.3-b4",
+        "status": "persisted",
+        "mode": "durable_persisted",
+        "durable": True,
         "request_id": REQUEST_ID,
         "run_id": RUN_ID,
         "run_sequence": 7,
@@ -224,16 +312,95 @@ def test_valid_run_state_request_returns_minimal_ephemeral_receipt(
     assert SECRET not in response.text
 
 
-def test_run_state_route_does_not_resolve_persistence_store(
+def test_run_state_missing_session_maps_to_410_without_ephemeral_fallback(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+    missing_session_id = "33333333-3333-4333-8333-333333333333"
 
-    async def fail_if_store_is_resolved() -> None:
-        raise AssertionError("run-state must remain b3 ephemeral")
+    response = _request(
+        app,
+        "POST",
+        RUN_STATE_PATH,
+        json=_valid_payload(session_id=missing_session_id),
+        headers=_auth_headers(session_id=missing_session_id),
+    )
 
-    app.dependency_overrides[get_matlab_bridge_run_state_store] = fail_if_store_is_resolved
+    assert response.status_code == 410
+    assert response.json() == {
+        "error": "bridge_run_state_session_unavailable",
+        "message": "bridge run-state write failed",
+    }
+    assert "durable" not in response.text
+
+
+def test_run_state_conflict_maps_to_409_write_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+    headers = _auth_headers()
+
+    first = _request(app, "POST", RUN_STATE_PATH, json=_valid_payload(), headers=headers)
+    conflicted = _request(
+        app,
+        "POST",
+        RUN_STATE_PATH,
+        json=_valid_payload(
+            request_id="3690af3d-9cfe-4442-900e-c86af37a6244",
+            stop_reason="DifferentStop",
+        ),
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert conflicted.status_code == 409
+    assert conflicted.json() == {
+        "error": "bridge_run_state_conflict",
+        "message": "bridge run-state write failed",
+    }
+    assert "durable" not in conflicted.text
+
+
+def test_run_state_store_scope_mismatch_maps_to_403_not_410(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+    _prepare_project(tmp_path, project_id="project-beta")
+    token = (
+        get_matlab_bridge_auth_service()
+        .issue_token(
+            user_id=BOOTSTRAP_USER_ID,
+            project_id="project-beta",
+            session_id=SESSION_ID,
+        )
+        .access_token
+    )
+
+    response = _request(
+        app,
+        "POST",
+        RUN_STATE_PATH,
+        json=_valid_payload(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "error": "bridge_auth_forbidden",
+        "message": "bridge auth request denied",
+    }
+
+
+def test_run_state_ended_session_maps_to_410(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+    store = SqliteBridgeRunStateStore(str(tmp_path / "mxa.db"))
+    asyncio.run(store.end_session(_run_state_scope()))
 
     response = _request(
         app,
@@ -243,8 +410,159 @@ def test_run_state_route_does_not_resolve_persistence_store(
         headers=_auth_headers(),
     )
 
-    assert response.status_code == 200
-    assert response.json()["durable"] is False
+    assert response.status_code == 410
+    assert response.json()["error"] == "bridge_run_state_session_unavailable"
+
+
+def test_run_state_expired_project_session_maps_to_410_on_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+
+    async def expire_project() -> None:
+        async with open_connection(str(tmp_path / "mxa.db")) as conn:
+            await conn.execute(
+                "UPDATE project_status_record SET created_at=? WHERE project_id=?",
+                ("2000-01-01T00:00:00", BOOTSTRAP_PROJECT_ID),
+            )
+            await conn.commit()
+
+    asyncio.run(expire_project())
+
+    response = _request(
+        app,
+        "POST",
+        RUN_STATE_PATH,
+        json=_valid_payload(),
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 410
+    assert response.json() == {
+        "error": "bridge_run_state_session_unavailable",
+        "message": "bridge run-state write failed",
+    }
+    assert "durable" not in response.text
+
+
+def test_run_state_store_unavailable_maps_to_503_without_payload_echo(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+
+    class FailingStore:
+        async def persist_run(self, request, scope):  # noqa: ANN001, ANN201
+            _ = request, scope
+            raise BridgeRunStateStoreUnavailableError("sqlite_operation_failed")
+
+    app.dependency_overrides[get_matlab_bridge_run_state_store] = lambda: FailingStore()
+
+    response = _request(
+        app,
+        "POST",
+        RUN_STATE_PATH,
+        json=_valid_payload(stop_reason=SECRET),
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": "bridge_run_state_store_unavailable",
+        "message": "bridge run-state write failed",
+    }
+    assert SECRET not in response.text
+    assert "durable" not in response.text
+
+
+def test_run_state_store_invariant_failure_maps_to_500(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+
+    class CorruptStore:
+        async def persist_run(self, request, scope):  # noqa: ANN001, ANN201
+            _ = request, scope
+            raise BridgeRunStateStoreUnavailableError("current_run_missing")
+
+    app.dependency_overrides[get_matlab_bridge_run_state_store] = lambda: CorruptStore()
+
+    response = _request(
+        app,
+        "POST",
+        RUN_STATE_PATH,
+        json=_valid_payload(),
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": "bridge_run_state_internal_error",
+        "message": "bridge run-state write failed",
+    }
+    assert "durable" not in response.text
+
+
+def test_run_state_server_privacy_invariant_failure_maps_to_500(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+
+    class PrivacyFailingService:
+        async def consume(self, request, auth_context, *, store, scope):  # noqa: ANN001, ANN201
+            _ = request, auth_context, store, scope
+            raise BridgeRunStateValidationError("run_state_privacy_validation_failed")
+
+    app.dependency_overrides[get_matlab_bridge_run_state_service] = lambda: PrivacyFailingService()
+
+    response = _request(
+        app,
+        "POST",
+        RUN_STATE_PATH,
+        json=_valid_payload(stop_reason=SECRET),
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": "bridge_run_state_internal_error",
+        "message": "bridge run-state write failed",
+    }
+    assert SECRET not in response.text
+    assert "durable" not in response.text
+
+
+def test_run_state_service_internal_error_maps_to_500(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True, app_env="test")
+
+    class InternalFailingService:
+        async def consume(self, request, auth_context, *, store, scope):  # noqa: ANN001, ANN201
+            _ = request, auth_context, store, scope
+            raise BridgeRunStateInternalError("unknown_decision")
+
+    app.dependency_overrides[get_matlab_bridge_run_state_service] = lambda: InternalFailingService()
+
+    response = _request(
+        app,
+        "POST",
+        RUN_STATE_PATH,
+        json=_valid_payload(stop_reason=SECRET),
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": "bridge_run_state_internal_error",
+        "message": "bridge run-state write failed",
+    }
+    assert SECRET not in response.text
+    assert "durable" not in response.text
 
 
 def test_run_state_missing_authorization_fails_with_bearer_challenge(
@@ -568,6 +886,7 @@ def test_run_state_body_limiter_counts_32768_and_32769_bytes(
     "payload",
     [
         _valid_payload(run_state_sharing_consent_confirmed=False),
+        _valid_payload(protocol_version="0.3-b3"),
         _valid_payload(run_sequence=True),
         _valid_payload(metrics=[{"name": "bad", "value": True, "unit_status": "unknown"}]),
         _valid_payload(metrics_status="unknown"),
@@ -655,7 +974,9 @@ def test_run_state_openapi_declares_feature_on_and_off_behavior(
     run_state_operation = enabled_schema["paths"][RUN_STATE_PATH]["post"]
     responses = run_state_operation["responses"]
 
-    assert {"200", "401", "403", "413", "415", "422", "503"}.issubset(responses)
+    assert {"200", "401", "403", "409", "410", "413", "415", "422", "500", "503"}.issubset(
+        responses
+    )
     assert responses["401"]["headers"]["WWW-Authenticate"]["schema"] == {"type": "string"}
     assert run_state_operation["security"] == [{"BridgeRunStateBearerAuth": []}]
     assert run_state_operation["requestBody"]["content"]["application/json"]["schema"] == {
@@ -667,6 +988,7 @@ def test_run_state_openapi_declares_feature_on_and_off_behavior(
         "bearerFormat": "JWT",
     }
     assert "BridgeRunStateAuthErrorResponse" in enabled_schema["components"]["schemas"]
+    assert "BridgeRunStateWriteErrorResponse" in enabled_schema["components"]["schemas"]
     assert "BridgeRunStateReceiptModel" in enabled_schema["components"]["schemas"]
     for path in ("/api/v1/bridge/diagnostic", "/api/v1/bridge/explanation"):
         operation = enabled_schema["paths"][path]["post"]

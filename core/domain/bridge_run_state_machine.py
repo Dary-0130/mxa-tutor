@@ -89,6 +89,7 @@ def canonicalize_run_state_request(request: BridgeRunStateRequest) -> bytes:
         "matlab_release": request.matlab_release,
         "client_version": request.client_version,
         "run_state_sharing_consent_confirmed": request.run_state_sharing_consent_confirmed,
+        "consent_notice_version": request.consent_notice_version,
         "run_status": request.run_status,
         "convergence_status": request.convergence_status,
         "stop_reason": request.stop_reason,

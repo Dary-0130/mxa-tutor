@@ -25,7 +25,7 @@ metrics = collectMetrics(simulationOutput, executionInfo, timingInfo, modelInfo)
 series = collectSeries(simulationOutput);
 
 payload = struct();
-payload.protocol_version = "0.3-b3";
+payload.protocol_version = char(mxa.bridge.MatlabBridgeApp.RunStateProtocolVersion);
 payload.request_id = char(requestId);
 payload.session_id = char(sessionId);
 payload.run_id = char(runId);
@@ -33,6 +33,7 @@ payload.run_sequence = int32(runSequence);
 payload.matlab_release = char("R" + string(version("-release")));
 payload.client_version = char(mxa.bridge.MatlabBridgeApp.ClientVersion);
 payload.run_state_sharing_consent_confirmed = true;
+payload.consent_notice_version = char(mxa.bridge.MatlabBridgeApp.RunStateConsentNoticeVersion);
 payload.run_status = char(runStatus);
 payload.convergence_status = "not_applicable";
 if strlength(stopReason) > 0

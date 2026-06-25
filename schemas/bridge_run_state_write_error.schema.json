@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "error": {
+      "enum": [
+        "bridge_run_state_conflict",
+        "bridge_run_state_session_unavailable",
+        "bridge_run_state_store_unavailable",
+        "bridge_run_state_internal_error"
+      ],
+      "title": "Error",
+      "type": "string"
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    }
+  },
+  "required": [
+    "error",
+    "message"
+  ],
+  "title": "BridgeRunStateWriteErrorResponse",
+  "type": "object"
+}

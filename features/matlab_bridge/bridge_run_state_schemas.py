@@ -30,9 +30,12 @@ from core.domain.bridge_run_state import BridgeRunStateMetric as BridgeRunStateM
 from core.domain.bridge_run_state import BridgeRunStateReceipt as BridgeRunStateReceiptDomain
 from core.domain.bridge_run_state import BridgeRunStateRequest as BridgeRunStateRequestDomain
 from core.domain.bridge_run_state import BridgeRunStateSeries as BridgeRunStateSeriesDomain
+from core.domain.bridge_run_state import (
+    BridgeRunStateWriteErrorResponse as BridgeRunStateWriteErrorResponseDomain,
+)
 from features.matlab_bridge.bridge_diagnostic_schemas import SENSITIVE_EXTRA_FIELDS
 
-BridgeRunStateProtocolVersion = Literal["0.3-b3"]
+BridgeRunStateProtocolVersion = Literal["0.3-b4"]
 BridgeRunStateStatus = Literal["completed", "stopped", "execution_error", "unknown"]
 BridgeRunStateConvergenceStatus = Literal[
     "converged",
@@ -49,12 +52,19 @@ BridgeRunStateContainerStatus = Literal[
 BridgeRunStateUnitStatus = Literal["known", "unknown", "not_applicable"]
 BridgeRunStateTimeUnit = Literal["s", "ms", "us", "unknown"]
 BridgeRunStateSampleOrder = Literal["chronological"]
-BridgeRunStateReceiptStatus = Literal["validated"]
-BridgeRunStateReceiptMode = Literal["ephemeral_validation"]
+BridgeRunStateConsentNoticeVersion = Literal["run_state_persistence_v1"]
+BridgeRunStateReceiptStatus = Literal["persisted"]
+BridgeRunStateReceiptMode = Literal["durable_persisted"]
 BridgeRunStateAuthErrorCode = Literal[
     "bridge_auth_invalid_token",
     "bridge_auth_forbidden",
     "bridge_auth_unavailable",
+]
+BridgeRunStateWriteErrorCode = Literal[
+    "bridge_run_state_conflict",
+    "bridge_run_state_session_unavailable",
+    "bridge_run_state_store_unavailable",
+    "bridge_run_state_internal_error",
 ]
 
 MAX_RUN_SEQUENCE = 1_000_000
@@ -323,6 +333,7 @@ class BridgeRunStateRequest(_BridgeRunStateBaseModel):
     matlab_release: str = Field(pattern=r"^R20[0-9]{2}[ab]$")
     client_version: str = Field(pattern=r"^[A-Za-z0-9.\-]{1,32}$")
     run_state_sharing_consent_confirmed: StrictBool
+    consent_notice_version: BridgeRunStateConsentNoticeVersion
     run_status: BridgeRunStateStatus
     convergence_status: BridgeRunStateConvergenceStatus
     stop_reason: _StopReasonText | None = None
@@ -386,6 +397,7 @@ class BridgeRunStateRequest(_BridgeRunStateBaseModel):
             matlab_release=self.matlab_release,
             client_version=self.client_version,
             run_state_sharing_consent_confirmed=self.run_state_sharing_consent_confirmed,
+            consent_notice_version=self.consent_notice_version,
             run_status=self.run_status,
             convergence_status=self.convergence_status,
             stop_reason=self.stop_reason,
@@ -398,9 +410,10 @@ class BridgeRunStateRequest(_BridgeRunStateBaseModel):
 
 
 class BridgeRunStateReceiptModel(_BridgeRunStateBaseModel):
+    protocol_version: BridgeRunStateProtocolVersion
     status: BridgeRunStateReceiptStatus
     mode: BridgeRunStateReceiptMode
-    durable: Literal[False]
+    durable: Literal[True]
     request_id: UUID
     run_id: UUID
     run_sequence: Annotated[StrictInt, Field(ge=0, le=MAX_RUN_SEQUENCE)]
@@ -411,6 +424,7 @@ class BridgeRunStateReceiptModel(_BridgeRunStateBaseModel):
 
     def to_domain(self) -> BridgeRunStateReceiptDomain:
         return BridgeRunStateReceiptDomain(
+            protocol_version=self.protocol_version,
             status=self.status,
             mode=self.mode,
             durable=self.durable,
@@ -423,6 +437,21 @@ class BridgeRunStateReceiptModel(_BridgeRunStateBaseModel):
 class BridgeRunStateAuthErrorResponse(_BridgeRunStateBaseModel):
     error: BridgeRunStateAuthErrorCode
     message: str
+
+
+class BridgeRunStateWriteErrorResponse(_BridgeRunStateBaseModel):
+    error: BridgeRunStateWriteErrorCode
+    message: str
+
+    @classmethod
+    def from_domain(cls, response: BridgeRunStateWriteErrorResponseDomain) -> Self:
+        return cls.model_validate(response)
+
+    def to_domain(self) -> BridgeRunStateWriteErrorResponseDomain:
+        return BridgeRunStateWriteErrorResponseDomain(
+            error=self.error,
+            message=self.message,
+        )
 
 
 def _series_to_domain(series: BridgeRunStateSeriesModel) -> BridgeRunStateSeriesDomain:
