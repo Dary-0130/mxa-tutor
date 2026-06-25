@@ -92,10 +92,11 @@ if ~runStateSubmitted
     error("mxa:bridge:E2ERunStateSubmitFailed", ...
         "run-state submit failed: %s", runStateApp.LastErrorIdentifier);
 end
-assert(strcmp(string(runStateApp.LastRunStateReceipt.status), "validated"));
-assert(strcmp(string(runStateApp.LastRunStateReceipt.mode), "ephemeral_validation"));
-assert(isequal(runStateApp.LastRunStateReceipt.durable, false) || ...
-    isequal(runStateApp.LastRunStateReceipt.durable, 0));
+assert(strcmp(string(runStateApp.LastRunStateReceipt.protocol_version), "0.3-b4"));
+assert(strcmp(string(runStateApp.LastRunStateReceipt.status), "persisted"));
+assert(strcmp(string(runStateApp.LastRunStateReceipt.mode), "durable_persisted"));
+assert(isequal(runStateApp.LastRunStateReceipt.durable, true) || ...
+    isequal(runStateApp.LastRunStateReceipt.durable, 1));
 assert(~contains(runStateApp.LastRunStateFrozenJson, validRunStateTokenText));
 frozenRunStateJson = runStateApp.LastRunStateFrozenJson;
 delete(runStateCleanup);

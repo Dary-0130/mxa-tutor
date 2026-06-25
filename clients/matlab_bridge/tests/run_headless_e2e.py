@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import re
@@ -110,6 +111,12 @@ def main() -> int:
     )
 
     import api.main as api_main
+    from adapters.storage._connection import open_connection
+    from adapters.storage.schema import init_schema
+    from adapters.storage.sqlite_bridge_run_state_store import (
+        BridgeRunStateScope,
+        SqliteBridgeRunStateStore,
+    )
     from api.dependencies import get_matlab_bridge_auth_service, get_settings
     from core.domain.bridge_auth import RUN_STATE_WRITE_CAPABILITY
 
@@ -120,6 +127,17 @@ def main() -> int:
     app = api_main.create_app()
     session_id = "11111111-1111-4111-8111-111111111111"
     auth_service = get_matlab_bridge_auth_service()
+    asyncio.run(
+        _prepare_run_state_session(
+            tmp_dir / "mxa.db",
+            auth_service,
+            session_id,
+            open_connection,
+            init_schema,
+            BridgeRunStateScope,
+            SqliteBridgeRunStateStore,
+        )
+    )
     valid_token = auth_service.issue_token(
         user_id="user-alpha",
         project_id="project-alpha",
@@ -250,6 +268,39 @@ def _run_matlab_e2e(
         f"'{_matlab_quote(session_id)}');"
     )
     subprocess.run(["matlab", "-batch", matlab_code], cwd=repo_root, check=True)
+
+
+async def _prepare_run_state_session(
+    db_path: Path,
+    auth_service,
+    session_id: str,
+    open_connection_fn,
+    init_schema_fn,
+    scope_cls,
+    store_cls,
+) -> None:
+    created_at = "2026-06-25T00:00:00"
+    async with open_connection_fn(str(db_path)) as conn:
+        await init_schema_fn(conn)
+        await conn.execute(
+            """
+            INSERT INTO project_status_record(
+                project_id, name, status, created_at, updated_at
+            ) VALUES ('project-alpha', 'demo.zip', 'parsing', ?, ?)
+            ON CONFLICT(project_id) DO NOTHING
+            """,
+            (created_at, created_at),
+        )
+        await conn.commit()
+    store = store_cls(str(db_path))
+    await store.establish_session(
+        scope_cls(
+            user_id="user-alpha",
+            project_id="project-alpha",
+            session_id=session_id,
+            process_generation=auth_service.process_generation,
+        )
+    )
 
 
 def _matlab_quote(value: object) -> str:

@@ -1,18 +1,23 @@
 {
   "additionalProperties": false,
   "properties": {
+    "protocol_version": {
+      "const": "0.3-b4",
+      "title": "Protocol Version",
+      "type": "string"
+    },
     "status": {
-      "const": "validated",
+      "const": "persisted",
       "title": "Status",
       "type": "string"
     },
     "mode": {
-      "const": "ephemeral_validation",
+      "const": "durable_persisted",
       "title": "Mode",
       "type": "string"
     },
     "durable": {
-      "const": false,
+      "const": true,
       "title": "Durable",
       "type": "boolean"
     },
@@ -34,6 +39,7 @@
     }
   },
   "required": [
+    "protocol_version",
     "status",
     "mode",
     "durable",

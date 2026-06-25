@@ -49,7 +49,7 @@ def _scope(
 
 def _payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "protocol_version": "0.3-b3",
+        "protocol_version": "0.3-b4",
         "request_id": str(uuid4()),
         "session_id": SESSION_ID,
         "run_id": RUN_ID,
@@ -57,6 +57,7 @@ def _payload(**overrides: object) -> dict[str, object]:
         "matlab_release": "R2026a",
         "client_version": "0.1.0",
         "run_state_sharing_consent_confirmed": True,
+        "consent_notice_version": "run_state_persistence_v1",
         "run_status": "completed",
         "convergence_status": "not_applicable",
         "stop_reason": "ReachedStopTime",
@@ -359,8 +360,22 @@ def test_store_source_uses_safe_transaction_and_logging_patterns() -> None:
     assert "BEGIN IMMEDIATE" in source
     assert "UPDATE bridge_run_state_run" not in source
     assert "logger.exception" not in source
-    assert not any("fingerprint" in line for line in logger_lines)
-    assert not any("snapshot_json" in line for line in logger_lines)
+    for leaked in (
+        "fingerprint",
+        "snapshot_json",
+        "canonical_bytes",
+        "run_id",
+        "request_id",
+        "session_id",
+        "token",
+        "claim",
+        "source_code",
+        "label",
+        "metric",
+        "series",
+        "path",
+    ):
+        assert not any(leaked in line for line in logger_lines)
 
 
 async def _insert_project(

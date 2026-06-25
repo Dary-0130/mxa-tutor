@@ -14,6 +14,9 @@ from core.domain.bridge_run_state import (
     BridgeRunStateReceipt,
     BridgeRunStateRequest,
 )
+from core.domain.bridge_run_state import (
+    BridgeRunStateWriteErrorResponse as BridgeRunStateWriteErrorResponseDomain,
+)
 from features.matlab_bridge.bridge_run_state_schemas import (
     BridgeRunStateAuthErrorResponse,
     BridgeRunStateEnvelopeSeriesModel,
@@ -23,6 +26,9 @@ from features.matlab_bridge.bridge_run_state_schemas import (
 )
 from features.matlab_bridge.bridge_run_state_schemas import (
     BridgeRunStateRequest as BridgeRunStateRequestModel,
+)
+from features.matlab_bridge.bridge_run_state_schemas import (
+    BridgeRunStateWriteErrorResponse as BridgeRunStateWriteErrorResponseModel,
 )
 from scripts.export_bridge_schemas import OUTPUTS
 
@@ -34,12 +40,14 @@ def test_top_level_model_names_are_frozen() -> None:
         BridgeRunStateMetricModel.__name__,
         BridgeRunStateIdentitySeriesModel.__name__,
         BridgeRunStateEnvelopeSeriesModel.__name__,
+        BridgeRunStateWriteErrorResponseModel.__name__,
     ] == [
         "BridgeRunStateRequest",
         "BridgeRunStateReceiptModel",
         "BridgeRunStateMetricModel",
         "BridgeRunStateIdentitySeriesModel",
         "BridgeRunStateEnvelopeSeriesModel",
+        "BridgeRunStateWriteErrorResponse",
     ]
 
 
@@ -50,6 +58,7 @@ def test_extra_forbid_at_all_levels() -> None:
         BridgeRunStateMetricModel,
         BridgeRunStateIdentitySeriesModel,
         BridgeRunStateEnvelopeSeriesModel,
+        BridgeRunStateWriteErrorResponseModel,
     ):
         assert model.model_config.get("extra") == "forbid"
 
@@ -74,7 +83,7 @@ def test_request_receipt_and_nested_field_order_matches_domain() -> None:
 
 def test_literals_are_frozen() -> None:
     assert get_args(BridgeRunStateRequestModel.model_fields["protocol_version"].annotation) == (
-        "0.3-b3",
+        "0.3-b4",
     )
     assert get_args(BridgeRunStateRequestModel.model_fields["run_status"].annotation) == (
         "completed",
@@ -82,9 +91,9 @@ def test_literals_are_frozen() -> None:
         "execution_error",
         "unknown",
     )
-    assert get_args(BridgeRunStateReceiptModel.model_fields["status"].annotation) == ("validated",)
+    assert get_args(BridgeRunStateReceiptModel.model_fields["status"].annotation) == ("persisted",)
     assert get_args(BridgeRunStateReceiptModel.model_fields["mode"].annotation) == (
-        "ephemeral_validation",
+        "durable_persisted",
     )
     assert get_args(
         BridgeRunStateIdentitySeriesModel.model_fields["representation"].annotation
@@ -108,13 +117,14 @@ def test_domain_contract_does_not_import_pydantic() -> None:
     assert "pydantic" not in source.lower()
 
 
-def test_export_bridge_schemas_now_exports_fourteen_bridge_schemas() -> None:
+def test_export_bridge_schemas_now_exports_fifteen_bridge_schemas() -> None:
     bridge_paths = [path for path in OUTPUTS if path.name.startswith("bridge_")]
 
-    assert len(bridge_paths) == 14
+    assert len(bridge_paths) == 15
     assert Path("schemas/bridge_run_state_request.schema.json") in bridge_paths
     assert Path("schemas/bridge_run_state_receipt.schema.json") in bridge_paths
     assert Path("schemas/bridge_run_state_auth_error_response.schema.json") in bridge_paths
+    assert Path("schemas/bridge_run_state_write_error.schema.json") in bridge_paths
 
 
 def test_exported_run_state_schemas_do_not_drift() -> None:
@@ -122,6 +132,7 @@ def test_exported_run_state_schemas_do_not_drift() -> None:
         Path("schemas/bridge_run_state_request.schema.json"),
         Path("schemas/bridge_run_state_receipt.schema.json"),
         Path("schemas/bridge_run_state_auth_error_response.schema.json"),
+        Path("schemas/bridge_run_state_write_error.schema.json"),
     }
     for path, model in OUTPUTS.items():
         if path not in run_state_paths:
@@ -133,3 +144,10 @@ def test_exported_run_state_schemas_do_not_drift() -> None:
 def test_run_state_auth_error_model_is_isolated_from_transport_error_model() -> None:
     assert set(BridgeRunStateAuthErrorResponse.model_fields) == {"error", "message"}
     assert BridgeRunStateAuthErrorResponse.__name__ == "BridgeRunStateAuthErrorResponse"
+
+
+def test_run_state_write_error_model_is_isolated_from_auth_error_model() -> None:
+    assert tuple(BridgeRunStateWriteErrorResponseModel.model_fields) == tuple(
+        field.name for field in fields(BridgeRunStateWriteErrorResponseDomain)
+    )
+    assert BridgeRunStateWriteErrorResponseModel.__name__ == "BridgeRunStateWriteErrorResponse"

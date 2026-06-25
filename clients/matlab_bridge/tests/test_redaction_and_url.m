@@ -252,6 +252,48 @@ verifyFalse(testCase, contains(string(explanationPayload.error_text), "SECRET123
     end
 end
 
+function testDiagnosticPathsUseNonPersistentConfirmContext(testCase)
+contexts = strings(0, 1);
+diagnosticCalls = 0;
+explanationCalls = 0;
+app = mxa.bridge.MatlabBridgeApp( ...
+    BaseUrl="http://localhost:8000", ...
+    Visible="off", ...
+    ConfirmFunction=@fakeConfirm, ...
+    DiagnosticPostFunction=@fakeDiagnosticPost, ...
+    ExplanationPostFunction=@fakeExplanationPost);
+cleanup = onCleanup(@() delete(app));
+
+app.setErrorText("Error using sim. Undefined function or variable Kp_ctrl.");
+manualSubmitted = app.submitManualError();
+autoSubmitted = app.runAndExplain(@() localThrowingFunction("C:\Users\alice\model.m", "secret=SECRET123456789"));
+
+verifyTrue(testCase, manualSubmitted);
+verifyTrue(testCase, autoSubmitted);
+verifyEqual(testCase, contexts, ["diagnostic"; "diagnostic"]);
+verifyEqual(testCase, diagnosticCalls, 1);
+verifyEqual(testCase, explanationCalls, 2);
+
+    function confirmed = fakeConfirm(~, ~, context)
+        contexts(end + 1, 1) = string(context); %#ok<AGROW>
+        confirmed = true;
+    end
+
+    function receipt = fakeDiagnosticPost(~, payload, ~)
+        diagnosticCalls = diagnosticCalls + 1;
+        receipt = struct( ...
+            "request_id", payload.request_id, ...
+            "status", "received", ...
+            "mode", "connectivity_stub", ...
+            "message", "连接成功。本版本仅验证诊断信息传输,不提供报错解释。");
+    end
+
+    function explanation = fakeExplanationPost(~, payload, ~)
+        explanationCalls = explanationCalls + 1;
+        explanation = makeExplanation(payload.request_id, "报错文本");
+    end
+end
+
 function testFormatReceiptIgnoresServerMessage(testCase)
 receipt = struct( ...
     "request_id", "2690af3d-9cfe-4442-900e-c86af37a6244", ...
@@ -464,7 +506,7 @@ end
 
 function testRunStateFreezeRejectsPayloadOver28Kb(testCase)
 payload = struct();
-payload.protocol_version = "0.3-b3";
+payload.protocol_version = "0.3-b4";
 payload.padding = repmat("a", 1, 28 * 1024);
 
 verifyError( ...
@@ -589,6 +631,102 @@ verifyEqual(testCase, string(firstPayload.run_id), string(secondPayload.run_id))
     end
 end
 
+function testSubmitRunStateDoesNotRetry409Conflict(testCase)
+tokenCalls = 0;
+postCalls = 0;
+app = mxa.bridge.MatlabBridgeApp( ...
+    BaseUrl="http://localhost:8000", ...
+    Visible="off", ...
+    ConfirmFunction=@(~, ~) true, ...
+    TokenProviderFunction=@fakeTokenProvider, ...
+    RunStatePostFunction=@fakePostRunState);
+cleanup = onCleanup(@() delete(app));
+
+submitted = app.submitRunState( ...
+    Simulink.SimulationOutput, ...
+    "user-alpha", ...
+    "project-alpha", ...
+    "11111111-1111-4111-8111-111111111111", ...
+    7);
+
+verifyFalse(testCase, submitted);
+verifyEqual(testCase, tokenCalls, 1);
+verifyEqual(testCase, postCalls, 1);
+verifyEqual(testCase, app.LastErrorIdentifier, "mxa:bridge:HTTP409");
+verifyTrue(testCase, contains(string(app.ResponseTextArea.Value), "运行状态冲突"));
+
+    function token = fakeTokenProvider(~, ~, ~)
+        tokenCalls = tokenCalls + 1;
+        token = "token";
+    end
+
+    function receipt = fakePostRunState(~, ~, ~, ~)
+        postCalls = postCalls + 1;
+        receipt = struct();
+        error("mxa:bridge:HTTP409", "409 conflict");
+    end
+end
+
+function testSubmitRunState410RequiresNewConfirmedRun(testCase)
+tokenCalls = 0;
+postCalls = 0;
+confirmedJson = strings(1, 2);
+app = mxa.bridge.MatlabBridgeApp( ...
+    BaseUrl="http://localhost:8000", ...
+    Visible="off", ...
+    ConfirmFunction=@fakeConfirm, ...
+    TokenProviderFunction=@fakeTokenProvider, ...
+    RunStatePostFunction=@fakePostRunState);
+cleanup = onCleanup(@() delete(app));
+
+firstSubmitted = app.submitRunState( ...
+    Simulink.SimulationOutput, ...
+    "user-alpha", ...
+    "project-alpha", ...
+    "11111111-1111-4111-8111-111111111111", ...
+    7);
+verifyFalse(testCase, firstSubmitted);
+verifyTrue(testCase, contains(string(app.ResponseTextArea.Value), "新建会话"));
+
+secondSubmitted = app.submitRunState( ...
+    Simulink.SimulationOutput, ...
+    "user-alpha", ...
+    "project-alpha", ...
+    "11111111-1111-4111-8111-111111111111", ...
+    8);
+
+verifyTrue(testCase, secondSubmitted);
+verifyEqual(testCase, tokenCalls, 2);
+verifyEqual(testCase, postCalls, 2);
+verifyNotEqual(testCase, confirmedJson(1), confirmedJson(2));
+firstPayload = jsondecode(char(confirmedJson(1)));
+secondPayload = jsondecode(char(confirmedJson(2)));
+verifyNotEqual(testCase, string(firstPayload.run_id), string(secondPayload.run_id));
+verifyEqual(testCase, string(firstPayload.protocol_version), "0.3-b4");
+verifyEqual(testCase, string(firstPayload.consent_notice_version), "run_state_persistence_v1");
+
+    function confirmed = fakeConfirm(~, frozenJson, context)
+        verifyEqual(testCase, string(context), "run_state_persistence");
+        confirmedJson(postCalls + 1) = string(frozenJson);
+        confirmed = true;
+    end
+
+    function token = fakeTokenProvider(~, ~, ~)
+        tokenCalls = tokenCalls + 1;
+        token = "token";
+    end
+
+    function receipt = fakePostRunState(~, frozenJson, ~, ~)
+        postCalls = postCalls + 1;
+        if postCalls == 1
+            receipt = struct();
+            error("mxa:bridge:HTTP410", "410 session gone");
+        end
+        payload = jsondecode(char(frozenJson));
+        receipt = makeRunStateReceipt(payload);
+    end
+end
+
 function localThrowingFunction(pathText, secretText)
 error("mxa:test:AutoCapture", "Failure at %s with %s", pathText, secretText);
 end
@@ -634,7 +772,7 @@ series.t_step = 0.1;
 series.y = [0 1 0 -1];
 
 payload = struct();
-payload.protocol_version = "0.3-b3";
+payload.protocol_version = "0.3-b4";
 payload.request_id = "2690af3d-9cfe-4442-900e-c86af37a6244";
 payload.session_id = "11111111-1111-4111-8111-111111111111";
 payload.run_id = "22222222-2222-4222-8222-222222222222";
@@ -642,6 +780,7 @@ payload.run_sequence = int32(7);
 payload.matlab_release = "R2026a";
 payload.client_version = "0.1.0";
 payload.run_state_sharing_consent_confirmed = true;
+payload.consent_notice_version = "run_state_persistence_v1";
 payload.run_status = "completed";
 payload.convergence_status = "not_applicable";
 payload.stop_reason = "ReachedStopTime";
@@ -654,9 +793,10 @@ end
 
 function receipt = makeRunStateReceipt(payload)
 receipt = struct( ...
-    "status", "validated", ...
-    "mode", "ephemeral_validation", ...
-    "durable", false, ...
+    "protocol_version", payload.protocol_version, ...
+    "status", "persisted", ...
+    "mode", "durable_persisted", ...
+    "durable", true, ...
     "request_id", payload.request_id, ...
     "run_id", payload.run_id, ...
     "run_sequence", payload.run_sequence);

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +11,7 @@ from core.domain.bridge_auth import (
     BridgeAuthClaims,
     BridgeAuthContext,
 )
+from core.domain.bridge_run_state_machine import RunStateDecision
 from core.domain.exceptions import BridgeRunStateValidationError
 from features.matlab_bridge.bridge_run_state_schemas import BridgeRunStateRequest
 from features.matlab_bridge.bridge_run_state_service import (
@@ -47,7 +50,7 @@ def _auth_context() -> BridgeAuthContext:
 
 def _valid_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "protocol_version": "0.3-b3",
+        "protocol_version": "0.3-b4",
         "request_id": REQUEST_ID,
         "session_id": SESSION_ID,
         "run_id": RUN_ID,
@@ -55,6 +58,7 @@ def _valid_payload(**overrides: object) -> dict[str, object]:
         "matlab_release": "R2026a",
         "client_version": "0.1.0",
         "run_state_sharing_consent_confirmed": True,
+        "consent_notice_version": "run_state_persistence_v1",
         "run_status": "completed",
         "convergence_status": "not_applicable",
         "stop_reason": "ReachedStopTime",
@@ -88,17 +92,39 @@ def _valid_payload(**overrides: object) -> dict[str, object]:
     return payload
 
 
-def test_service_returns_minimal_ephemeral_receipt() -> None:
+class FakePersistStore:
+    def __init__(self, decision: RunStateDecision | None = None) -> None:
+        self.decision = decision or RunStateDecision(kind="current")
+        self.requests = []
+        self.scopes = []
+
+    async def persist_run(self, request, scope):  # noqa: ANN001, ANN201
+        self.requests.append(request)
+        self.scopes.append(scope)
+        return SimpleNamespace(decision=self.decision)
+
+
+def test_service_returns_durable_receipt_after_persistence() -> None:
     request = BridgeRunStateRequest.model_validate(_valid_payload()).to_domain()
+    store = FakePersistStore()
 
-    receipt = BridgeRunStateService().consume(request, _auth_context())
+    receipt = asyncio.run(
+        BridgeRunStateService().consume(
+            request,
+            _auth_context(),
+            store=store,
+            scope=object(),
+        )
+    )
 
-    assert receipt.status == "validated"
-    assert receipt.mode == "ephemeral_validation"
-    assert receipt.durable is False
+    assert receipt.protocol_version == "0.3-b4"
+    assert receipt.status == "persisted"
+    assert receipt.mode == "durable_persisted"
+    assert receipt.durable is True
     assert receipt.request_id == request.request_id
     assert receipt.run_id == request.run_id
     assert receipt.run_sequence == 7
+    assert store.requests[0].stop_reason == request.stop_reason
 
 
 def test_server_side_redaction_covers_all_string_fields() -> None:
@@ -162,7 +188,14 @@ def test_privacy_fail_closed_if_redaction_misses_private_text(
     ).to_domain()
 
     with pytest.raises(BridgeRunStateValidationError):
-        BridgeRunStateService().consume(request, _auth_context())
+        asyncio.run(
+            BridgeRunStateService().consume(
+                request,
+                _auth_context(),
+                store=FakePersistStore(),
+                scope=object(),
+            )
+        )
 
 
 def test_redact_run_state_text_redacts_model_metadata() -> None:
@@ -181,7 +214,19 @@ def test_service_source_uses_metadata_only_logging() -> None:
 
     assert "logger.exception" not in source
     assert "SqliteBridgeRunStateStore" not in source
-    assert "persist_run" not in source
-    assert not any("stop_reason" in line for line in logger_lines)
-    assert not any("metric.value" in line for line in logger_lines)
-    assert not any("series.y" in line for line in logger_lines)
+    for leaked in (
+        "stop_reason",
+        "metric.value",
+        "series.y",
+        "run_id",
+        "request_id",
+        "session_id",
+        "token",
+        "claim",
+        "fingerprint",
+        "source_code",
+        "label",
+        "mat_path",
+        "csv_path",
+    ):
+        assert not any(leaked in line for line in logger_lines)

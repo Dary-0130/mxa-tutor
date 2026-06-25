@@ -252,7 +252,7 @@
   "additionalProperties": false,
   "properties": {
     "protocol_version": {
-      "const": "0.3-b3",
+      "const": "0.3-b4",
       "title": "Protocol Version",
       "type": "string"
     },
@@ -290,6 +290,11 @@
     "run_state_sharing_consent_confirmed": {
       "title": "Run State Sharing Consent Confirmed",
       "type": "boolean"
+    },
+    "consent_notice_version": {
+      "const": "run_state_persistence_v1",
+      "title": "Consent Notice Version",
+      "type": "string"
     },
     "run_status": {
       "enum": [
@@ -399,6 +404,7 @@
     "matlab_release",
     "client_version",
     "run_state_sharing_consent_confirmed",
+    "consent_notice_version",
     "run_status",
     "convergence_status",
     "metrics_status",

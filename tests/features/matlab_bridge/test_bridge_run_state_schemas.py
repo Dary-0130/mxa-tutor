@@ -71,7 +71,7 @@ def _envelope_series(**overrides: object) -> dict[str, object]:
 
 def _valid_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
-        "protocol_version": "0.3-b3",
+        "protocol_version": "0.3-b4",
         "request_id": REQUEST_ID,
         "session_id": SESSION_ID,
         "run_id": RUN_ID,
@@ -79,6 +79,7 @@ def _valid_payload(**overrides: object) -> dict[str, object]:
         "matlab_release": "R2026a",
         "client_version": "0.1.0",
         "run_state_sharing_consent_confirmed": True,
+        "consent_notice_version": "run_state_persistence_v1",
         "run_status": "completed",
         "convergence_status": "not_applicable",
         "stop_reason": "ReachedStopTime",
@@ -97,7 +98,7 @@ def test_valid_request_converts_to_deeply_immutable_domain() -> None:
 
     domain = request.to_domain()
 
-    assert domain.protocol_version == "0.3-b3"
+    assert domain.protocol_version == "0.3-b4"
     assert domain.request_id == UUID(REQUEST_ID)
     assert domain.session_id == UUID(SESSION_ID)
     assert domain.run_id == UUID(RUN_ID)
@@ -115,9 +116,10 @@ def test_request_from_domain_and_receipt_round_trip() -> None:
     rebuilt = BridgeRunStateRequest.from_domain(domain)
     receipt = BridgeRunStateReceiptModel.model_validate(
         {
-            "status": "validated",
-            "mode": "ephemeral_validation",
-            "durable": False,
+            "protocol_version": "0.3-b4",
+            "status": "persisted",
+            "mode": "durable_persisted",
+            "durable": True,
             "request_id": REQUEST_ID,
             "run_id": RUN_ID,
             "run_sequence": 7,
@@ -126,9 +128,10 @@ def test_request_from_domain_and_receipt_round_trip() -> None:
 
     assert rebuilt.model_dump(mode="json") == request.model_dump(mode="json")
     assert BridgeRunStateReceiptModel.from_domain(receipt.to_domain()).model_dump(mode="json") == {
-        "status": "validated",
-        "mode": "ephemeral_validation",
-        "durable": False,
+        "protocol_version": "0.3-b4",
+        "status": "persisted",
+        "mode": "durable_persisted",
+        "durable": True,
         "request_id": REQUEST_ID,
         "run_id": RUN_ID,
         "run_sequence": 7,
@@ -139,12 +142,14 @@ def test_request_from_domain_and_receipt_round_trip() -> None:
     "override",
     [
         {"protocol_version": "0.3-b2"},
+        {"protocol_version": "0.3-b3"},
         {"run_sequence": -1},
         {"run_sequence": 1_000_001},
         {"run_sequence": True},
         {"run_sequence": "7"},
         {"run_state_sharing_consent_confirmed": False},
         {"run_state_sharing_consent_confirmed": 1},
+        {"consent_notice_version": "run_state_ephemeral_v1"},
         {"run_status": "failed"},
         {"convergence_status": "done"},
         {"matlab_release": "R2026c"},

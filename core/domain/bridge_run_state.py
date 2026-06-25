@@ -64,7 +64,7 @@ BridgeRunStateSeries = BridgeRunStateIdentitySeries | BridgeRunStateEnvelopeSeri
 
 @dataclass(frozen=True)
 class BridgeRunStateRequest:
-    protocol_version: Literal["0.3-b3"]
+    protocol_version: Literal["0.3-b4"]
     request_id: UUID
     session_id: UUID
     run_id: UUID
@@ -72,6 +72,7 @@ class BridgeRunStateRequest:
     matlab_release: str
     client_version: str
     run_state_sharing_consent_confirmed: bool
+    consent_notice_version: Literal["run_state_persistence_v1"]
     run_status: RunStatus
     convergence_status: ConvergenceStatus
     stop_reason: str | None
@@ -84,9 +85,24 @@ class BridgeRunStateRequest:
 
 @dataclass(frozen=True)
 class BridgeRunStateReceipt:
-    status: Literal["validated"]
-    mode: Literal["ephemeral_validation"]
-    durable: Literal[False]
+    protocol_version: Literal["0.3-b4"]
+    status: Literal["persisted"]
+    mode: Literal["durable_persisted"]
+    durable: Literal[True]
     request_id: UUID
     run_id: UUID
     run_sequence: int
+
+
+BridgeRunStateWriteErrorCode = Literal[
+    "bridge_run_state_conflict",
+    "bridge_run_state_session_unavailable",
+    "bridge_run_state_store_unavailable",
+    "bridge_run_state_internal_error",
+]
+
+
+@dataclass(frozen=True)
+class BridgeRunStateWriteErrorResponse:
+    error: BridgeRunStateWriteErrorCode
+    message: str
