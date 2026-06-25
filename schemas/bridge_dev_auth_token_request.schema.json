@@ -24,7 +24,10 @@
         "run_state:write"
       ],
       "items": {
-        "const": "run_state:write",
+        "enum": [
+          "run_state:write",
+          "run_state:explain"
+        ],
         "type": "string"
       },
       "title": "Capabilities",

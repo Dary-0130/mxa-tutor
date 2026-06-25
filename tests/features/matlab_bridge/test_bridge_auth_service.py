@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from loguru import logger
 
-from core.domain.bridge_auth import RUN_STATE_WRITE_CAPABILITY
+from core.domain.bridge_auth import RUN_STATE_EXPLAIN_CAPABILITY, RUN_STATE_WRITE_CAPABILITY
 from features.matlab_bridge.bridge_auth_service import (
     BridgeAuthForbiddenError,
     BridgeAuthRevocationStoreUnavailableError,
@@ -178,6 +178,22 @@ def test_required_capability_uses_exact_membership() -> None:
 
     with pytest.raises(BridgeAuthForbiddenError):
         service.verify_token(token, required_capability="run_state")
+
+
+def test_explain_capability_can_be_issued_without_implying_write() -> None:
+    service = _service()
+    token = service.issue_token(
+        user_id=USER_ID,
+        project_id=PROJECT_ID,
+        session_id=SESSION_ID,
+        capabilities=(RUN_STATE_EXPLAIN_CAPABILITY,),
+    ).access_token
+
+    context = service.verify_token(token, required_capability=RUN_STATE_EXPLAIN_CAPABILITY)
+
+    assert context.capabilities == frozenset({RUN_STATE_EXPLAIN_CAPABILITY})
+    with pytest.raises(BridgeAuthForbiddenError):
+        service.verify_token(token, required_capability=RUN_STATE_WRITE_CAPABILITY)
 
 
 def test_disallowed_capability_cannot_be_issued() -> None:

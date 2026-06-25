@@ -48,12 +48,16 @@ from features.ingest.upload_service import ExtractFn, UploadService
 from features.matlab_bridge import (
     BridgeAuthService,
     BridgeExplanationService,
+    BridgeRunStateCoachingService,
     BridgeRunStateService,
     DiagnosticService,
 )
 from features.matlab_bridge.bridge_auth_service import (
     InMemoryBridgeRevocationStore,
     build_bridge_auth_config,
+)
+from features.matlab_bridge.bridge_run_state_coaching_service import (
+    BridgeRunStateCoachingUnavailableError,
 )
 from features.overview import OverviewCache
 from features.overview._teaching_level_policy import TeachingLevelPolicy
@@ -93,6 +97,16 @@ def get_matlab_bridge_explanation_service(request: Request) -> BridgeExplanation
 def get_matlab_bridge_run_state_service() -> BridgeRunStateService:
     """Return the stateless MATLAB bridge run-state validation service."""
     return BridgeRunStateService()
+
+
+def get_matlab_bridge_run_state_coaching_service(
+    request: Request,
+) -> BridgeRunStateCoachingService:
+    """Return a run-state coaching service using the shared app text provider."""
+    text_provider = getattr(request.app.state, "text_provider", None)
+    if text_provider is None:
+        raise BridgeRunStateCoachingUnavailableError("text_provider_unavailable") from None
+    return BridgeRunStateCoachingService(text_provider=cast(TextProvider, text_provider))
 
 
 def get_matlab_bridge_run_state_store(request: Request) -> SqliteBridgeRunStateStore:

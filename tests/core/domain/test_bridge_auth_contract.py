@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from core.domain.bridge_auth import (
+    RUN_STATE_EXPLAIN_CAPABILITY,
     RUN_STATE_WRITE_CAPABILITY,
     BridgeAuthClaims,
     BridgeAuthContext,
@@ -30,6 +31,7 @@ def test_bridge_auth_context_is_frozen_and_exposes_immutable_capabilities() -> N
     assert context.session_id == "session-1"
     assert context.capabilities == frozenset({RUN_STATE_WRITE_CAPABILITY})
     assert context.has_capability(RUN_STATE_WRITE_CAPABILITY)
+    assert not context.has_capability(RUN_STATE_EXPLAIN_CAPABILITY)
 
 
 def test_bridge_auth_domain_contract_does_not_import_framework_or_store_code() -> None:

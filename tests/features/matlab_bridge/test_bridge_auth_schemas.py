@@ -57,6 +57,10 @@ def test_dev_auth_token_request_round_trip_and_capability_allowlist() -> None:
         **payload,
         "capabilities": ["run_state:write"],
     }
+    explain_request = BridgeDevAuthTokenRequest.model_validate(
+        {**payload, "capabilities": ["run_state:explain"]}
+    )
+    assert explain_request.capabilities == ("run_state:explain",)
     with pytest.raises(ValidationError):
         BridgeDevAuthTokenRequest.model_validate({**payload, "capabilities": ["run_state:read"]})
 

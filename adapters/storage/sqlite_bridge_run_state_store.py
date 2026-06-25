@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
+from uuid import UUID
 
 import aiosqlite
 from loguru import logger
@@ -24,6 +26,15 @@ from core.domain.bridge_run_state_machine import (
     fingerprint_run_state_request,
 )
 from core.domain.exceptions import StoreError
+from core.interfaces.coaching_run_state_reader import (
+    CoachingRunStateMetric,
+    CoachingRunStateReader,
+    CoachingRunStateReaderUnavailableError,
+    CoachingRunStateReadRejectedError,
+    CoachingRunStateScope,
+    CoachingRunStateSeries,
+    CoachingRunStateSnapshot,
+)
 
 RunStateSessionRejectReason = Literal[
     "invalid_scope",
@@ -87,7 +98,7 @@ class BridgeRunStatePersistResult:
     current_run_id: str | None
 
 
-class SqliteBridgeRunStateStore:
+class SqliteBridgeRunStateStore(CoachingRunStateReader):
     """Persist run-state sessions and immutable run snapshots in SQLite."""
 
     def __init__(
@@ -272,6 +283,66 @@ class SqliteBridgeRunStateStore:
                     type(exc).__name__,
                 )
                 raise BridgeRunStateStoreUnavailableError("sqlite_operation_failed") from None
+
+    async def read_run_state_for_coaching(
+        self,
+        scope: CoachingRunStateScope,
+        run_id: UUID,
+    ) -> CoachingRunStateSnapshot:
+        try:
+            normalized = _normalize_scope(_scope_from_coaching_scope(scope))
+        except BridgeRunStateSessionRejectedError as exc:
+            raise _coaching_rejection(exc.reason) from None
+        now = _ensure_naive_utc(self._clock())
+        async with open_connection(self._db_path) as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                session = await self._require_active_session(conn, normalized, now)
+                row = await self._select_run_by_run_id(conn, session.session_id, str(run_id))
+                if row is None:
+                    await conn.rollback()
+                    raise CoachingRunStateReadRejectedError("run_missing")
+                snapshot = _coaching_snapshot_from_row(row)
+                await conn.commit()
+                return snapshot
+            except BridgeRunStateSessionRejectedError as exc:
+                await _commit_expiry_or_rollback(conn, exc)
+                raise _coaching_rejection(exc.reason) from None
+            except CoachingRunStateReadRejectedError:
+                raise
+            except (aiosqlite.Error, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                await conn.rollback()
+                logger.error(
+                    "Bridge run-state coaching read failed: event_code={} status={} exception={}",
+                    "bridge_run_state_coaching_read",
+                    "store_error",
+                    type(exc).__name__,
+                )
+                raise CoachingRunStateReaderUnavailableError("coaching_read_failed") from None
+
+    async def assert_coaching_session_active(self, scope: CoachingRunStateScope) -> None:
+        try:
+            normalized = _normalize_scope(_scope_from_coaching_scope(scope))
+        except BridgeRunStateSessionRejectedError as exc:
+            raise _coaching_rejection(exc.reason) from None
+        now = _ensure_naive_utc(self._clock())
+        async with open_connection(self._db_path) as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                await self._require_active_session(conn, normalized, now)
+                await conn.commit()
+            except BridgeRunStateSessionRejectedError as exc:
+                await _commit_expiry_or_rollback(conn, exc)
+                raise _coaching_rejection(exc.reason) from None
+            except aiosqlite.Error as exc:
+                await conn.rollback()
+                logger.error(
+                    "Bridge run-state coaching fence failed: event_code={} status={} exception={}",
+                    "bridge_run_state_coaching_fence",
+                    "store_error",
+                    type(exc).__name__,
+                )
+                raise CoachingRunStateReaderUnavailableError("coaching_fence_failed") from None
 
     async def persist_run(
         self,
@@ -707,6 +778,132 @@ def _current_from_row(row: aiosqlite.Row) -> BridgeRunStateCurrentRecord:
         snapshot_json=row["snapshot_json"],
         received_at=_parse_datetime(row["received_at"]),
     )
+
+
+def _coaching_snapshot_from_row(row: aiosqlite.Row) -> CoachingRunStateSnapshot:
+    payload = json.loads(row["snapshot_json"])
+    if not isinstance(payload, dict):
+        raise ValueError("snapshot_json_not_mapping")
+    return CoachingRunStateSnapshot(
+        run_id=UUID(str(row["run_id"])),
+        request_id=UUID(str(row["request_id"])),
+        run_sequence=int(row["run_sequence"]),
+        matlab_release=_require_payload_string(payload, "matlab_release"),
+        client_version=_require_payload_string(payload, "client_version"),
+        run_status=_require_payload_string(payload, "run_status"),
+        convergence_status=_require_payload_string(payload, "convergence_status"),
+        stop_reason=_optional_payload_string(payload, "stop_reason"),
+        solver=_optional_payload_string(payload, "solver"),
+        metrics_status=_require_payload_string(payload, "metrics_status"),
+        metrics=tuple(
+            _coaching_metric_from_payload(item) for item in _payload_list(payload, "metrics")
+        ),
+        series_status=_require_payload_string(payload, "series_status"),
+        series=tuple(
+            _coaching_series_from_payload(item) for item in _payload_list(payload, "series")
+        ),
+        received_at=_parse_datetime(row["received_at"]),
+    )
+
+
+def _coaching_metric_from_payload(value: object) -> CoachingRunStateMetric:
+    if not isinstance(value, dict):
+        raise ValueError("metric_not_mapping")
+    unit = _optional_payload_string(value, "unit")
+    return CoachingRunStateMetric(
+        name=_require_payload_string(value, "name"),
+        value=_require_payload_float(value, "value"),
+        unit_status=_require_payload_string(value, "unit_status"),
+        unit=unit,
+    )
+
+
+def _coaching_series_from_payload(value: object) -> CoachingRunStateSeries:
+    if not isinstance(value, dict):
+        raise ValueError("series_not_mapping")
+    representation = _require_payload_string(value, "representation")
+    sample_min: float | None = None
+    sample_max: float | None = None
+    if representation == "identity_uniform_v1":
+        y_values = [_payload_float_item(item) for item in _payload_list(value, "y")]
+        if y_values:
+            sample_min = min(y_values)
+            sample_max = max(y_values)
+    elif representation == "min_max_envelope_uniform_v1":
+        lows = [_payload_float_item(item) for item in _payload_list(value, "y_min")]
+        highs = [_payload_float_item(item) for item in _payload_list(value, "y_max")]
+        if lows:
+            sample_min = min(lows)
+        if highs:
+            sample_max = max(highs)
+    return CoachingRunStateSeries(
+        series_id=_require_payload_string(value, "series_id"),
+        label=_require_payload_string(value, "label"),
+        representation=representation,
+        time_unit=_require_payload_string(value, "time_unit"),
+        value_unit_status=_require_payload_string(value, "value_unit_status"),
+        source_point_count=_require_payload_int(value, "source_point_count"),
+        t_start=_require_payload_float(value, "t_start"),
+        sample_min=sample_min,
+        sample_max=sample_max,
+        value_unit=_optional_payload_string(value, "value_unit"),
+    )
+
+
+def _payload_list(payload: dict[object, object], key: str) -> list[object]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        raise ValueError(f"{key}_not_list")
+    return value
+
+
+def _require_payload_string(payload: dict[object, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"{key}_not_string")
+    return value
+
+
+def _optional_payload_string(payload: dict[object, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{key}_not_optional_string")
+    return value
+
+
+def _payload_float_item(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError("number_not_numeric")
+    return float(value)
+
+
+def _require_payload_float(payload: dict[object, object], key: str) -> float:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{key}_not_number")
+    return float(value)
+
+
+def _require_payload_int(payload: dict[object, object], key: str) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key}_not_int")
+    return value
+
+
+def _scope_from_coaching_scope(scope: CoachingRunStateScope) -> BridgeRunStateScope:
+    return BridgeRunStateScope(
+        user_id=scope.user_id,
+        project_id=scope.project_id,
+        session_id=scope.session_id,
+        process_generation=scope.process_generation,
+    )
+
+
+def _coaching_rejection(reason: RunStateSessionRejectReason) -> CoachingRunStateReadRejectedError:
+    return CoachingRunStateReadRejectedError(reason)
 
 
 def _normalize_scope(scope: BridgeRunStateScope) -> BridgeRunStateScope:

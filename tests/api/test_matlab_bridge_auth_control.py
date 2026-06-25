@@ -15,8 +15,9 @@ from adapters.storage.sqlite_bridge_run_state_store import (
     SqliteBridgeRunStateStore,
 )
 from api.dependencies import get_matlab_bridge_auth_service, get_settings
-from core.domain.bridge_auth import RUN_STATE_WRITE_CAPABILITY
+from core.domain.bridge_auth import RUN_STATE_EXPLAIN_CAPABILITY, RUN_STATE_WRITE_CAPABILITY
 from features.matlab_bridge.bridge_auth_service import (
+    BridgeAuthForbiddenError,
     BridgeAuthService,
     BridgeAuthServiceConfig,
     BridgeAuthTokenError,
@@ -179,6 +180,35 @@ def test_dev_auth_issues_token_with_only_run_state_write_capability(
     assert context.capabilities == frozenset({RUN_STATE_WRITE_CAPABILITY})
 
 
+def test_dev_auth_can_issue_explain_capability_without_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path)
+    _prepare_project(tmp_path)
+
+    response = _request(
+        app,
+        "POST",
+        TOKEN_PATH,
+        json=_token_request(capabilities=["run_state:explain"]),
+        headers={"X-MXA-Bridge-Dev-Bootstrap": BOOTSTRAP},
+    )
+
+    assert response.status_code == 200
+    token = response.json()["access_token"]
+    context = get_matlab_bridge_auth_service().verify_token(
+        token,
+        required_capability=RUN_STATE_EXPLAIN_CAPABILITY,
+    )
+    assert context.capabilities == frozenset({RUN_STATE_EXPLAIN_CAPABILITY})
+    with pytest.raises(BridgeAuthForbiddenError):
+        get_matlab_bridge_auth_service().verify_token(
+            token,
+            required_capability=RUN_STATE_WRITE_CAPABILITY,
+        )
+
+
 def test_dev_auth_establishes_run_state_session_before_issuing_token(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -306,6 +336,36 @@ def test_dev_auth_revoke_invalidates_token(
         get_matlab_bridge_auth_service().verify_token(
             token,
             required_capability=RUN_STATE_WRITE_CAPABILITY,
+        )
+
+
+def test_dev_auth_revoke_accepts_explain_only_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path)
+    _prepare_project(tmp_path)
+    token = _request(
+        app,
+        "POST",
+        TOKEN_PATH,
+        json=_token_request(capabilities=["run_state:explain"]),
+        headers={"X-MXA-Bridge-Dev-Bootstrap": BOOTSTRAP},
+    ).json()["access_token"]
+
+    response = _request(
+        app,
+        "POST",
+        REVOKE_PATH,
+        json={"access_token": token},
+        headers={"X-MXA-Bridge-Dev-Bootstrap": BOOTSTRAP},
+    )
+
+    assert response.status_code == 200
+    with pytest.raises(BridgeAuthTokenError):
+        get_matlab_bridge_auth_service().verify_token(
+            token,
+            required_capability=RUN_STATE_EXPLAIN_CAPABILITY,
         )
 
 

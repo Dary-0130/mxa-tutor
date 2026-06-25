@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "error": {
+      "enum": [
+        "bridge_run_state_coaching_unavailable",
+        "bridge_run_state_coaching_timeout",
+        "bridge_run_state_coaching_failed",
+        "bridge_run_state_coaching_busy"
+      ],
+      "title": "Error",
+      "type": "string"
+    },
+    "message": {
+      "title": "Message",
+      "type": "string"
+    }
+  },
+  "required": [
+    "error",
+    "message"
+  ],
+  "title": "CoachingLLMError",
+  "type": "object"
+}

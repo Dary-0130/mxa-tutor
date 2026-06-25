@@ -1,0 +1,322 @@
+{
+  "$defs": {
+    "AltDirectionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "increase",
+            "decrease",
+            "hold",
+            "compare"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "magnitude_band": {
+          "enum": [
+            "slight",
+            "moderate",
+            "large"
+          ],
+          "title": "Magnitude Band",
+          "type": "string"
+        },
+        "rationale_reading_id": {
+          "pattern": "^r[0-9]{1,3}$",
+          "title": "Rationale Reading Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "magnitude_band",
+        "rationale_reading_id"
+      ],
+      "title": "AltDirectionModel",
+      "type": "object"
+    },
+    "EvidenceItemModel": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "pattern": "^e[0-9]{1,3}$",
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "signal_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Signal Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "text",
+        "signal_ref"
+      ],
+      "title": "EvidenceItemModel",
+      "type": "object"
+    },
+    "PrimaryDirectionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "increase",
+            "decrease",
+            "hold",
+            "compare"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "magnitude_band": {
+          "enum": [
+            "slight",
+            "moderate",
+            "large"
+          ],
+          "title": "Magnitude Band",
+          "type": "string"
+        },
+        "rationale_reading_id": {
+          "pattern": "^r[0-9]{1,3}$",
+          "title": "Rationale Reading Id",
+          "type": "string"
+        },
+        "alternatives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AltDirectionModel"
+          },
+          "maxItems": 2,
+          "minItems": 0,
+          "title": "Alternatives",
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "magnitude_band",
+        "rationale_reading_id"
+      ],
+      "title": "PrimaryDirectionModel",
+      "type": "object"
+    },
+    "SignalReadingModel": {
+      "additionalProperties": false,
+      "properties": {
+        "reading_id": {
+          "pattern": "^r[0-9]{1,3}$",
+          "title": "Reading Id",
+          "type": "string"
+        },
+        "reading": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Reading",
+          "type": "string"
+        },
+        "is_inference": {
+          "const": true,
+          "title": "Is Inference",
+          "type": "boolean"
+        },
+        "confidence": {
+          "enum": [
+            "low",
+            "medium"
+          ],
+          "title": "Confidence",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "pattern": "^e[0-9]{1,3}$",
+            "type": "string"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "reading_id",
+        "reading",
+        "is_inference",
+        "confidence",
+        "evidence_ids"
+      ],
+      "title": "SignalReadingModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {
+      "const": "0.3-c1",
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "request_id": {
+      "format": "uuid",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "run_id": {
+      "format": "uuid",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "context_run_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "title": "Context Run Ids",
+      "type": "array"
+    },
+    "status": {
+      "const": "completed",
+      "title": "Status",
+      "type": "string"
+    },
+    "mode": {
+      "const": "run_state_coaching",
+      "title": "Mode",
+      "type": "string"
+    },
+    "outcome": {
+      "enum": [
+        "coached",
+        "insufficient_evidence"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "run_summary": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Run Summary",
+      "type": "string"
+    },
+    "signal_readings": {
+      "items": {
+        "$ref": "#/$defs/SignalReadingModel"
+      },
+      "maxItems": 8,
+      "minItems": 0,
+      "title": "Signal Readings",
+      "type": "array"
+    },
+    "primary_directions": {
+      "items": {
+        "$ref": "#/$defs/PrimaryDirectionModel"
+      },
+      "maxItems": 2,
+      "minItems": 0,
+      "title": "Primary Directions",
+      "type": "array"
+    },
+    "cross_round_trend": {
+      "anyOf": [
+        {
+          "maxLength": 300,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cross Round Trend"
+    },
+    "uncertainties": {
+      "items": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 6,
+      "minItems": 0,
+      "title": "Uncertainties",
+      "type": "array"
+    },
+    "fallback_reason": {
+      "anyOf": [
+        {
+          "enum": [
+            "no_metrics_or_series",
+            "run_status_unknown",
+            "insufficient_signal",
+            "conflicting_signals"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback Reason"
+    },
+    "overall_confidence": {
+      "enum": [
+        "low",
+        "medium"
+      ],
+      "title": "Overall Confidence",
+      "type": "string"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/EvidenceItemModel"
+      },
+      "maxItems": 16,
+      "minItems": 1,
+      "title": "Evidence",
+      "type": "array"
+    },
+    "caveats": {
+      "items": {
+        "maxLength": 400,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Caveats",
+      "type": "array"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "request_id",
+    "run_id",
+    "context_run_ids",
+    "status",
+    "mode",
+    "outcome",
+    "run_summary",
+    "signal_readings",
+    "primary_directions",
+    "uncertainties",
+    "overall_confidence",
+    "evidence",
+    "caveats"
+  ],
+  "title": "BridgeRunStateCoachingResultModel",
+  "type": "object"
+}
