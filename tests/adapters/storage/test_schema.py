@@ -14,6 +14,8 @@ async def test_init_schema_creates_tables_and_version(db_path: str) -> None:
         version = await version_cur.fetchone()
 
     assert {
+        "bridge_run_state_run",
+        "bridge_run_state_session",
         "chunks",
         "chat_message",
         "chat_session",

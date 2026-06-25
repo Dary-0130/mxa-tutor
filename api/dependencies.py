@@ -29,6 +29,7 @@ from adapters.parser.m_parser import MParserImpl
 from adapters.parser.pdf_parser import PdfParser
 from adapters.parser.slx_parser import SlxParserImpl
 from adapters.parser.zip_extractor import safe_extract
+from adapters.storage.sqlite_bridge_run_state_store import SqliteBridgeRunStateStore
 from app.config import AppSettings
 from core.domain.exceptions import BridgeExplanationUnavailableError, MatlabEngineDisabledError
 from core.interfaces.chat_store import ChatStore
@@ -92,6 +93,18 @@ def get_matlab_bridge_explanation_service(request: Request) -> BridgeExplanation
 def get_matlab_bridge_run_state_service() -> BridgeRunStateService:
     """Return the stateless MATLAB bridge run-state validation service."""
     return BridgeRunStateService()
+
+
+def get_matlab_bridge_run_state_store(request: Request) -> SqliteBridgeRunStateStore:
+    """Return the app-managed run-state persistence substrate."""
+    store = getattr(request.app.state, "bridge_run_state_store", None)
+    if store is not None:
+        return cast(SqliteBridgeRunStateStore, store)
+    settings = get_settings()
+    return SqliteBridgeRunStateStore(
+        settings.db_path,
+        upload_ttl_hours=settings.upload_ttl_hours,
+    )
 
 
 @lru_cache(maxsize=1)

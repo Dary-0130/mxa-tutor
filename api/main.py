@@ -22,6 +22,7 @@ from loguru import logger
 from adapters.llm import DeepSeekTextProvider
 from adapters.storage._connection import open_connection
 from adapters.storage.schema import init_schema
+from adapters.storage.sqlite_bridge_run_state_store import SqliteBridgeRunStateStore
 from adapters.storage.sqlite_chat_store import SqliteChatStore
 from adapters.storage.sqlite_paper_cache import (
     SqlitePaperBundleStore,
@@ -63,6 +64,7 @@ from features.chat._prompt_builder import ChatPromptBuilder
 from features.chat.chat_service import ChatService
 from features.chunking import ChunkingService
 from features.ingest.cleanup_worker import CleanupWorker
+from features.matlab_bridge.run_state_cleanup_worker import RunStateCleanupWorker
 from features.overview import InMemoryOverviewCache
 from features.overview.project_graph_builder import ProjectGraphBuilder
 
@@ -230,10 +232,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await stack.enter_async_context(_bootstrap_db(settings.db_path))
         store = SqliteProjectStore(settings.db_path)
         chat_store = SqliteChatStore(settings.db_path)
+        bridge_run_state_store = SqliteBridgeRunStateStore(
+            settings.db_path,
+            upload_ttl_hours=settings.upload_ttl_hours,
+        )
         teaching_unit_store = SqliteTeachingUnitStore(settings.db_path)
         paper_bundle_store = SqlitePaperBundleStore(settings.db_path)
         app.state.project_store = store
         app.state.chat_store = chat_store
+        app.state.bridge_run_state_store = bridge_run_state_store
         app.state.teaching_unit_store = teaching_unit_store
         app.state.paper_bundle_store = paper_bundle_store
         app.state.paper_spec_cache = SqlitePaperSpecCacheView(paper_bundle_store)
@@ -296,6 +303,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ttl_hours=settings.upload_ttl_hours,
         )
         cleanup_task = asyncio.create_task(worker.run_forever())
+        run_state_worker = RunStateCleanupWorker(bridge_run_state_store)
+        run_state_cleanup_task = asyncio.create_task(run_state_worker.run_forever())
 
         async def _shutdown_cleanup() -> None:
             cleanup_task.cancel()
@@ -303,6 +312,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await cleanup_task
             logger.info("CleanupWorker shutdown complete")
 
+        async def _shutdown_run_state_cleanup() -> None:
+            run_state_cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await run_state_cleanup_task
+            logger.info(
+                "Bridge run-state sweep shutdown: event_code={} status={}",
+                "bridge_run_state_sweep",
+                "shutdown",
+            )
+
+        stack.push_async_callback(_shutdown_run_state_cleanup)
         stack.push_async_callback(_shutdown_cleanup)
         yield
 

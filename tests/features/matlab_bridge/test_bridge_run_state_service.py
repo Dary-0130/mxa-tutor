@@ -180,6 +180,8 @@ def test_service_source_uses_metadata_only_logging() -> None:
     logger_lines = [line for line in source.splitlines() if "logger." in line]
 
     assert "logger.exception" not in source
+    assert "SqliteBridgeRunStateStore" not in source
+    assert "persist_run" not in source
     assert not any("stop_reason" in line for line in logger_lines)
     assert not any("metric.value" in line for line in logger_lines)
     assert not any("series.y" in line for line in logger_lines)

@@ -49,19 +49,17 @@ class BridgeRunStateService:
         redacted_request = redact_run_state_request(request)
         if contains_run_state_private_text("\n".join(_iter_request_strings(redacted_request))):
             logger.error(
-                "Bridge run-state privacy validation failed: request_id={} run_sequence={}",
-                str(request.request_id),
-                request.run_sequence,
+                "Bridge run-state privacy validation failed: event_code={} status={}",
+                "bridge_run_state_validate",
+                "privacy_rejected",
             )
             raise BridgeRunStateValidationError("run_state_privacy_validation_failed") from None
 
         logger.info(
-            (
-                "Bridge run-state validated: request_id={} run_sequence={} run_status={} "
-                "metrics_count={} series_count={}"
-            ),
-            str(request.request_id),
-            request.run_sequence,
+            "Bridge run-state validated: event_code={} status={} run_status={} "
+            "metrics_count={} series_count={}",
+            "bridge_run_state_validate",
+            "ok",
             request.run_status,
             len(request.metrics),
             len(request.series),
