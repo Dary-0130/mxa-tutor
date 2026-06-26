@@ -579,6 +579,26 @@ verifyTrue(testCase, contains(app.LastConfirmedSnapshot, "22222222-2222-4222-822
     end
 end
 
+function testRunStateCoachingConfirmCopyDisclosesDeepSeekRetention(testCase)
+[title, confirmOption, details] = mxa.bridge.defaultConfirmCopy("run_state_coaching");
+
+verifyEqual(testCase, title, "发送运行状态陪调请求?");
+verifyEqual(testCase, confirmOption, "发送");
+verifyTrue(testCase, contains(details, "数据类别"));
+verifyTrue(testCase, contains(details, "脱敏"));
+verifyTrue(testCase, contains(details, "降采样"));
+verifyTrue(testCase, contains(details, "不含原始 MAT/CSV"));
+verifyTrue(testCase, contains(details, "用途"));
+verifyTrue(testCase, contains(details, "LLM"));
+verifyTrue(testCase, contains(details, "跨轮指导"));
+verifyTrue(testCase, contains(details, "DeepSeek"));
+verifyTrue(testCase, contains(details, "不由本机 24h 控制"));
+verifyTrue(testCase, contains(details, "本机不持久化解释或上下文"));
+verifyTrue(testCase, contains(details, "目标 run"));
+verifyTrue(testCase, contains(details, "previous_run_count"));
+verifyTrue(testCase, contains(details, "结果中回显"));
+end
+
 function testFormatRunStateCoachingRendersContractFields(testCase)
 payload = struct( ...
     "protocol_version", "0.3-c1", ...

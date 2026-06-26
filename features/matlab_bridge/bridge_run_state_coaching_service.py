@@ -69,6 +69,12 @@ _DEAD_VALUE_PATTERNS = (
     re.compile(r"(?:设为|调到|调整到|目标|固定为|最终值|具体数值).{0,24}\d+(?:\.\d+)?"),
     re.compile(r"(?:Kp|Ki|Kd|增益|参数).{0,24}(?:=|为|到)\s*\d+(?:\.\d+)?"),
 )
+_INSTRUCTION_COPY_PATTERNS = (
+    re.compile(r"忽略.{0,16}(?:以上|上述|前文|说明|指令)"),
+    re.compile(r"(?:不要|无需).{0,16}(?:遵守|理会|参考).{0,16}(?:说明|指令)"),
+    re.compile(r"(?:执行|按照|遵循).{0,16}(?:这条|下面|以下).{0,16}指令"),
+    re.compile(r"设到最大"),
+)
 
 
 class BridgeRunStateCoachingCrossRoundNotEnabledError(Exception):
@@ -566,6 +572,9 @@ def _validate_result_postconditions(result: BridgeRunStateCoachingResult) -> Non
             if pattern.search(text):
                 raise ValueError("commitment_scan_failed")
     for text in _iter_provider_controlled_strings(result):
+        for pattern in _INSTRUCTION_COPY_PATTERNS:
+            if pattern.search(text):
+                raise ValueError("instruction_copy_scan_failed")
         for pattern in _DEAD_VALUE_PATTERNS:
             if pattern.search(text):
                 raise ValueError("dead_value_scan_failed")

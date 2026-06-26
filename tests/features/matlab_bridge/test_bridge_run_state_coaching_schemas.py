@@ -107,6 +107,25 @@ def test_request_rejects_invalid_consent_bounds_and_sensitive_fields(
         BridgeRunStateCoachingRequest.model_validate(payload)
 
 
+def test_persistence_consent_cannot_replace_coaching_consent() -> None:
+    missing_coaching_consent = _valid_request()
+    missing_coaching_consent.pop("run_state_coaching_consent_confirmed")
+    missing_coaching_consent["run_state_sharing_consent_confirmed"] = True
+
+    with pytest.raises(ValidationError):
+        BridgeRunStateCoachingRequest.model_validate(missing_coaching_consent)
+
+    with pytest.raises(ValidationError):
+        BridgeRunStateCoachingRequest.model_validate(
+            _valid_request(run_state_sharing_consent_confirmed=True)
+        )
+
+    request = BridgeRunStateCoachingRequest.model_validate(
+        _valid_request(run_state_coaching_consent_confirmed=True)
+    )
+    assert request.run_state_coaching_consent_confirmed is True
+
+
 def test_result_round_trip_validates_evidence_reading_direction_chain() -> None:
     result = BridgeRunStateCoachingResultModel.model_validate(_valid_result())
     domain = result.to_domain()

@@ -6,21 +6,7 @@ if nargin < 3
 end
 
 contextText = string(context);
-if contextText == "run_state_persistence"
-    title = "保存运行状态快照?";
-    confirmOption = "保存";
-    details = strjoin([ ...
-        "数据类别: 已脱敏、降采样的 MATLAB/Simulink 运行状态摘要,不含原始 MAT/CSV 文件。", ...
-        "用途: 保存本轮 run-state,用于跨轮状态机和后续本地会话衔接。", ...
-        "持久化: 确认后会写入本机 mxa-tutor SQLite 存储。", ...
-        "最长留存: 最长不超过 24h,可能更早删除。", ...
-        "删除条件: 工程删除、会话结束/失效或留存到期会删除。" ...
-    ], newline);
-else
-    title = "发送诊断信息?";
-    confirmOption = "发送";
-    details = "";
-end
+[title, confirmOption, details] = mxa.bridge.defaultConfirmCopy(contextText);
 
 message = sprintf("%s\n\n%s", mxa.bridge.MatlabBridgeApp.SafetyPrompt, sanitizedText);
 if strlength(details) > 0
