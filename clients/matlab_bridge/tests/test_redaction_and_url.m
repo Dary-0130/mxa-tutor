@@ -579,6 +579,55 @@ verifyTrue(testCase, contains(app.LastConfirmedSnapshot, "22222222-2222-4222-822
     end
 end
 
+function testSubmitRunStateCoachingWindowChangeRequiresFreshConfirmation(testCase)
+confirmedSnapshots = strings(0, 1);
+postedCounts = zeros(0, 1);
+app = mxa.bridge.MatlabBridgeApp( ...
+    BaseUrl="http://localhost:8000", ...
+    Visible="off", ...
+    ConfirmFunction=@fakeConfirm, ...
+    TokenProviderFunction=@fakeTokenProvider, ...
+    RunStateCoachingPostFunction=@fakePostCoaching);
+cleanup = onCleanup(@() delete(app));
+
+first = app.submitRunStateCoaching( ...
+    "user-alpha", ...
+    "project-alpha", ...
+    "11111111-1111-4111-8111-111111111111", ...
+    "22222222-2222-4222-8222-222222222222", ...
+    0);
+second = app.submitRunStateCoaching( ...
+    "user-alpha", ...
+    "project-alpha", ...
+    "11111111-1111-4111-8111-111111111111", ...
+    "22222222-2222-4222-8222-222222222222", ...
+    2);
+
+verifyTrue(testCase, first);
+verifyTrue(testCase, second);
+verifyEqual(testCase, numel(confirmedSnapshots), 2);
+verifyTrue(testCase, contains(confirmedSnapshots(1), "previous_run_count"));
+verifyTrue(testCase, contains(confirmedSnapshots(2), "previous_run_count"));
+verifyNotEqual(testCase, confirmedSnapshots(1), confirmedSnapshots(2));
+verifyEqual(testCase, postedCounts, [0; 2]);
+
+    function confirmed = fakeConfirm(~, snapshot, context)
+        verifyEqual(testCase, string(context), "run_state_coaching");
+        confirmedSnapshots(end + 1, 1) = string(snapshot); %#ok<AGROW>
+        confirmed = true;
+    end
+
+    function token = fakeTokenProvider(~, ~, ~, capability)
+        verifyEqual(testCase, string(capability), "run_state:explain");
+        token = "explain-token";
+    end
+
+    function result = fakePostCoaching(~, payload, ~, ~)
+        postedCounts(end + 1, 1) = double(payload.previous_run_count); %#ok<AGROW>
+        result = makeRunStateCoaching(payload);
+    end
+end
+
 function testRunStateCoachingConfirmCopyDisclosesDeepSeekRetention(testCase)
 [title, confirmOption, details] = mxa.bridge.defaultConfirmCopy("run_state_coaching");
 

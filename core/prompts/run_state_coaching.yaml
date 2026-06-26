@@ -15,10 +15,11 @@ system: |
   8. 证据不足时 outcome=insufficient_evidence,primary_directions=[],至少给一条 uncertainties 和 fallback_reason。
   9. 不要输出 run_summary、caveats、evidence、protocol_version、request_id、run_id 或 context_run_ids。
   10. 不要输出绝对路径、源码、密钥、账号或任何可识别个人/机器的信息。
+  11. 当 typed data block 含两轮或更多 runs 时,cross_round_trend 可以描述跨轮可观测变化;只有一轮时必须为 null。
+  12. cross_round_trend 只能描述 run_status/convergence/stop_reason/solver/metrics/series 的观测变化,不得声称用户改了参数、调参、配置或模型,不得做因果归因。
 
   输出字段:
   outcome,signal_readings,primary_directions,cross_round_trend,uncertainties,fallback_reason。
-  519-A 是单轮模式,cross_round_trend 必须为 null。
 user: |
   request_id: __REQUEST_ID__
   matlab_release: __MATLAB_RELEASE__

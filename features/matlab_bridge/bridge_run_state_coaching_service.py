@@ -31,8 +31,8 @@ from core.domain.exceptions import (
     LLMServerError,
     LLMTimeoutError,
 )
+from core.interfaces.coaching_cross_round_reader import CoachingCrossRoundReader
 from core.interfaces.coaching_run_state_reader import (
-    CoachingRunStateReader,
     CoachingRunStateScope,
     CoachingRunStateSnapshot,
 )
@@ -75,10 +75,6 @@ _INSTRUCTION_COPY_PATTERNS = (
     re.compile(r"(?:执行|按照|遵循).{0,16}(?:这条|下面|以下).{0,16}指令"),
     re.compile(r"设到最大"),
 )
-
-
-class BridgeRunStateCoachingCrossRoundNotEnabledError(Exception):
-    """519-A rejects cross-round context requests."""
 
 
 class BridgeRunStateCoachingUnavailableError(Exception):
@@ -179,11 +175,8 @@ class BridgeRunStateCoachingService:
         request: BridgeRunStateCoachingRequest,
         auth_context: BridgeAuthContext,
         *,
-        reader: CoachingRunStateReader,
+        reader: CoachingCrossRoundReader,
     ) -> BridgeRunStateCoachingResult:
-        if request.previous_run_count != 0:
-            raise BridgeRunStateCoachingCrossRoundNotEnabledError
-
         scope = CoachingRunStateScope(
             user_id=auth_context.user_id,
             project_id=auth_context.project_id,
@@ -198,15 +191,20 @@ class BridgeRunStateCoachingService:
         provider_task: asyncio.Task[LLMResponse] | None = None
         release_without_provider = True
         try:
-            snapshot = await reader.read_run_state_for_coaching(scope, request.run_id)
-            evidence = _build_evidence(snapshot)
-            if _is_insufficient_without_provider(snapshot):
-                result = _build_insufficient_result(request, snapshot, evidence)
+            snapshots = await reader.read_run_state_window_for_coaching(
+                scope,
+                request.run_id,
+                request.previous_run_count,
+            )
+            target_snapshot = snapshots[-1]
+            evidence = _build_evidence(snapshots)
+            if _is_insufficient_without_provider(target_snapshot):
+                result = _build_insufficient_result(request, snapshots, evidence)
                 await reader.assert_coaching_session_active(scope)
                 return result
 
             await reader.assert_coaching_session_active(scope)
-            messages = self._build_messages(request, snapshot, evidence)
+            messages = self._build_messages(request, snapshots, evidence)
             _require_provider_input_limit(messages)
             logger.info(
                 "Bridge run-state coaching LLM call: event_code={} status={} evidence_count={}",
@@ -236,7 +234,7 @@ class BridgeRunStateCoachingService:
             outcome = await self._await_and_shape_provider(
                 provider_task,
                 request,
-                snapshot,
+                snapshots,
                 evidence,
             )
             await reader.assert_coaching_session_active(scope)
@@ -250,19 +248,20 @@ class BridgeRunStateCoachingService:
     def _build_messages(
         self,
         request: BridgeRunStateCoachingRequest,
-        snapshot: CoachingRunStateSnapshot,
+        snapshots: tuple[CoachingRunStateSnapshot, ...],
         evidence: tuple[BridgeRunStateCoachingEvidenceItem, ...],
     ) -> list[LLMMessage]:
         context_json = json.dumps(
-            _context_payload(snapshot, evidence),
+            _context_payload(snapshots, evidence),
             ensure_ascii=False,
             separators=(",", ":"),
         )
+        target_snapshot = snapshots[-1]
         user = _render_user(
             self._prompt_template.user,
             {
                 "REQUEST_ID": str(request.request_id),
-                "MATLAB_RELEASE": snapshot.matlab_release,
+                "MATLAB_RELEASE": target_snapshot.matlab_release,
                 "ALLOWED_EVIDENCE_IDS": ",".join(item.evidence_id for item in evidence),
                 "RUN_STATE_CONTEXT_JSON": context_json,
             },
@@ -276,7 +275,7 @@ class BridgeRunStateCoachingService:
         self,
         provider_task: asyncio.Task[LLMResponse],
         request: BridgeRunStateCoachingRequest,
-        snapshot: CoachingRunStateSnapshot,
+        snapshots: tuple[CoachingRunStateSnapshot, ...],
         evidence: tuple[BridgeRunStateCoachingEvidenceItem, ...],
     ) -> BridgeRunStateCoachingResult | Exception:
         try:
@@ -284,7 +283,7 @@ class BridgeRunStateCoachingService:
                 asyncio.shield(provider_task),
                 timeout=self._server_deadline_s,
             )
-            return _parse_and_validate_response(response, request, snapshot, evidence)
+            return _parse_and_validate_response(response, request, snapshots, evidence)
         except TimeoutError:
             logger.error(
                 "Bridge run-state coaching timeout: event_code={} status={}",
@@ -344,7 +343,7 @@ def coaching_error_payloads() -> dict[int, dict[str, str]]:
 def _parse_and_validate_response(
     response: LLMResponse,
     request: BridgeRunStateCoachingRequest,
-    snapshot: CoachingRunStateSnapshot,
+    snapshots: tuple[CoachingRunStateSnapshot, ...],
     evidence: tuple[BridgeRunStateCoachingEvidenceItem, ...],
 ) -> BridgeRunStateCoachingResult:
     if len(response.text.encode("utf-8")) > MAX_BRIDGE_COACHING_RESPONSE_BYTES:
@@ -352,7 +351,7 @@ def _parse_and_validate_response(
     try:
         payload = json.loads(response.text)
         draft = CoachingDraft.model_validate(payload)
-        result = _assemble_result(request, snapshot, evidence, draft)
+        result = _assemble_result(request, snapshots, evidence, draft)
         _validate_result_postconditions(result)
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         logger.error(
@@ -372,10 +371,12 @@ def _parse_and_validate_response(
 
 def _assemble_result(
     request: BridgeRunStateCoachingRequest,
-    snapshot: CoachingRunStateSnapshot,
+    snapshots: tuple[CoachingRunStateSnapshot, ...],
     evidence: tuple[BridgeRunStateCoachingEvidenceItem, ...],
     draft: CoachingDraft,
 ) -> BridgeRunStateCoachingResult:
+    target_snapshot = snapshots[-1]
+    context_run_ids = tuple(snapshot.run_id for snapshot in snapshots)
     evidence_ids = {item.evidence_id for item in evidence}
     reading_ids: set[str] = set()
     readings: list[BridgeRunStateCoachingSignalReading] = []
@@ -419,8 +420,7 @@ def _assemble_result(
             )
         )
 
-    if draft.cross_round_trend is not None:
-        raise ValueError("cross_round_trend_not_enabled")
+    cross_round_trend = draft.cross_round_trend if len(snapshots) >= 2 else None
     confidence: BridgeRunStateCoachingConfidence = "low"
     if draft.outcome == "coached" and any(reading.confidence == "medium" for reading in readings):
         confidence = "medium"
@@ -428,14 +428,14 @@ def _assemble_result(
         protocol_version="0.3-c1",
         request_id=request.request_id,
         run_id=request.run_id,
-        context_run_ids=(request.run_id,),
+        context_run_ids=context_run_ids,
         status="completed",
         mode="run_state_coaching",
         outcome=draft.outcome,
-        run_summary=_run_summary(snapshot),
+        run_summary=_run_summary(target_snapshot),
         signal_readings=tuple(readings),
         primary_directions=tuple(directions),
-        cross_round_trend=None,
+        cross_round_trend=cross_round_trend,
         uncertainties=tuple(draft.uncertainties),
         fallback_reason=draft.fallback_reason,
         overall_confidence=confidence,
@@ -446,21 +446,22 @@ def _assemble_result(
 
 def _build_insufficient_result(
     request: BridgeRunStateCoachingRequest,
-    snapshot: CoachingRunStateSnapshot,
+    snapshots: tuple[CoachingRunStateSnapshot, ...],
     evidence: tuple[BridgeRunStateCoachingEvidenceItem, ...],
 ) -> BridgeRunStateCoachingResult:
+    target_snapshot = snapshots[-1]
     reason: BridgeRunStateCoachingFallbackReason = (
-        "run_status_unknown" if snapshot.run_status == "unknown" else "no_metrics_or_series"
+        "run_status_unknown" if target_snapshot.run_status == "unknown" else "no_metrics_or_series"
     )
     return BridgeRunStateCoachingResult(
         protocol_version="0.3-c1",
         request_id=request.request_id,
         run_id=request.run_id,
-        context_run_ids=(request.run_id,),
+        context_run_ids=tuple(snapshot.run_id for snapshot in snapshots),
         status="completed",
         mode="run_state_coaching",
         outcome="insufficient_evidence",
-        run_summary=_run_summary(snapshot),
+        run_summary=_run_summary(target_snapshot),
         signal_readings=(),
         primary_directions=(),
         cross_round_trend=None,
@@ -473,9 +474,10 @@ def _build_insufficient_result(
 
 
 def _build_evidence(
-    snapshot: CoachingRunStateSnapshot,
+    snapshots: tuple[CoachingRunStateSnapshot, ...],
 ) -> tuple[BridgeRunStateCoachingEvidenceItem, ...]:
     items: list[BridgeRunStateCoachingEvidenceItem] = []
+    is_cross_round = len(snapshots) >= 2
 
     def add(signal_ref: str, text: str) -> None:
         if len(items) >= 16:
@@ -489,36 +491,61 @@ def _build_evidence(
             )
         )
 
-    add("run_status", f"run_status={snapshot.run_status}")
-    add("convergence_status", f"convergence_status={snapshot.convergence_status}")
-    if snapshot.stop_reason:
-        add("stop_reason", f"stop_reason={snapshot.stop_reason}")
-    if snapshot.solver:
-        add("solver", f"solver={snapshot.solver}")
-    for metric in snapshot.metrics:
-        unit = f" {metric.unit}" if metric.unit else ""
-        add(f"metric:{metric.name}", f"metric {metric.name}={metric.value:g}{unit}")
-    for series in snapshot.series:
-        if series.sample_min is None or series.sample_max is None:
+    for snapshot in snapshots:
+        prefix = f"run_sequence={snapshot.run_sequence} " if is_cross_round else ""
+        ref_prefix = f"run:{snapshot.run_sequence}:" if is_cross_round else ""
+        add(f"{ref_prefix}run_status", f"{prefix}run_status={snapshot.run_status}")
+        add(
+            f"{ref_prefix}convergence_status",
+            f"{prefix}convergence_status={snapshot.convergence_status}",
+        )
+        if snapshot.stop_reason:
+            add(f"{ref_prefix}stop_reason", f"{prefix}stop_reason={snapshot.stop_reason}")
+        if snapshot.solver:
+            add(f"{ref_prefix}solver", f"{prefix}solver={snapshot.solver}")
+        for metric in snapshot.metrics[:16]:
+            unit = f" {metric.unit}" if metric.unit else ""
             add(
-                f"series:{series.series_id}",
-                f"series {series.series_id} points={series.source_point_count}",
+                f"{ref_prefix}metric:{metric.name}",
+                f"{prefix}metric {metric.name}={metric.value:g}{unit}",
             )
-        else:
-            add(
-                f"series:{series.series_id}",
-                (
-                    f"series {series.series_id} points={series.source_point_count} "
-                    f"range=[{series.sample_min:g},{series.sample_max:g}]"
-                ),
-            )
+        for series in snapshot.series[:4]:
+            if series.sample_min is None or series.sample_max is None:
+                add(
+                    f"{ref_prefix}series:{series.series_id}",
+                    f"{prefix}series {series.series_id} points={series.source_point_count}",
+                )
+            else:
+                add(
+                    f"{ref_prefix}series:{series.series_id}",
+                    (
+                        f"{prefix}series {series.series_id} "
+                        f"points={series.source_point_count} "
+                        f"range=[{series.sample_min:g},{series.sample_max:g}]"
+                    ),
+                )
     return tuple(items)
 
 
 def _context_payload(
-    snapshot: CoachingRunStateSnapshot,
+    snapshots: tuple[CoachingRunStateSnapshot, ...],
     evidence: tuple[BridgeRunStateCoachingEvidenceItem, ...],
 ) -> dict[str, Any]:
+    return {
+        "target_run_id": str(snapshots[-1].run_id),
+        "runs": [_context_run_payload(snapshot) for snapshot in snapshots],
+        "evidence": [
+            {
+                "evidence_id": item.evidence_id,
+                "text": item.text,
+                "signal_ref": item.signal_ref,
+            }
+            for item in evidence
+        ],
+    }
+
+
+def _context_run_payload(snapshot: CoachingRunStateSnapshot) -> dict[str, Any]:
     return {
         "run_id": str(snapshot.run_id),
         "run_sequence": snapshot.run_sequence,
@@ -536,7 +563,7 @@ def _context_payload(
                 "unit_status": metric.unit_status,
                 "unit": metric.unit,
             }
-            for metric in snapshot.metrics
+            for metric in snapshot.metrics[:16]
         ],
         "series_status": snapshot.series_status,
         "series": [
@@ -551,15 +578,7 @@ def _context_payload(
                 "sample_max": series.sample_max,
                 "value_unit": series.value_unit,
             }
-            for series in snapshot.series
-        ],
-        "evidence": [
-            {
-                "evidence_id": item.evidence_id,
-                "text": item.text,
-                "signal_ref": item.signal_ref,
-            }
-            for item in evidence
+            for series in snapshot.series[:4]
         ],
     }
 

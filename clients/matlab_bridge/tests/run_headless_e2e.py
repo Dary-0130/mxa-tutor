@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
 
 import uvicorn
@@ -279,7 +280,7 @@ async def _prepare_run_state_session(
     scope_cls,
     store_cls,
 ) -> None:
-    created_at = "2026-06-25T00:00:00"
+    created_at = datetime.now(UTC).replace(tzinfo=None).isoformat()
     async with open_connection_fn(str(db_path)) as conn:
         await init_schema_fn(conn)
         await conn.execute(

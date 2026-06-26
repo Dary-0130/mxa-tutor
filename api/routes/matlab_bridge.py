@@ -66,7 +66,6 @@ from features.matlab_bridge.bridge_run_state_coaching_schemas import (
 )
 from features.matlab_bridge.bridge_run_state_coaching_service import (
     BridgeRunStateCoachingBusyError,
-    BridgeRunStateCoachingCrossRoundNotEnabledError,
     BridgeRunStateCoachingFailedError,
     BridgeRunStateCoachingService,
     BridgeRunStateCoachingTimeoutError,
@@ -144,23 +143,6 @@ def _bridge_validation_error(request: Request) -> JSONResponse:
     return JSONResponse(
         status_code=422,
         content={"error": "validation_error", "message": "请求参数有问题,请检查后重试"},
-    )
-
-
-def _bridge_cross_round_error(request: Request) -> JSONResponse:
-    logger.error(
-        "API error: exception={} status={} path={} method={}",
-        "CoachingCrossRoundNotEnabled",
-        422,
-        request.url.path,
-        request.method,
-    )
-    return JSONResponse(
-        status_code=422,
-        content={
-            "error": "coaching_cross_round_not_enabled",
-            "message": "当前版本暂不支持跨轮陪调,请仅请求本轮 run-state",
-        },
     )
 
 
@@ -655,22 +637,12 @@ async def bridge_run_state(
         413: {"model": BridgeErrorResponse},
         415: {"model": BridgeErrorResponse},
         422: {
-            "description": "Global validation error shape or 519-A cross-round rejection",
+            "description": "Global validation error shape",
             "content": {
                 "application/json": {
-                    "examples": {
-                        "validation": {
-                            "value": {
-                                "error": "validation_error",
-                                "message": "请求参数有问题,请检查后重试",
-                            }
-                        },
-                        "cross_round": {
-                            "value": {
-                                "error": "coaching_cross_round_not_enabled",
-                                "message": "当前版本暂不支持跨轮陪调,请仅请求本轮 run-state",
-                            }
-                        },
+                    "example": {
+                        "error": "validation_error",
+                        "message": "请求参数有问题,请检查后重试",
                     }
                 }
             },
@@ -726,7 +698,7 @@ async def bridge_run_state_coaching(
         Depends(get_matlab_bridge_run_state_store),
     ],
 ) -> BridgeRunStateCoachingResultModel | JSONResponse:
-    """Generate one single-run coaching explanation from persisted run-state."""
+    """Generate one coaching explanation from persisted run-state context."""
     request_body = cast(
         BridgeRunStateCoachingRequest,
         request.state.bridge_run_state_coaching_request,
@@ -738,8 +710,6 @@ async def bridge_run_state_coaching(
             auth_context,
             reader=store,
         )
-    except BridgeRunStateCoachingCrossRoundNotEnabledError:
-        return _bridge_cross_round_error(request)
     except CoachingRunStateReadRejectedError as exc:
         return _map_coaching_read_rejection(exc)
     except CoachingRunStateReaderUnavailableError:

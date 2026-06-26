@@ -390,7 +390,7 @@ MATLAB Add-on 用户确认发送手动粘贴或自动采集的报错文本后,�
 
 ### 触发
 
-MATLAB Add-on 用户确认发送一次已持久化 run-state 的陪调请求后,服务端生成一次 `0.3-c1` 结构化结果。519-A 只解释目标 run,不读跨轮窗口;`previous_run_count != 0` 必须拒绝。
+MATLAB Add-on 用户确认发送一次已持久化 run-state 的陪调请求后,服务端生成一次 `0.3-c1` 结构化结果。请求以目标 run 为锚,可读取目标 run + 最多 `previous_run_count` 个实有前序 run;实际使用的 run 通过 `context_run_ids` 回显。
 
 ### 固定结构
 
@@ -401,6 +401,7 @@ MATLAB Add-on 用户确认发送一次已持久化 run-state 的陪调请求后,
 - `signal_readings` 只解释 run-state 里可观察到的信号/指标摘要,每条都必须引用 `evidence_id`。
 - `primary_directions` 只能用 `action + magnitude_band` 表达方向,不要给具体参数值、绝对目标或保证效果。
 - 主方向和备选方向都必须用 `rationale_reading_id` 指向一条 reading;reading 再指向 evidence。
+- `cross_round_trend` 只描述跨轮窗口里的可观测变化,不得声称用户改了参数、配置或模型,不得做因果归因。
 - `insufficient_evidence` 要清楚说明证据不足,方向数组必须为空,不要勉强给建议。
 
 ### 禁止

@@ -12,9 +12,9 @@ import pytest
 from core.domain.bridge_auth import BridgeAuthClaims, BridgeAuthContext
 from core.domain.bridge_run_state_coaching import BridgeRunStateCoachingRequest
 from core.domain.exceptions import LLMTimeoutError
+from core.interfaces.coaching_cross_round_reader import CoachingCrossRoundReader
 from core.interfaces.coaching_run_state_reader import (
     CoachingRunStateMetric,
-    CoachingRunStateReader,
     CoachingRunStateReadRejectedError,
     CoachingRunStateScope,
     CoachingRunStateSeries,
@@ -23,7 +23,6 @@ from core.interfaces.coaching_run_state_reader import (
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.matlab_bridge.bridge_run_state_coaching_service import (
     BridgeRunStateCoachingBusyError,
-    BridgeRunStateCoachingCrossRoundNotEnabledError,
     BridgeRunStateCoachingFailedError,
     BridgeRunStateCoachingService,
     BridgeRunStateCoachingTimeoutError,
@@ -33,6 +32,7 @@ from features.matlab_bridge.bridge_run_state_coaching_service import (
 REQUEST_ID = UUID("2690af3d-9cfe-4442-900e-c86af37a6244")
 SESSION_ID = UUID("11111111-1111-4111-8111-111111111111")
 RUN_ID = UUID("22222222-2222-4222-8222-222222222222")
+PREVIOUS_RUN_ID = UUID("33333333-3333-4333-8333-333333333333")
 
 
 class FakeProvider(TextProvider):
@@ -79,27 +79,34 @@ class FakeProvider(TextProvider):
         return ModelCapability(model_name="fake", supports_json=True)
 
 
-class FakeReader(CoachingRunStateReader):
+class FakeReader(CoachingCrossRoundReader):
     def __init__(
         self,
         snapshot: CoachingRunStateSnapshot | None = None,
+        snapshots: tuple[CoachingRunStateSnapshot, ...] | None = None,
         *,
         reject_on_fence: bool = False,
     ) -> None:
-        self.snapshot = snapshot or _snapshot()
+        if snapshots is not None:
+            self.snapshots = snapshots
+        else:
+            self.snapshots = (snapshot or _snapshot(),)
         self.reject_on_fence = reject_on_fence
         self.read_calls = 0
         self.fence_calls = 0
+        self.previous_run_counts: list[int] = []
 
-    async def read_run_state_for_coaching(
+    async def read_run_state_window_for_coaching(
         self,
         scope: CoachingRunStateScope,
         run_id: UUID,
-    ) -> CoachingRunStateSnapshot:
+        previous_run_count: int,
+    ) -> tuple[CoachingRunStateSnapshot, ...]:
         assert scope.session_id == str(SESSION_ID)
         assert run_id == RUN_ID
+        self.previous_run_counts.append(previous_run_count)
         self.read_calls += 1
-        return self.snapshot
+        return self.snapshots
 
     async def assert_coaching_session_active(self, scope: CoachingRunStateScope) -> None:
         assert scope.session_id == str(SESSION_ID)
@@ -158,25 +165,69 @@ async def test_unknown_run_without_signals_returns_insufficient_without_provider
     assert reader.fence_calls == 1
 
 
-async def test_previous_run_count_is_rejected_in_service_layer() -> None:
+async def test_previous_run_count_uses_window_and_trend_with_history() -> None:
+    provider = FakeProvider(
+        json.dumps(
+            _draft_payload(cross_round_trend="前序和目标轮的可观测信号更稳定。"), ensure_ascii=False
+        )
+    )
+    reader = FakeReader(
+        snapshots=(
+            _snapshot(run_id=PREVIOUS_RUN_ID, run_sequence=6),
+            _snapshot(run_id=RUN_ID, run_sequence=7),
+        )
+    )
     service = BridgeRunStateCoachingService(
-        FakeProvider(),
+        provider,
         slot_manager=CoachingAttemptSlotManager(ttl_seconds=10),
     )
 
-    with pytest.raises(BridgeRunStateCoachingCrossRoundNotEnabledError):
-        await service.coach(_request(previous_run_count=1), _auth_context(), reader=FakeReader())
+    result = await service.coach(_request(previous_run_count=1), _auth_context(), reader=reader)
+
+    assert result.context_run_ids == (PREVIOUS_RUN_ID, RUN_ID)
+    assert result.cross_round_trend == "前序和目标轮的可观测信号更稳定。"
+    assert reader.previous_run_counts == [1]
+    payload = _provider_context_payload(provider)
+    assert [item["run_id"] for item in payload["runs"]] == [str(PREVIOUS_RUN_ID), str(RUN_ID)]
+    assert "delta" not in _json_keys(payload)
+    assert "parameter_changes" not in _json_keys(payload)
+    assert "user_adjustments" not in _json_keys(payload)
 
 
-async def test_provider_output_fail_closed_for_dead_values_privacy_and_cross_round() -> None:
-    drafts = [
-        _draft_payload(reading="请把 Kp 调到 5。"),
-        _draft_payload(reading="我已经运行仿真并确认问题。"),
-        _draft_payload(reading="路径 C:/Users/alice/private/model.slx 暴露。"),
-        _draft_payload(cross_round_trend="上一轮更稳定。"),
+async def test_single_run_context_forces_cross_round_trend_null() -> None:
+    provider = FakeProvider(
+        json.dumps(_draft_payload(cross_round_trend="上一轮看起来更稳定。"), ensure_ascii=False)
+    )
+    service = BridgeRunStateCoachingService(
+        provider,
+        slot_manager=CoachingAttemptSlotManager(ttl_seconds=10),
+    )
+
+    result = await service.coach(
+        _request(previous_run_count=1), _auth_context(), reader=FakeReader()
+    )
+
+    assert result.context_run_ids == (RUN_ID,)
+    assert result.cross_round_trend is None
+
+
+async def test_provider_output_fail_closed_for_dead_values_privacy_and_trend_commitments() -> None:
+    cases = [
+        (_draft_payload(reading="请把 Kp 调到 5。"), FakeReader()),
+        (_draft_payload(reading="我已经运行仿真并确认问题。"), FakeReader()),
+        (_draft_payload(reading="路径 C:/Users/alice/private/model.slx 暴露。"), FakeReader()),
+        (
+            _draft_payload(cross_round_trend="我已经确认前序轮更稳定。"),
+            FakeReader(
+                snapshots=(
+                    _snapshot(run_id=PREVIOUS_RUN_ID, run_sequence=6),
+                    _snapshot(run_id=RUN_ID, run_sequence=7),
+                )
+            ),
+        ),
     ]
 
-    for draft in drafts:
+    for draft, reader in cases:
         provider = FakeProvider(json.dumps(draft, ensure_ascii=False))
         service = BridgeRunStateCoachingService(
             provider,
@@ -184,7 +235,7 @@ async def test_provider_output_fail_closed_for_dead_values_privacy_and_cross_rou
         )
 
         with pytest.raises(BridgeRunStateCoachingFailedError):
-            await service.coach(_request(), _auth_context(), reader=FakeReader())
+            await service.coach(_request(previous_run_count=1), _auth_context(), reader=reader)
 
 
 async def test_provider_timeout_maps_to_timeout_after_final_fence() -> None:
@@ -321,15 +372,17 @@ def _auth_context() -> BridgeAuthContext:
 
 def _snapshot(
     *,
+    run_id: UUID = RUN_ID,
+    run_sequence: int = 7,
     run_status: str = "completed",
     convergence_status: str = "not_applicable",
     metrics: tuple[CoachingRunStateMetric, ...] | None = None,
     series: tuple[CoachingRunStateSeries, ...] | None = None,
 ) -> CoachingRunStateSnapshot:
     return CoachingRunStateSnapshot(
-        run_id=RUN_ID,
+        run_id=run_id,
         request_id=REQUEST_ID,
-        run_sequence=7,
+        run_sequence=run_sequence,
         matlab_release="R2026a",
         client_version="0.1.0",
         run_status=run_status,
@@ -402,6 +455,28 @@ def _draft_payload(
         "uncertainties": [],
         "fallback_reason": None,
     }
+
+
+def _provider_context_payload(provider: FakeProvider) -> dict[str, object]:
+    content = provider.messages[1].content
+    start_marker = "```json typed-data:run_state_observations"
+    start = content.index(start_marker) + len(start_marker)
+    end = content.index("```", start)
+    return json.loads(content[start:end].strip())
+
+
+def _json_keys(value: object) -> set[str]:
+    if isinstance(value, dict):
+        keys = {str(key) for key in value}
+        for nested in value.values():
+            keys.update(_json_keys(nested))
+        return keys
+    if isinstance(value, list):
+        keys: set[str] = set()
+        for nested in value:
+            keys.update(_json_keys(nested))
+        return keys
+    return set()
 
 
 def asyncio_create(coro):

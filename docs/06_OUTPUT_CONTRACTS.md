@@ -765,16 +765,16 @@ auth 错误响应使用独立 `BridgeRunStateAuthErrorResponse`:
 
 OpenAPI 只在 `/run-state` operation 挂 `BridgeRunStateBearerAuth` security scheme,并声明 401/403/409/410/413/415/422/500/503;`/diagnostic` 与 `/explanation` 不挂该 security scheme。
 
-## 16. MATLAB Bridge Run-State Coaching 契约(TASK-519-A)
+## 16. MATLAB Bridge Run-State Coaching 契约(TASK-519-A/B)
 
-`BridgeRunStateCoaching` 用于一次用户确认后的单轮 run-state 陪调解释。它读取 518 已持久化的脱敏、降采样 run-state 摘要,调用 LLM 生成结构化 reading/direction,但不持久化 prompt、response、解释结果或上下文。519-A 只支持目标 run 本轮;跨轮窗口留 519-B。
+`BridgeRunStateCoaching` 用于一次用户确认后的 run-state 陪调解释。它读取 518 已持久化的脱敏、降采样 run-state 摘要,以目标 run 为锚读取本轮及最多 4 个前序 run,调用 LLM 生成结构化 reading/direction 和可选跨轮趋势,但不持久化 prompt、response、解释结果或上下文。
 
-**状态**:v0.3-c1 + TASK-519-A 单轮闭环。`/diagnostic`、`/explanation`、`/run-state` 的既有字节、schema、auth、持久化语义不变。
+**状态**:v0.3-c1 + TASK-519-A 单轮闭环 + TASK-519-B 跨轮窗口。`/diagnostic`、`/explanation`、`/run-state` 的既有字节、schema、auth、持久化语义不变。
 
 | 同步项 | 路径 |
 |---|---|
 | Domain | `core/domain/bridge_run_state_coaching.py` |
-| Reader ABC | `core/interfaces/coaching_run_state_reader.py` |
+| Reader ABC | `core/interfaces/coaching_run_state_reader.py` / `core/interfaces/coaching_cross_round_reader.py` |
 | Pydantic wrapper | `features/matlab_bridge/bridge_run_state_coaching_schemas.py` |
 | Private draft | `features/matlab_bridge/_run_state_coaching_draft.py`(不导出、不进 core) |
 | JSON Schema | `schemas/bridge_run_state_coaching_request.schema.json` / `schemas/bridge_run_state_coaching_result.schema.json` / `schemas/bridge_run_state_coaching_error.schema.json` |
@@ -793,9 +793,9 @@ OpenAPI 只在 `/run-state` operation 挂 `BridgeRunStateBearerAuth` security sc
 | `run_id` | UUID | 必填 | 目标 run |
 | `run_state_coaching_consent_confirmed` | StrictBool | 必须为 `true` | 用户确认允许 LLM 陪调 |
 | `coaching_consent_notice_version` | `Literal["run_state_coaching_v1"]` | 必填 | coaching notice 版本 |
-| `previous_run_count` | StrictInt | `0..4`;519-A 必须为 0 | 目标轮之前历史轮数 |
+| `previous_run_count` | StrictInt | `0..4`;总 context 最多 5 轮 | 目标轮之前历史轮数 |
 
-`extra="forbid"`。敏感字段硬拒绝同 run-state request。`previous_run_count != 0` 在 519-A 返回 422 `coaching_cross_round_not_enabled`。
+`extra="forbid"`。敏感字段硬拒绝同 run-state request。`previous_run_count=0` 表示仅目标 run;`1..4` 表示目标 run 加最多对应数量的实有前序 run。服务端以目标 `run_id` 的 `run_sequence` 为锚,只读取同 session 且 `run_sequence <= target_sequence` 的窗口。
 
 coaching notice `run_state_coaching_v1` 固定披露:数据类别为脱敏降采样 run-state 摘要、不含原始 MAT/CSV;用途为送 LLM 生成陪调和未来跨轮指导;第三方 LLM 服务 DeepSeek 可能有服务端留存且不受本机 24h 控制;本机不持久化解释或上下文;范围为目标 run + 最多 `previous_run_count` 前序,实际使用轮在结果回显。
 
@@ -803,7 +803,7 @@ coaching notice `run_state_coaching_v1` 固定披露:数据类别为脱敏降采
 
 token scope 必须包含精确 capability `run_state:explain`;`run_state:write` 不蕴含 explain。dev-auth issuer 可授 `run_state:write` 或 `run_state:explain`,默认请求仍只发 write。revoke 接受任一 run-state capability 的 token。
 
-Reader 只暴露单轮 `scope + run_id` 读和 active fence 复检,不得暴露 window 读。SQLite 实现必须在 `BEGIN IMMEDIATE` 内校验 project 未过期、session active、scope/process_generation 匹配,再按 `session_id + run_id` 取目标 run;禁止全局 by-run_id 查询。
+单轮 Reader ABC 只暴露单轮 `scope + run_id` 读和 active fence 复检,不承载 window 方法。跨轮 Reader ABC 独立暴露 `scope + run_id + previous_run_count` 窗口读和 active fence 复检。SQLite 实现必须在 `BEGIN IMMEDIATE` 内校验 project 未过期、session active、scope/process_generation 匹配,先按 `session_id + run_id` 解析目标 run_sequence,再读取同 session 中 `run_sequence <= target_sequence` 的 target + 前序窗口;禁止全局 by-run_id 查询。
 
 围栏顺序固定:阶段一串行化读 → 发送前 active 复检 → provider task + `shield` deadline + 传输层 timeout → 捕获 provider 成功/失败 → finalize active 复检。finalize 发现终态一律返回 410 `bridge_run_state_session_unavailable`,不论 provider 成功、失败或超时。每 session coaching in-flight=1,槽绑定不可复用 attempt_id;TTL 和 done-callback 都 compare-and-release,陈旧 callback no-op;孤儿超过全局上限返回 429 `bridge_run_state_coaching_busy`。
 
@@ -813,13 +813,13 @@ Reader 只暴露单轮 `scope + run_id` 读和 active fence 复检,不得暴露 
 |---|---|---|---|
 | `protocol_version` | `Literal["0.3-c1"]` | 固定 | coaching 协议 |
 | `request_id` / `run_id` | UUID | echo | 请求和目标 run |
-| `context_run_ids` | array[UUID] | 1..5;519-A = `[run_id]` | 实际使用的 run |
+| `context_run_ids` | array[UUID] | 1..5;升序,target 恒在 | 实际使用的 run |
 | `status` / `mode` | `completed` / `run_state_coaching` | 固定 | 结果类别 |
 | `outcome` | `coached` / `insufficient_evidence` | 判别键 | 是否可给方向 |
 | `run_summary` | string | ≤200 | 服务端基于 run_status/convergence 确定生成 |
 | `signal_readings` | array | coached 1..8 | 每条 reading 必须引用 evidence |
 | `primary_directions` | array | coached 1..2;insufficient 为空 | 只含 action/magnitude_band/rationale |
-| `cross_round_trend` | string/null | 519-A 恒 null | 519-B 填 |
+| `cross_round_trend` | string/null | ≤300;实有 context <2 时为 null | 只描述跨轮可观测变化,不归因用户调参 |
 | `uncertainties` | array[string] | ≤6;insufficient ≥1 | 不确定性 |
 | `fallback_reason` | enum/null | insufficient 必填 | 证据不足原因 |
 | `overall_confidence` | `low` / `medium` | insufficient 恒 low | 总体置信度 |

@@ -26,6 +26,7 @@ from core.domain.bridge_run_state_machine import (
     fingerprint_run_state_request,
 )
 from core.domain.exceptions import StoreError
+from core.interfaces.coaching_cross_round_reader import CoachingCrossRoundReader
 from core.interfaces.coaching_run_state_reader import (
     CoachingRunStateMetric,
     CoachingRunStateReader,
@@ -98,7 +99,7 @@ class BridgeRunStatePersistResult:
     current_run_id: str | None
 
 
-class SqliteBridgeRunStateStore(CoachingRunStateReader):
+class SqliteBridgeRunStateStore(CoachingRunStateReader, CoachingCrossRoundReader):
     """Persist run-state sessions and immutable run snapshots in SQLite."""
 
     def __init__(
@@ -319,6 +320,63 @@ class SqliteBridgeRunStateStore(CoachingRunStateReader):
                     type(exc).__name__,
                 )
                 raise CoachingRunStateReaderUnavailableError("coaching_read_failed") from None
+
+    async def read_run_state_window_for_coaching(
+        self,
+        scope: CoachingRunStateScope,
+        run_id: UUID,
+        previous_run_count: int,
+    ) -> tuple[CoachingRunStateSnapshot, ...]:
+        try:
+            normalized = _normalize_scope(_scope_from_coaching_scope(scope))
+        except BridgeRunStateSessionRejectedError as exc:
+            raise _coaching_rejection(exc.reason) from None
+        now = _ensure_naive_utc(self._clock())
+        async with open_connection(self._db_path) as conn:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                session = await self._require_active_session(conn, normalized, now)
+                target = await self._select_run_by_run_id(conn, session.session_id, str(run_id))
+                if target is None:
+                    await conn.rollback()
+                    raise CoachingRunStateReadRejectedError("run_missing")
+                limit = previous_run_count + 1
+                cur = await conn.execute(
+                    """
+                    SELECT *
+                    FROM (
+                        SELECT *
+                        FROM bridge_run_state_run
+                        WHERE session_id=? AND run_sequence<=?
+                        ORDER BY run_sequence DESC
+                        LIMIT ?
+                    )
+                    ORDER BY run_sequence ASC
+                    """,
+                    (session.session_id, int(target["run_sequence"]), limit),
+                )
+                rows = await cur.fetchall()
+                snapshots = tuple(_coaching_snapshot_from_row(row) for row in rows)
+                if not snapshots or snapshots[-1].run_id != run_id:
+                    raise ValueError("target_missing_from_window")
+                await conn.commit()
+                return snapshots
+            except BridgeRunStateSessionRejectedError as exc:
+                await _commit_expiry_or_rollback(conn, exc)
+                raise _coaching_rejection(exc.reason) from None
+            except CoachingRunStateReadRejectedError:
+                raise
+            except (aiosqlite.Error, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                await conn.rollback()
+                logger.error(
+                    "Bridge run-state coaching window read failed: event_code={} status={} exception={}",
+                    "bridge_run_state_coaching_read",
+                    "store_error",
+                    type(exc).__name__,
+                )
+                raise CoachingRunStateReaderUnavailableError(
+                    "coaching_window_read_failed"
+                ) from None
 
     async def assert_coaching_session_active(self, scope: CoachingRunStateScope) -> None:
         try:
