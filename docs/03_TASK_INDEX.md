@@ -349,9 +349,9 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅🔍] 12/13 (paper-to-model TASK-500~503;MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅] 13/13 (paper-to-model TASK-500~503;MATLAB bridge/engine TASK-510~519)
 
-总计: 43/49
+总计: 44/49
 ```
 
 ---
@@ -378,7 +378,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-516 | MATLAB run-state 采集 + 独立 `/run-state` 通道契约(b3-1) | ✅ | Codex | 已合并 main(PR #118 / df383c8);无持久化、无 LLM、独立新通道 |
 | TASK-517 | run-state scoped-token 安全门(b3-2a / 517-A + 517-B) | ✅ | Codex | b3-2a 完整完工:517-A substrate(PR #120)+517-B enforcement(PR #121)均已合并 main;a 整张完工;b(TASK-518)可派 |
 | TASK-518 | run-state 持久化 + 跨轮状态机(b3-2b / 518-A + 518-B) | ✅ | Codex | 518-A substrate(PR #123)+ 518-B wiring(PR #124)均已合并 main:持久化写路径 + b4-only durable 回执 / 错误契约 / 24h 硬保证 / MATLAB 同意文案 |
-| TASK-519 | run-state 闭环陪调编排 + 解释(b3-2c / 519-A + 519-B) | 🔍 | Codex | 519-A 已在 main;519-B 本分支实现跨轮 reader/window + `context_run_ids` 回显 + `cross_round_trend` 可观测变化 + 不落盘/围栏不变 |
+| TASK-519 | run-state 闭环陪调编排 + 解释(b3-2c / 519-A + 519-B) | ✅ | Codex | 519-A 单轮 + 519-B 跨轮均已合并 main、b3-2c 整体完工 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
@@ -409,4 +409,4 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 ---
 
 **版本**:v3.0(delta)
-**最后更新**:2026-06-24
+**最后更新**:2026-06-26
