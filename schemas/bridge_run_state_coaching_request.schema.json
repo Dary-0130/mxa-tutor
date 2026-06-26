@@ -1,0 +1,51 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {
+      "const": "0.3-c1",
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "request_id": {
+      "format": "uuid",
+      "title": "Request Id",
+      "type": "string"
+    },
+    "session_id": {
+      "format": "uuid",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "run_id": {
+      "format": "uuid",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "run_state_coaching_consent_confirmed": {
+      "title": "Run State Coaching Consent Confirmed",
+      "type": "boolean"
+    },
+    "coaching_consent_notice_version": {
+      "const": "run_state_coaching_v1",
+      "title": "Coaching Consent Notice Version",
+      "type": "string"
+    },
+    "previous_run_count": {
+      "maximum": 4,
+      "minimum": 0,
+      "title": "Previous Run Count",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "protocol_version",
+    "request_id",
+    "session_id",
+    "run_id",
+    "run_state_coaching_consent_confirmed",
+    "coaching_consent_notice_version",
+    "previous_run_count"
+  ],
+  "title": "BridgeRunStateCoachingRequest",
+  "type": "object"
+}

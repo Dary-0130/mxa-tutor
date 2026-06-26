@@ -117,14 +117,17 @@ def test_domain_contract_does_not_import_pydantic() -> None:
     assert "pydantic" not in source.lower()
 
 
-def test_export_bridge_schemas_now_exports_fifteen_bridge_schemas() -> None:
+def test_export_bridge_schemas_now_exports_eighteen_bridge_schemas() -> None:
     bridge_paths = [path for path in OUTPUTS if path.name.startswith("bridge_")]
 
-    assert len(bridge_paths) == 15
+    assert len(bridge_paths) == 18
     assert Path("schemas/bridge_run_state_request.schema.json") in bridge_paths
     assert Path("schemas/bridge_run_state_receipt.schema.json") in bridge_paths
     assert Path("schemas/bridge_run_state_auth_error_response.schema.json") in bridge_paths
     assert Path("schemas/bridge_run_state_write_error.schema.json") in bridge_paths
+    assert Path("schemas/bridge_run_state_coaching_request.schema.json") in bridge_paths
+    assert Path("schemas/bridge_run_state_coaching_result.schema.json") in bridge_paths
+    assert Path("schemas/bridge_run_state_coaching_error.schema.json") in bridge_paths
 
 
 def test_exported_run_state_schemas_do_not_drift() -> None:

@@ -764,3 +764,85 @@ auth 错误响应使用独立 `BridgeRunStateAuthErrorResponse`:
 | 500 | `bridge_run_state_internal_error` | 反序列化/持久化不变量损坏 |
 
 OpenAPI 只在 `/run-state` operation 挂 `BridgeRunStateBearerAuth` security scheme,并声明 401/403/409/410/413/415/422/500/503;`/diagnostic` 与 `/explanation` 不挂该 security scheme。
+
+## 16. MATLAB Bridge Run-State Coaching 契约(TASK-519-A)
+
+`BridgeRunStateCoaching` 用于一次用户确认后的单轮 run-state 陪调解释。它读取 518 已持久化的脱敏、降采样 run-state 摘要,调用 LLM 生成结构化 reading/direction,但不持久化 prompt、response、解释结果或上下文。519-A 只支持目标 run 本轮;跨轮窗口留 519-B。
+
+**状态**:v0.3-c1 + TASK-519-A 单轮闭环。`/diagnostic`、`/explanation`、`/run-state` 的既有字节、schema、auth、持久化语义不变。
+
+| 同步项 | 路径 |
+|---|---|
+| Domain | `core/domain/bridge_run_state_coaching.py` |
+| Reader ABC | `core/interfaces/coaching_run_state_reader.py` |
+| Pydantic wrapper | `features/matlab_bridge/bridge_run_state_coaching_schemas.py` |
+| Private draft | `features/matlab_bridge/_run_state_coaching_draft.py`(不导出、不进 core) |
+| JSON Schema | `schemas/bridge_run_state_coaching_request.schema.json` / `schemas/bridge_run_state_coaching_result.schema.json` / `schemas/bridge_run_state_coaching_error.schema.json` |
+| Prompt | `core/prompts/run_state_coaching.yaml` |
+| Freeze/边界测试 | `tests/features/matlab_bridge/test_bridge_run_state_coaching_*` |
+
+### 16.1 BridgeRunStateCoachingRequest
+
+请求端点:`POST /api/v1/bridge/run-state/coaching`,`Content-Type: application/json`。该端点与 `/run-state` 共享 loopback / Content-Type / 32KB body guard 和 bearer 结构校验,但 capability 必须是 `run_state:explain`。
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `protocol_version` | `Literal["0.3-c1"]` | 必填 | run-state coaching 协议 |
+| `request_id` | UUID | 每尝试一个 | 请求关联 |
+| `session_id` | UUID | 必填 | scope 输入,必须与 token session 一致 |
+| `run_id` | UUID | 必填 | 目标 run |
+| `run_state_coaching_consent_confirmed` | StrictBool | 必须为 `true` | 用户确认允许 LLM 陪调 |
+| `coaching_consent_notice_version` | `Literal["run_state_coaching_v1"]` | 必填 | coaching notice 版本 |
+| `previous_run_count` | StrictInt | `0..4`;519-A 必须为 0 | 目标轮之前历史轮数 |
+
+`extra="forbid"`。敏感字段硬拒绝同 run-state request。`previous_run_count != 0` 在 519-A 返回 422 `coaching_cross_round_not_enabled`。
+
+coaching notice `run_state_coaching_v1` 固定披露:数据类别为脱敏降采样 run-state 摘要、不含原始 MAT/CSV;用途为送 LLM 生成陪调和未来跨轮指导;第三方 LLM 服务 DeepSeek 可能有服务端留存且不受本机 24h 控制;本机不持久化解释或上下文;范围为目标 run + 最多 `previous_run_count` 前序,实际使用轮在结果回显。
+
+### 16.2 Auth、Reader 与围栏
+
+token scope 必须包含精确 capability `run_state:explain`;`run_state:write` 不蕴含 explain。dev-auth issuer 可授 `run_state:write` 或 `run_state:explain`,默认请求仍只发 write。revoke 接受任一 run-state capability 的 token。
+
+Reader 只暴露单轮 `scope + run_id` 读和 active fence 复检,不得暴露 window 读。SQLite 实现必须在 `BEGIN IMMEDIATE` 内校验 project 未过期、session active、scope/process_generation 匹配,再按 `session_id + run_id` 取目标 run;禁止全局 by-run_id 查询。
+
+围栏顺序固定:阶段一串行化读 → 发送前 active 复检 → provider task + `shield` deadline + 传输层 timeout → 捕获 provider 成功/失败 → finalize active 复检。finalize 发现终态一律返回 410 `bridge_run_state_session_unavailable`,不论 provider 成功、失败或超时。每 session coaching in-flight=1,槽绑定不可复用 attempt_id;TTL 和 done-callback 都 compare-and-release,陈旧 callback no-op;孤儿超过全局上限返回 429 `bridge_run_state_coaching_busy`。
+
+### 16.3 BridgeRunStateCoachingResult
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `protocol_version` | `Literal["0.3-c1"]` | 固定 | coaching 协议 |
+| `request_id` / `run_id` | UUID | echo | 请求和目标 run |
+| `context_run_ids` | array[UUID] | 1..5;519-A = `[run_id]` | 实际使用的 run |
+| `status` / `mode` | `completed` / `run_state_coaching` | 固定 | 结果类别 |
+| `outcome` | `coached` / `insufficient_evidence` | 判别键 | 是否可给方向 |
+| `run_summary` | string | ≤200 | 服务端基于 run_status/convergence 确定生成 |
+| `signal_readings` | array | coached 1..8 | 每条 reading 必须引用 evidence |
+| `primary_directions` | array | coached 1..2;insufficient 为空 | 只含 action/magnitude_band/rationale |
+| `cross_round_trend` | string/null | 519-A 恒 null | 519-B 填 |
+| `uncertainties` | array[string] | ≤6;insufficient ≥1 | 不确定性 |
+| `fallback_reason` | enum/null | insufficient 必填 | 证据不足原因 |
+| `overall_confidence` | `low` / `medium` | insufficient 恒 low | 总体置信度 |
+| `evidence` | array | 1..16 | 服务端闭集 evidence |
+| `caveats` | array[string] | 1..3 | 服务端注入 |
+
+`SignalReading`: `reading_id` 匹配 `^r[0-9]{1,3}$`,唯一;`reading` ≤300;`is_inference=true`;`confidence` 为 low/medium;`evidence_ids` 1..6 且必须属于 result.evidence。
+
+`PrimaryDirection` / `AltDirection`: `action` 为 `increase` / `decrease` / `hold` / `compare`;`magnitude_band` 为 `slight` / `moderate` / `large`;`rationale_reading_id` 必填且必须指向 reading。不得输出 target、absolute value 或具体调参死值。
+
+`EvidenceItem`: `evidence_id` 匹配 `^e[0-9]{1,3}$`,result 内唯一;`text` ≤200;`signal_ref` ≤64。LLM draft 不产 evidence、summary、caveats 或 run/context IDs。
+
+### 16.4 错误响应
+
+auth/write 错误复用 §15.4 字面,不新增不改:`401 bridge_auth_invalid_token`;`403 bridge_auth_forbidden`;`503 bridge_auth_unavailable`;`410 bridge_run_state_session_unavailable`;`500 bridge_run_state_internal_error`;store `503 bridge_run_state_store_unavailable`。
+
+coaching provider 错误使用独立 `CoachingLLMError {error,message}`:
+
+| 触发 | HTTP | `error` |
+|---|---:|---|
+| provider 不可用 | 503 | `bridge_run_state_coaching_unavailable` |
+| provider 或服务端 deadline 超时 | 504 | `bridge_run_state_coaching_timeout` |
+| 坏 JSON / schema / validator / 隐私或死值后置扫描 | 502 | `bridge_run_state_coaching_failed` |
+| in-flight 或孤儿上限 | 429 | `bridge_run_state_coaching_busy` |
+
+429 不进入全局 `BridgeErrorResponse`。OpenAPI 的 coaching `503` 必须是 `oneOf(BridgeRunStateAuthErrorResponse, BridgeRunStateWriteErrorResponse, CoachingLLMError)`。

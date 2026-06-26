@@ -19,7 +19,6 @@ from api.dependencies import (
     get_settings,
 )
 from app.config import AppSettings
-from core.domain.bridge_auth import RUN_STATE_WRITE_CAPABILITY
 from features.matlab_bridge.bridge_auth_schemas import (
     BridgeDevAuthErrorResponse,
     BridgeDevAuthRevokeRequest,
@@ -108,9 +107,6 @@ async def revoke_dev_bridge_token(
     if not _bootstrap_allowed(settings, bootstrap_token):
         return _auth_error(403, "bridge_auth_forbidden")
     try:
-        service.verify_token(
-            request_body.access_token, required_capability=RUN_STATE_WRITE_CAPABILITY
-        )
         service.revoke_token(request_body.access_token)
     except BridgeAuthRevocationStoreUnavailableError:
         return _auth_error(503, "bridge_auth_unavailable")

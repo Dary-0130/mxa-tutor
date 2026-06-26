@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import aiosqlite
 import pytest
@@ -17,6 +17,10 @@ from adapters.storage.sqlite_bridge_run_state_store import (
     BridgeRunStateSessionRejectedError,
     BridgeRunStateStoreUnavailableError,
     SqliteBridgeRunStateStore,
+)
+from core.interfaces.coaching_run_state_reader import (
+    CoachingRunStateReadRejectedError,
+    CoachingRunStateScope,
 )
 from features.matlab_bridge.bridge_run_state_schemas import BridgeRunStateRequest
 from features.matlab_bridge.run_state_cleanup_worker import RunStateCleanupWorker
@@ -40,6 +44,20 @@ def _scope(
     generation: str = "generation-1",
 ) -> BridgeRunStateScope:
     return BridgeRunStateScope(
+        user_id="user-alpha",
+        project_id=project_id,
+        session_id=session_id,
+        process_generation=generation,
+    )
+
+
+def _coaching_scope(
+    *,
+    session_id: str = SESSION_ID,
+    project_id: str = "project-alpha",
+    generation: str = "generation-1",
+) -> CoachingRunStateScope:
+    return CoachingRunStateScope(
         user_id="user-alpha",
         project_id=project_id,
         session_id=session_id,
@@ -300,6 +318,55 @@ async def test_current_pointer_trigger_rejects_drift(initialized_db_path: str) -
             )
 
 
+async def test_coaching_reader_reads_only_scoped_run_and_rechecks_active_fence(
+    initialized_db_path: str,
+) -> None:
+    await _insert_project(initialized_db_path)
+    store = SqliteBridgeRunStateStore(initialized_db_path)
+    await store.establish_session(_scope())
+    request = _request()
+    await store.persist_run(request, _scope())
+
+    snapshot = await store.read_run_state_for_coaching(_coaching_scope(), request.run_id)
+    await store.assert_coaching_session_active(_coaching_scope())
+
+    assert snapshot.run_id == request.run_id
+    assert snapshot.run_sequence == request.run_sequence
+    assert snapshot.matlab_release == "R2026a"
+    assert snapshot.metrics[0].name == "wall_clock_elapsed"
+    assert snapshot.series[0].series_id == "simout"
+    assert not hasattr(store, "read_run_state_window_for_coaching")
+
+
+async def test_coaching_reader_is_scoped_and_does_not_read_global_run_id(
+    initialized_db_path: str,
+) -> None:
+    await _insert_project(initialized_db_path)
+    await _insert_project(initialized_db_path, project_id="project-beta")
+    store = SqliteBridgeRunStateStore(initialized_db_path)
+    await store.establish_session(_scope())
+    await store.persist_run(_request(), _scope())
+    beta_session_id = "33333333-3333-4333-8333-333333333333"
+    await store.establish_session(_scope(project_id="project-beta", session_id=beta_session_id))
+
+    with pytest.raises(CoachingRunStateReadRejectedError, match="run_missing"):
+        await store.read_run_state_for_coaching(
+            _coaching_scope(project_id="project-beta", session_id=beta_session_id),
+            UUID(RUN_ID),
+        )
+
+
+async def test_coaching_reader_missing_run_maps_to_read_rejection(
+    initialized_db_path: str,
+) -> None:
+    await _insert_project(initialized_db_path)
+    store = SqliteBridgeRunStateStore(initialized_db_path)
+    await store.establish_session(_scope())
+
+    with pytest.raises(CoachingRunStateReadRejectedError, match="run_missing"):
+        await store.read_run_state_for_coaching(_coaching_scope(), UUID(RUN_ID))
+
+
 async def test_concurrent_writes_with_two_connections_leave_single_current(
     initialized_db_path: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -381,6 +448,7 @@ def test_store_source_uses_safe_transaction_and_logging_patterns() -> None:
 async def _insert_project(
     db_path: str,
     *,
+    project_id: str = "project-alpha",
     created_at: str | None = None,
 ) -> None:
     created_at = created_at or datetime.now(UTC).replace(tzinfo=None).isoformat()
@@ -391,7 +459,7 @@ async def _insert_project(
                 project_id, name, status, created_at, updated_at
             ) VALUES (?, 'demo.zip', 'parsing', ?, ?)
             """,
-            ("project-alpha", created_at, created_at),
+            (project_id, created_at, created_at),
         )
         await conn.commit()
 

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 
 RUN_STATE_WRITE_CAPABILITY = "run_state:write"
+RUN_STATE_EXPLAIN_CAPABILITY = "run_state:explain"
+RUN_STATE_CAPABILITIES = frozenset({RUN_STATE_WRITE_CAPABILITY, RUN_STATE_EXPLAIN_CAPABILITY})
 
 
 @dataclass(frozen=True, slots=True)

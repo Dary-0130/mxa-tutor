@@ -6,7 +6,9 @@ classdef MatlabBridgeApp < handle
         DiagnosticProtocolVersion = "0.3-a"
         ExplanationProtocolVersion = "0.3-b1"
         RunStateProtocolVersion = "0.3-b4"
+        RunStateCoachingProtocolVersion = "0.3-c1"
         RunStateConsentNoticeVersion = "run_state_persistence_v1"
+        RunStateCoachingNoticeVersion = "run_state_coaching_v1"
         DiagnosticKind = "manual_error"
         AutoCapturedDiagnosticKind = "auto_captured_error"
         ClientVersion = "0.1.0"
@@ -14,6 +16,7 @@ classdef MatlabBridgeApp < handle
         NetworkErrorMessage = "连接失败,请稍后重试。"
         ExplanationErrorMessage = "解释失败,请稍后重试。"
         RunStateErrorMessage = "运行状态发送失败,请稍后重试。"
+        RunStateCoachingErrorMessage = "运行状态陪调失败,请稍后重试。"
     end
 
     properties
@@ -22,9 +25,11 @@ classdef MatlabBridgeApp < handle
         DiagnosticPostFunction function_handle = @mxa.bridge.postDiagnostic
         ExplanationPostFunction function_handle = @mxa.bridge.postExplanation
         RunStatePostFunction function_handle = @mxa.bridge.postRunState
+        RunStateCoachingPostFunction function_handle = @mxa.bridge.postRunStateCoaching
         TokenProviderFunction function_handle = @mxa.bridge.defaultTokenProvider
         TimeoutSeconds (1,1) double = 10
         ExplanationTimeoutSeconds (1,1) double = 60
+        RunStateCoachingTimeoutSeconds (1,1) double = 60
         UIFigure
         InputTextArea
         PreviewTextArea
@@ -34,6 +39,7 @@ classdef MatlabBridgeApp < handle
         LastReceipt = []
         LastExplanation = []
         LastRunStateReceipt = []
+        LastRunStateCoaching = []
         LastSanitizedText (1,1) string = ""
         LastConfirmedSnapshot (1,1) string = ""
         LastRunStateFrozenJson (1,1) string = ""
@@ -49,10 +55,12 @@ classdef MatlabBridgeApp < handle
                 options.DiagnosticPostFunction function_handle = @mxa.bridge.postDiagnostic
                 options.ExplanationPostFunction function_handle = @mxa.bridge.postExplanation
                 options.RunStatePostFunction function_handle = @mxa.bridge.postRunState
+                options.RunStateCoachingPostFunction function_handle = @mxa.bridge.postRunStateCoaching
                 options.TokenProviderFunction function_handle = @mxa.bridge.defaultTokenProvider
                 options.Visible (1,1) string {mustBeMember(options.Visible, ["on", "off"])} = "on"
                 options.TimeoutSeconds (1,1) double {mustBePositive} = 10
                 options.ExplanationTimeoutSeconds (1,1) double {mustBePositive} = 60
+                options.RunStateCoachingTimeoutSeconds (1,1) double {mustBePositive} = 60
             end
 
             mxa.bridge.validateBaseUrl(options.BaseUrl);
@@ -61,9 +69,11 @@ classdef MatlabBridgeApp < handle
             obj.DiagnosticPostFunction = options.DiagnosticPostFunction;
             obj.ExplanationPostFunction = options.ExplanationPostFunction;
             obj.RunStatePostFunction = options.RunStatePostFunction;
+            obj.RunStateCoachingPostFunction = options.RunStateCoachingPostFunction;
             obj.TokenProviderFunction = options.TokenProviderFunction;
             obj.TimeoutSeconds = options.TimeoutSeconds;
             obj.ExplanationTimeoutSeconds = options.ExplanationTimeoutSeconds;
+            obj.RunStateCoachingTimeoutSeconds = options.RunStateCoachingTimeoutSeconds;
             obj.createComponents(options.Visible);
         end
 
@@ -341,6 +351,78 @@ classdef MatlabBridgeApp < handle
             obj.setStatus("运行状态已保存。");
             submitted = true;
         end
+
+        function submitted = submitRunStateCoaching( ...
+                obj, userId, projectId, sessionId, runId, previousRunCount)
+            if ~exist("previousRunCount", "var")
+                previousRunCount = 0;
+            end
+            submitted = false;
+            obj.LastRunStateCoaching = [];
+            obj.LastConfirmedSnapshot = "";
+            obj.LastErrorIdentifier = "";
+
+            requestId = char(java.util.UUID.randomUUID);
+            payload = obj.buildRunStateCoachingPayload( ...
+                requestId, sessionId, runId, previousRunCount);
+            preview = string(jsonencode(payload, PrettyPrint=true));
+            obj.PreviewTextArea.Value = cellstr(splitlines(preview));
+
+            confirmed = false;
+            try
+                confirmed = obj.confirmSnapshot(preview, "run_state_coaching");
+            catch ME
+                obj.LastErrorIdentifier = string(ME.identifier);
+                obj.setStatus("已取消发送。");
+                obj.ResponseTextArea.Value = cellstr("已取消发送。");
+                return
+            end
+
+            if ~confirmed
+                obj.setStatus("已取消发送。");
+                obj.ResponseTextArea.Value = cellstr("已取消发送。");
+                return
+            end
+
+            obj.LastConfirmedSnapshot = preview;
+            try
+                accessToken = obj.fetchRunStateToken( ...
+                    userId, projectId, sessionId, "run_state:explain");
+                coaching = obj.RunStateCoachingPostFunction( ...
+                    obj.BaseUrl, payload, obj.RunStateCoachingTimeoutSeconds, accessToken);
+            catch ME
+                if ~obj.isUnauthorizedError(ME)
+                    obj.LastErrorIdentifier = string(ME.identifier);
+                    obj.setStatus(obj.RunStateCoachingErrorMessage);
+                    obj.ResponseTextArea.Value = cellstr(obj.RunStateCoachingErrorMessage);
+                    return
+                end
+                try
+                    accessToken = obj.fetchRunStateToken( ...
+                        userId, projectId, sessionId, "run_state:explain");
+                    coaching = obj.RunStateCoachingPostFunction( ...
+                        obj.BaseUrl, payload, obj.RunStateCoachingTimeoutSeconds, accessToken);
+                catch refreshME
+                    obj.LastErrorIdentifier = string(refreshME.identifier);
+                    obj.setStatus(obj.RunStateCoachingErrorMessage);
+                    obj.ResponseTextArea.Value = cellstr(obj.RunStateCoachingErrorMessage);
+                    return
+                end
+            end
+
+            if ~obj.isValidRunStateCoaching(coaching, payload)
+                obj.LastErrorIdentifier = "mxa:bridge:InvalidRunStateCoaching";
+                obj.setStatus("运行状态陪调校验失败。");
+                obj.ResponseTextArea.Value = cellstr("运行状态陪调校验失败。");
+                return
+            end
+
+            obj.LastRunStateCoaching = coaching;
+            obj.ResponseTextArea.Value = cellstr(splitlines( ...
+                mxa.bridge.formatRunStateCoaching(coaching)));
+            obj.setStatus("运行状态陪调完成。");
+            submitted = true;
+        end
     end
 
     methods (Access = private)
@@ -416,6 +498,18 @@ classdef MatlabBridgeApp < handle
             payload.llm_processing_consent_confirmed = true;
         end
 
+        function payload = buildRunStateCoachingPayload( ...
+                obj, requestId, sessionId, runId, previousRunCount)
+            payload = struct();
+            payload.protocol_version = char(obj.RunStateCoachingProtocolVersion);
+            payload.request_id = char(requestId);
+            payload.session_id = char(sessionId);
+            payload.run_id = char(runId);
+            payload.run_state_coaching_consent_confirmed = true;
+            payload.coaching_consent_notice_version = char(obj.RunStateCoachingNoticeVersion);
+            payload.previous_run_count = int32(previousRunCount);
+        end
+
         function valid = isValidReceipt(~, receipt, requestId)
             valid = false;
             if ~isstruct(receipt)
@@ -456,9 +550,39 @@ classdef MatlabBridgeApp < handle
                 durableTrue;
         end
 
-        function token = fetchRunStateToken(obj, userId, projectId, sessionId)
-            token = string(obj.TokenProviderFunction( ...
-                string(userId), string(projectId), string(sessionId)));
+        function valid = isValidRunStateCoaching(~, coaching, payload)
+            valid = false;
+            if ~isstruct(coaching)
+                return
+            end
+            requiredFields = [ ...
+                "protocol_version", "request_id", "run_id", "context_run_ids", ...
+                "status", "mode", "outcome", "run_summary", "caveats" ...
+            ];
+            for index = 1:numel(requiredFields)
+                if ~isfield(coaching, requiredFields(index))
+                    return
+                end
+            end
+            valid = strcmp(string(coaching.protocol_version), string(payload.protocol_version)) && ...
+                strcmp(string(coaching.request_id), string(payload.request_id)) && ...
+                strcmp(string(coaching.run_id), string(payload.run_id)) && ...
+                strcmp(string(coaching.status), "completed") && ...
+                strcmp(string(coaching.mode), "run_state_coaching");
+        end
+
+        function token = fetchRunStateToken(obj, userId, projectId, sessionId, capability)
+            if ~exist("capability", "var")
+                capability = "run_state:write";
+            end
+            providerArity = nargin(obj.TokenProviderFunction);
+            if providerArity >= 4 || providerArity < 0
+                token = string(obj.TokenProviderFunction( ...
+                    string(userId), string(projectId), string(sessionId), string(capability)));
+            else
+                token = string(obj.TokenProviderFunction( ...
+                    string(userId), string(projectId), string(sessionId)));
+            end
             if strlength(token) == 0
                 error("mxa:bridge:AuthTokenMissing", "run-state access token is required.");
             end

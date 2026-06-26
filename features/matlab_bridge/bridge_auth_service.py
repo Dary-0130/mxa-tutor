@@ -17,6 +17,7 @@ from uuid import uuid4
 from loguru import logger
 
 from core.domain.bridge_auth import (
+    RUN_STATE_CAPABILITIES,
     RUN_STATE_WRITE_CAPABILITY,
     BridgeAuthClaims,
     BridgeAuthContext,
@@ -82,7 +83,7 @@ class BridgeAuthServiceConfig:
     max_token_lifetime_seconds: int
     clock_skew_seconds: int
     process_generation: str
-    allowed_capabilities: frozenset[str] = frozenset({RUN_STATE_WRITE_CAPABILITY})
+    allowed_capabilities: frozenset[str] = RUN_STATE_CAPABILITIES
 
 
 @dataclass(frozen=True, slots=True)

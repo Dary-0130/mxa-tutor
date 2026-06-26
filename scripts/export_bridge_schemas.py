@@ -27,6 +27,11 @@ from features.matlab_bridge.bridge_explanation_schemas import (
     BridgeExplanationRequest,
     BridgeExplanationResultModel,
 )
+from features.matlab_bridge.bridge_run_state_coaching_schemas import (
+    BridgeRunStateCoachingRequest,
+    BridgeRunStateCoachingResultModel,
+    CoachingLLMError,
+)
 from features.matlab_bridge.bridge_run_state_schemas import (
     BridgeRunStateAuthErrorResponse,
     BridgeRunStateReceiptModel,
@@ -52,6 +57,11 @@ OUTPUTS = {
         BridgeRunStateAuthErrorResponse
     ),
     Path("schemas/bridge_run_state_write_error.schema.json"): BridgeRunStateWriteErrorResponse,
+    Path("schemas/bridge_run_state_coaching_request.schema.json"): BridgeRunStateCoachingRequest,
+    Path("schemas/bridge_run_state_coaching_result.schema.json"): (
+        BridgeRunStateCoachingResultModel
+    ),
+    Path("schemas/bridge_run_state_coaching_error.schema.json"): CoachingLLMError,
 }
 
 

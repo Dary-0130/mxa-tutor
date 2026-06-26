@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-BridgeDevAuthCapability = Literal["run_state:write"]
+BridgeDevAuthCapability = Literal["run_state:write", "run_state:explain"]
 BridgeDevAuthStatus = Literal["issued", "revoked"]
 BridgeDevAuthTokenType = Literal["Bearer"]
 
