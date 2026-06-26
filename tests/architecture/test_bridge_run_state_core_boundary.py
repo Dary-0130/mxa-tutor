@@ -7,6 +7,9 @@ ROOT = Path(__file__).resolve().parents[2]
 RUN_STATE_MACHINE = ROOT / "core" / "domain" / "bridge_run_state_machine.py"
 RUN_STATE_COACHING_DOMAIN = ROOT / "core" / "domain" / "bridge_run_state_coaching.py"
 RUN_STATE_COACHING_READER = ROOT / "core" / "interfaces" / "coaching_run_state_reader.py"
+RUN_STATE_COACHING_CROSS_ROUND_READER = (
+    ROOT / "core" / "interfaces" / "coaching_cross_round_reader.py"
+)
 RUN_STATE_COACHING_SERVICE = (
     ROOT / "features" / "matlab_bridge" / "bridge_run_state_coaching_service.py"
 )
@@ -33,6 +36,7 @@ def test_bridge_run_state_machine_keeps_core_boundary_pure() -> None:
 def test_bridge_run_state_coaching_domain_and_reader_keep_core_boundary_pure() -> None:
     assert _import_offenders(RUN_STATE_COACHING_DOMAIN, FORBIDDEN_PREFIXES) == []
     assert _import_offenders(RUN_STATE_COACHING_READER, FORBIDDEN_PREFIXES) == []
+    assert _import_offenders(RUN_STATE_COACHING_CROSS_ROUND_READER, FORBIDDEN_PREFIXES) == []
 
 
 def test_bridge_run_state_coaching_service_uses_reader_abc_not_adapter_private_imports() -> None:
@@ -40,7 +44,7 @@ def test_bridge_run_state_coaching_service_uses_reader_abc_not_adapter_private_i
     source = RUN_STATE_COACHING_SERVICE.read_text(encoding="utf-8")
 
     assert offenders == []
-    assert "CoachingRunStateReader" in source
+    assert "CoachingCrossRoundReader" in source
     assert "sqlite_bridge_run_state_store" not in source
     assert "_run_state_coaching_draft" in source
     assert "features.explanation" not in source

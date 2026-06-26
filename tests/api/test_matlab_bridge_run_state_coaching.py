@@ -47,11 +47,14 @@ class CoachingProvider(TextProvider):
         text: str | None = None,
         exc: Exception | None = None,
         block_event: threading.Event | None = None,
+        on_chat: Any | None = None,
     ) -> None:
         self.text = text or json.dumps(_draft_payload(), ensure_ascii=False)
         self.exc = exc
         self.block_event = block_event
+        self.on_chat = on_chat
         self.calls = 0
+        self.messages: list[LLMMessage] = []
 
     def chat(
         self,
@@ -60,10 +63,13 @@ class CoachingProvider(TextProvider):
         timeout: float = 30.0,
         max_tokens: int | None = None,
     ) -> LLMResponse:
-        _ = messages, timeout
+        _ = timeout
         assert json_mode is True
         assert max_tokens == 1024
         self.calls += 1
+        self.messages = messages
+        if self.on_chat is not None:
+            self.on_chat()
         if self.block_event is not None:
             self.block_event.wait(timeout=5)
         if self.exc is not None:
@@ -300,26 +306,115 @@ def test_valid_coaching_request_returns_evidence_bound_result_and_does_not_persi
     assert body["signal_readings"][0]["evidence_ids"][0] == body["evidence"][0]["evidence_id"]
     assert provider.calls == 1
     assert _bridge_run_row_count(tmp_path) == 1
+    assert _coaching_table_names(tmp_path) == []
     assert CURRENT_SCHEMA_VERSION == 5
 
 
-def test_coaching_rejects_previous_run_count_in_519_a(
+@pytest.mark.parametrize("previous_run_count", [1, 2, 3, 4])
+def test_coaching_allows_previous_run_count_1_to_4_and_echoes_actual_window(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    previous_run_count: int,
 ) -> None:
-    app = _create_app(monkeypatch, tmp_path, enabled=True)
-    _prepare_ready_run(tmp_path)
+    provider = CoachingProvider(
+        text=json.dumps(
+            _draft_payload(cross_round_trend="前序和目标轮的可观测信号更稳定。"),
+            ensure_ascii=False,
+        )
+    )
+    app = _create_app(monkeypatch, tmp_path, enabled=True, provider=provider)
+    previous_run_id = str(uuid4())
+    asyncio.run(_prepare_project_and_session(tmp_path))
+    asyncio.run(
+        _persist_run(
+            tmp_path,
+            _run_state_request(
+                request_id=str(uuid4()),
+                run_id=previous_run_id,
+                run_sequence=1,
+            ),
+        )
+    )
+    asyncio.run(
+        _persist_run(
+            tmp_path,
+            _run_state_request(request_id=str(uuid4()), run_id=RUN_ID, run_sequence=2),
+        )
+    )
 
     response = _request(
         app,
         "POST",
         COACHING_PATH,
-        json=_coaching_payload(previous_run_count=1),
+        json=_coaching_payload(previous_run_count=previous_run_count),
         headers=_auth_headers(),
     )
 
-    assert response.status_code == 422
-    assert response.json()["error"] == "coaching_cross_round_not_enabled"
+    assert response.status_code == 200
+    body = response.json()
+    assert body["context_run_ids"] == [previous_run_id, RUN_ID]
+    assert body["cross_round_trend"] == "前序和目标轮的可观测信号更稳定。"
+    assert provider.calls == 1
+    assert _bridge_run_row_count(tmp_path) == 2
+    payload = _provider_context_payload(provider)
+    assert [item["run_id"] for item in payload["runs"]] == [previous_run_id, RUN_ID]
+    assert "delta" not in _json_keys(payload)
+    assert "parameter_changes" not in _json_keys(payload)
+    assert "user_adjustments" not in _json_keys(payload)
+
+
+def test_coaching_future_run_written_after_phase_one_does_not_change_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    previous_run_id = str(uuid4())
+    future_run_id = str(uuid4())
+
+    def persist_future_run() -> None:
+        asyncio.run(
+            _persist_run(
+                tmp_path,
+                _run_state_request(
+                    request_id=str(uuid4()),
+                    run_id=future_run_id,
+                    run_sequence=3,
+                ),
+            )
+        )
+
+    provider = CoachingProvider(on_chat=persist_future_run)
+    app = _create_app(monkeypatch, tmp_path, enabled=True, provider=provider)
+    asyncio.run(_prepare_project_and_session(tmp_path))
+    asyncio.run(
+        _persist_run(
+            tmp_path,
+            _run_state_request(
+                request_id=str(uuid4()),
+                run_id=previous_run_id,
+                run_sequence=1,
+            ),
+        )
+    )
+    asyncio.run(
+        _persist_run(
+            tmp_path,
+            _run_state_request(request_id=str(uuid4()), run_id=RUN_ID, run_sequence=2),
+        )
+    )
+
+    response = _request(
+        app,
+        "POST",
+        COACHING_PATH,
+        json=_coaching_payload(previous_run_count=4),
+        headers=_auth_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["context_run_ids"] == [previous_run_id, RUN_ID]
+    assert future_run_id not in body["context_run_ids"]
+    assert _bridge_run_row_count(tmp_path) == 3
 
 
 def test_coaching_requires_explain_capability_and_write_does_not_imply_explain(
@@ -339,6 +434,37 @@ def test_coaching_requires_explain_capability_and_write_does_not_imply_explain(
 
     assert response.status_code == 403
     assert response.json()["error"] == "bridge_auth_forbidden"
+
+
+def test_cross_round_coaching_still_requires_consent_and_explain_capability(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    app = _create_app(monkeypatch, tmp_path, enabled=True)
+    _prepare_ready_run(tmp_path)
+
+    write_token = _request(
+        app,
+        "POST",
+        COACHING_PATH,
+        json=_coaching_payload(previous_run_count=1),
+        headers=_auth_headers(capability="run_state:write"),
+    )
+    missing_consent = _request(
+        app,
+        "POST",
+        COACHING_PATH,
+        json=_coaching_payload(
+            previous_run_count=1,
+            run_state_coaching_consent_confirmed=False,
+        ),
+        headers=_auth_headers(),
+    )
+
+    assert write_token.status_code == 403
+    assert write_token.json()["error"] == "bridge_auth_forbidden"
+    assert missing_consent.status_code == 422
+    assert missing_consent.json()["error"] == "validation_error"
 
 
 def test_coaching_reader_uses_scope_and_does_not_read_global_run_id(
@@ -511,11 +637,25 @@ async def test_coaching_in_flight_busy_and_finalize_terminal_410(
     provider = CoachingProvider(block_event=release_provider)
     app = _create_app(monkeypatch, tmp_path, enabled=True, provider=provider)
     await _prepare_project_and_session(tmp_path)
-    await _persist_run(tmp_path)
+    previous_run_id = str(uuid4())
+    await _persist_run(
+        tmp_path,
+        _run_state_request(request_id=str(uuid4()), run_id=previous_run_id, run_sequence=1),
+    )
+    await _persist_run(
+        tmp_path,
+        _run_state_request(request_id=str(uuid4()), run_id=RUN_ID, run_sequence=2),
+    )
     headers = _auth_headers()
 
     first = asyncio.create_task(
-        _request_async(app, "POST", COACHING_PATH, json=_coaching_payload(), headers=headers)
+        _request_async(
+            app,
+            "POST",
+            COACHING_PATH,
+            json=_coaching_payload(previous_run_count=1),
+            headers=headers,
+        )
     )
     await _wait_until(lambda: provider.calls == 1)
 
@@ -523,7 +663,7 @@ async def test_coaching_in_flight_busy_and_finalize_terminal_410(
         app,
         "POST",
         COACHING_PATH,
-        json=_coaching_payload(request_id=str(uuid4())),
+        json=_coaching_payload(request_id=str(uuid4()), previous_run_count=1),
         headers=headers,
     )
     await SqliteBridgeRunStateStore(str(tmp_path / "mxa.db")).end_session(_scope())
@@ -534,6 +674,7 @@ async def test_coaching_in_flight_busy_and_finalize_terminal_410(
     assert busy.json()["error"] == "bridge_run_state_coaching_busy"
     assert first_response.status_code == 410
     assert first_response.json()["error"] == "bridge_run_state_session_unavailable"
+    assert "context_run_ids" not in first_response.json()
 
 
 def test_coaching_openapi_declares_new_path_and_503_oneof(
@@ -573,6 +714,7 @@ def test_coaching_openapi_declares_new_path_and_503_oneof(
 def _draft_payload(
     *,
     reading: str = "wall_clock_elapsed 和 simout 摘要说明本轮有可观察信号。",
+    cross_round_trend: str | None = None,
 ) -> dict[str, object]:
     return {
         "outcome": "coached",
@@ -599,7 +741,7 @@ def _draft_payload(
                 ],
             }
         ],
-        "cross_round_trend": None,
+        "cross_round_trend": cross_round_trend,
         "uncertainties": [],
         "fallback_reason": None,
     }
@@ -614,6 +756,46 @@ def _bridge_run_row_count(tmp_path: Path) -> int:
         return int(row["count"])
 
     return asyncio.run(count())
+
+
+def _provider_context_payload(provider: CoachingProvider) -> dict[str, object]:
+    content = provider.messages[1].content
+    start_marker = "```json typed-data:run_state_observations"
+    start = content.index(start_marker) + len(start_marker)
+    end = content.index("```", start)
+    return json.loads(content[start:end].strip())
+
+
+def _coaching_table_names(tmp_path: Path) -> list[str]:
+    async def names() -> list[str]:
+        async with open_connection(str(tmp_path / "mxa.db")) as conn:
+            rows = await (
+                await conn.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type='table' AND name LIKE '%coaching%'
+                    ORDER BY name
+                    """
+                )
+            ).fetchall()
+        return [str(row["name"]) for row in rows]
+
+    return asyncio.run(names())
+
+
+def _json_keys(value: object) -> set[str]:
+    if isinstance(value, dict):
+        keys = {str(key) for key in value}
+        for nested in value.values():
+            keys.update(_json_keys(nested))
+        return keys
+    if isinstance(value, list):
+        keys: set[str] = set()
+        for nested in value:
+            keys.update(_json_keys(nested))
+        return keys
+    return set()
 
 
 async def _table_row_count(tmp_path: Path, table_name: str) -> int:

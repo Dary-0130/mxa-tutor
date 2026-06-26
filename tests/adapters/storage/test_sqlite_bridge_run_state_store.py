@@ -19,6 +19,7 @@ from adapters.storage.sqlite_bridge_run_state_store import (
     SqliteBridgeRunStateStore,
 )
 from core.interfaces.coaching_run_state_reader import (
+    CoachingRunStateReader,
     CoachingRunStateReadRejectedError,
     CoachingRunStateScope,
 )
@@ -335,7 +336,47 @@ async def test_coaching_reader_reads_only_scoped_run_and_rechecks_active_fence(
     assert snapshot.matlab_release == "R2026a"
     assert snapshot.metrics[0].name == "wall_clock_elapsed"
     assert snapshot.series[0].series_id == "simout"
-    assert not hasattr(store, "read_run_state_window_for_coaching")
+    assert not hasattr(CoachingRunStateReader, "read_run_state_window_for_coaching")
+
+
+async def test_coaching_cross_round_reader_anchors_target_and_returns_bounded_ascending_window(
+    initialized_db_path: str,
+) -> None:
+    await _insert_project(initialized_db_path)
+    store = SqliteBridgeRunStateStore(initialized_db_path)
+    await store.establish_session(_scope())
+    requests = [_request(run_id=str(uuid4()), run_sequence=sequence) for sequence in range(1, 6)]
+    for request in requests:
+        await store.persist_run(request, _scope())
+
+    window = await store.read_run_state_window_for_coaching(
+        _coaching_scope(),
+        requests[3].run_id,
+        previous_run_count=3,
+    )
+
+    assert [snapshot.run_id for snapshot in window] == [request.run_id for request in requests[:4]]
+    assert [snapshot.run_sequence for snapshot in window] == [1, 2, 3, 4]
+    assert requests[4].run_id not in {snapshot.run_id for snapshot in window}
+
+
+async def test_coaching_cross_round_reader_returns_only_target_when_no_predecessors(
+    initialized_db_path: str,
+) -> None:
+    await _insert_project(initialized_db_path)
+    store = SqliteBridgeRunStateStore(initialized_db_path)
+    await store.establish_session(_scope())
+    request = _request(run_sequence=1)
+    await store.persist_run(request, _scope())
+
+    window = await store.read_run_state_window_for_coaching(
+        _coaching_scope(),
+        request.run_id,
+        previous_run_count=4,
+    )
+
+    assert [snapshot.run_id for snapshot in window] == [request.run_id]
+    assert [snapshot.run_sequence for snapshot in window] == [1]
 
 
 async def test_coaching_reader_is_scoped_and_does_not_read_global_run_id(
