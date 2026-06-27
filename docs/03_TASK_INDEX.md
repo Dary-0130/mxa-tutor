@@ -349,9 +349,9 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅] 13/13 (paper-to-model TASK-500~503;MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅] 14/14 (paper-to-model TASK-500~504;MATLAB bridge/engine TASK-510~519)
 
-总计: 44/49
+总计: 45/49
 ```
 
 ---
@@ -370,6 +370,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-501 | PaperPlanService 与资料入口实现起点 | ✅ | Codex | TASK-500 已合并,可派单 |
 | TASK-502 | PaperPlanService + 4 prompt yaml + Python helper + MissingDetector + UserSupplyMerger | ✅ | Codex | 已合并 main 2026-06-18 PR #99,转 TASK-503 |
 | TASK-503 | TuningSuggestion + 持久化 PaperBundleStore + GET 路由 + D 根因方向 A + R6 整体门槛 5 解封 | ✅ | Codex | v0.2.4 + decision 25 验收通过，整体门槛 5 解封 |
+| TASK-504 | 资料入口前端页(论文复现阅读工作台,paper-to-model v0.2 前端) | ✅ | Codex | 已合并 main(PR #129 / 5bc7c17);上传论文 → 纵向阅读工作台(摘要/子系统划分/建模步骤/参数对照带来源/调参建议);复用现有设计系统,仅消费现有后端数据,无后端改动 |
 | TASK-510 | MATLAB Add-on 连接桥 spike(v0.3-a) | ✅ | Codex | 已合并 main(PR #108 / merge 2026-06-21);只证传输桥,不接 Engine;C 类人工补测由 PM 完成 |
 | TASK-511 | MATLAB bridge LLM 报错解释(v0.3-b b1) | ✅ | Codex | 已合并 main(PR #111 / 53e7861);机制 + 确定性护栏验收通过,质量评估留 seam |
 | TASK-512 | MATLAB Engine substrate gate(v0.3-b b2-0) | ✅ | Codex | 已合并 main(PR #110 / merge 2026-06-22);只证独立 Engine substrate,不接 bridge runtime |
@@ -409,4 +410,4 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 ---
 
 **版本**:v3.0(delta)
-**最后更新**:2026-06-26
+**最后更新**:2026-06-27
