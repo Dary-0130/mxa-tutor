@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer, useRef } from "react";
+import { type KeyboardEvent, useCallback, useMemo, useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UploadScene } from "../components/scene/UploadScene";
 import { apiUploadTask } from "../lib/api";
@@ -8,6 +8,18 @@ import { UploadStatusCard } from "./upload/UploadStatusCard";
 import { useParseStatusPolling } from "./upload/useParseStatusPolling";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+type EntryTabKey = "engineering" | "paper";
+
+const ENTRY_TAB_IDS: Record<EntryTabKey, string> = {
+  engineering: "home-entry-tab-engineering",
+  paper: "home-entry-tab-paper",
+};
+
+const ENTRY_PANEL_IDS: Record<EntryTabKey, string> = {
+  engineering: "home-entry-panel-engineering",
+  paper: "home-entry-panel-paper",
+};
 
 type UploadState =
   | { status: "idle"; file: null; progress: number; projectId: null; errorCode?: string }
@@ -68,7 +80,10 @@ function validateZip(file: File): string | null {
 
 export function UploadPage() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [selectedTab, setSelectedTab] = useState<EntryTabKey>("engineering");
   const abortRef = useRef<(() => void) | null>(null);
+  const engineeringTabRef = useRef<HTMLButtonElement | null>(null);
+  const paperTabRef = useRef<HTMLButtonElement | null>(null);
   const navigate = useNavigate();
 
   const uploadCallbacks = useMemo(
@@ -118,6 +133,50 @@ export function UploadPage() {
   const sceneState = state.status === "dragging" ? "dragging" : state.status;
   const errorMessage = state.status === "failed" ? resolveErrorMessage(state.errorCode) : undefined;
   const busy = state.status === "uploading" || state.status === "parsing";
+  const activeTab: EntryTabKey = busy ? "engineering" : selectedTab;
+
+  const activateTab = useCallback(
+    (tab: EntryTabKey) => {
+      if (busy && tab === "paper") {
+        return;
+      }
+      setSelectedTab(tab);
+    },
+    [busy],
+  );
+
+  const focusTab = useCallback((tab: EntryTabKey) => {
+    if (tab === "engineering") {
+      engineeringTabRef.current?.focus();
+      return;
+    }
+    paperTabRef.current?.focus();
+  }, []);
+
+  const handleTabKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, currentTab: EntryTabKey) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activateTab(currentTab);
+        return;
+      }
+
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+        return;
+      }
+
+      event.preventDefault();
+      const nextTab: EntryTabKey = currentTab === "engineering" ? "paper" : "engineering";
+      if (busy && nextTab === "paper") {
+        setSelectedTab("engineering");
+        focusTab("engineering");
+        return;
+      }
+      setSelectedTab(nextTab);
+      focusTab(nextTab);
+    },
+    [activateTab, busy, focusTab],
+  );
 
   return (
     <main className="upload-page">
@@ -125,36 +184,84 @@ export function UploadPage() {
       <div className="upload-corner-tag" aria-hidden="true">
         MATLAB · SIMULINK
       </div>
-      <section className="upload-content" aria-label="上传 MATLAB 工程">
+      <section className="upload-content" aria-label="首页入口">
         <div className="upload-copy">
           <h1 className="upload-hero-brand">MXA TUTOR</h1>
-          <p className="upload-hero-tagline">工程导览 + 资料复现路线图</p>
-          <div className="upload-hero-note" aria-label="资料入口口径">
-            <p>资料入口提供模型搭建副驾与参数对应说明。</p>
-            <p>
-              稳交付:摘要、公式 / 参数、物理含义、模型搭建路线图;尽力交付:.m 脚本骨架;不承诺:打开即跑的完整 .slx 成品、运行结果正确或最优调参。
-            </p>
-            <p>
-              领域限 control_system / signal_processing / power_electronics / communication / motor_control / new_energy;general 资料入口拒绝,图片参数需用户补充。
-            </p>
-          </div>
+          <p className="upload-hero-tagline">工程导览 / 资料复现</p>
         </div>
-        {busy && state.file ? (
-          <UploadStatusCard
-            file={state.file}
-            phase={state.status}
-            progress={state.progress}
-            onCancel={state.status === "uploading" ? () => abortRef.current?.() : undefined}
-          />
-        ) : (
-          <UploadDropzone
-            disabled={busy}
-            dragging={state.status === "dragging"}
-            errorMessage={errorMessage}
-            onDragState={(dragging) => dispatch({ type: "DRAG", dragging })}
-            onFile={startUpload}
-          />
-        )}
+        <div className="upload-entry-shell">
+          <div className="upload-entry-tabs" role="tablist" aria-label="首页入口">
+            <button
+              ref={engineeringTabRef}
+              id={ENTRY_TAB_IDS.engineering}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "engineering"}
+              aria-controls={ENTRY_PANEL_IDS.engineering}
+              className={`upload-entry-tab${activeTab === "engineering" ? " upload-entry-tab--active" : ""}`}
+              tabIndex={activeTab === "engineering" ? 0 : -1}
+              onClick={() => activateTab("engineering")}
+              onKeyDown={(event) => handleTabKeyDown(event, "engineering")}
+            >
+              工程导览
+            </button>
+            <button
+              ref={paperTabRef}
+              id={ENTRY_TAB_IDS.paper}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "paper"}
+              aria-controls={ENTRY_PANEL_IDS.paper}
+              aria-disabled={busy ? "true" : undefined}
+              className={`upload-entry-tab${activeTab === "paper" ? " upload-entry-tab--active" : ""}`}
+              tabIndex={activeTab === "paper" ? 0 : -1}
+              onClick={() => activateTab("paper")}
+              onKeyDown={(event) => handleTabKeyDown(event, "paper")}
+            >
+              资料复现
+            </button>
+          </div>
+
+          {activeTab === "engineering" ? (
+            <div
+              id={ENTRY_PANEL_IDS.engineering}
+              className="upload-entry-panel"
+              role="tabpanel"
+              aria-labelledby={ENTRY_TAB_IDS.engineering}
+            >
+              {busy && state.file ? (
+                <UploadStatusCard
+                  file={state.file}
+                  phase={state.status}
+                  progress={state.progress}
+                  onCancel={state.status === "uploading" ? () => abortRef.current?.() : undefined}
+                />
+              ) : (
+                <UploadDropzone
+                  disabled={busy}
+                  dragging={state.status === "dragging"}
+                  errorMessage={errorMessage}
+                  onDragState={(dragging) => dispatch({ type: "DRAG", dragging })}
+                  onFile={startUpload}
+                />
+              )}
+            </div>
+          ) : (
+            <div
+              id={ENTRY_PANEL_IDS.paper}
+              className="upload-entry-panel"
+              role="tabpanel"
+              aria-labelledby={ENTRY_TAB_IDS.paper}
+            >
+              <div className="upload-paper-entry">
+                <p>上传论文 / 报告后，系统将生成复现路线图、参数对应说明与调参方向。该入口独立于工程 .zip 解析流程。</p>
+                <button type="button" className="text-command" onClick={() => navigate("/paper")}>
+                  进入资料复现 →
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
     </main>
   );

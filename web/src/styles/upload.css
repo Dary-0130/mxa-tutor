@@ -10,7 +10,7 @@
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: minmax(320px, 1fr) 460px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 460px);
   gap: clamp(32px, 6vw, 104px);
   align-items: center;
   width: min(1180px, calc(100vw - 96px));
@@ -35,19 +35,6 @@
   letter-spacing: 0;
 }
 
-.upload-hero-note {
-  max-width: 620px;
-  margin-top: 22px;
-  color: var(--color-cold);
-  font-size: 0.96rem;
-  font-weight: 650;
-  line-height: 1.7;
-}
-
-.upload-hero-note p {
-  margin: 8px 0 0;
-}
-
 .upload-corner-tag {
   position: fixed;
   top: 28px;
@@ -70,6 +57,76 @@
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.28);
+}
+
+.upload-entry-shell {
+  display: grid;
+  width: min(100%, 460px);
+  gap: 12px;
+}
+
+.upload-entry-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 460px);
+  border: 1px solid color-mix(in srgb, var(--color-rebar) 72%, transparent);
+  background: color-mix(in srgb, var(--color-formwork) 72%, transparent);
+}
+
+.upload-entry-tab {
+  min-height: 48px;
+  border: 0;
+  background: transparent;
+  color: var(--color-cold);
+  cursor: pointer;
+  font: 850 0.82rem var(--font-mono);
+  letter-spacing: 0;
+  text-align: center;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.upload-entry-tab + .upload-entry-tab {
+  border-left: 1px solid color-mix(in srgb, var(--color-rebar) 72%, transparent);
+}
+
+.upload-entry-tab--active {
+  color: var(--color-ite);
+  background: color-mix(in srgb, var(--color-signal) 18%, transparent);
+  box-shadow: inset 0 -3px 0 var(--color-signal);
+}
+
+.upload-entry-tab[aria-disabled="true"] {
+  color: var(--color-rebar);
+  cursor: not-allowed;
+}
+
+.upload-entry-tab:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 3px;
+}
+
+.upload-entry-panel {
+  width: min(100%, 460px);
+  min-height: 260px;
+}
+
+.upload-paper-entry {
+  display: grid;
+  align-content: center;
+  gap: 24px;
+  min-height: 260px;
+  padding: 30px;
+  border: 1px solid color-mix(in srgb, var(--color-ite) 22%, transparent);
+  background: color-mix(in srgb, var(--color-concrete) 58%, transparent);
+  box-shadow: 0 28px 90px color-mix(in srgb, var(--color-concrete) 40%, transparent);
+}
+
+.upload-paper-entry p {
+  margin: 0;
+  color: var(--color-cold);
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.8;
 }
 
 .upload-dropzone {
