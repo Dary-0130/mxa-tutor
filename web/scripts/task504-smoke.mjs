@@ -27,7 +27,7 @@ const parameterTable = readFileSync(join(root, files.parameterTable), "utf8");
 if (!parameterTable.includes('row.kind === "missing" && !row.user_supplied_value')) {
   throw new Error("Missing unresolved prompt three-state guard");
 }
-for (const text of ["可填入数值,亦可留空", "各参数已标注来源。缺失参数可选填,留空不影响其余建模步骤。"]) {
+for (const text of ["数值(可选)", "各参数已标注来源。缺失参数可选填,留空不影响其余建模步骤。"]) {
   if (!parameterTable.includes(text)) {
     throw new Error(`Missing parameter table text: ${text}`);
   }

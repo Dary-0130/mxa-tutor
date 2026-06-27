@@ -109,7 +109,6 @@ export function PaperUploadPage() {
         <div className="paper-upload-copy">
           <p className="section-kicker">PAPER TO MODEL</p>
           <h1>资料入口</h1>
-          <p className="paper-copy">上传论文或报告后,生成可对照 MATLAB / Simulink 搭建的阅读工作台。</p>
         </div>
         {busy && state.file ? (
           <div className="upload-status-card paper-upload-status" aria-live="polite">

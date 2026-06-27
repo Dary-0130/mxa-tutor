@@ -121,6 +121,7 @@ export function ParameterTable({
   );
   const { status, submit } = useUserSupply({ paperId, onPlanUpdate });
   const message = statusMessage(status);
+  const hasPendingPrompts = remainingMissingPrompts.length > 0;
 
   const updateDraft = (promptId: string, field: "value" | "unit", value: string) => {
     setDrafts((current) => ({
@@ -196,7 +197,7 @@ export function ParameterTable({
                   <label className="paper-missing-input">
                     <input
                       value={draft?.value ?? ""}
-                      placeholder="可填入数值,亦可留空"
+                      placeholder="数值(可选)"
                       onChange={(event) => updateDraft(prompt.prompt_id, "value", event.target.value)}
                     />
                     <input
@@ -207,7 +208,7 @@ export function ParameterTable({
                     <small>{formatEvidence(prompt.paper_reference)}</small>
                   </label>
                 ) : (
-                  <span className="paper-secondary">暂无待补充参数。</span>
+                  null
                 )}
               </span>
             </div>
@@ -223,7 +224,9 @@ export function ParameterTable({
         >
           提交补充
         </button>
-        <span className="paper-secondary">{message ?? "暂无待补充参数。"}</span>
+        {message || !hasPendingPrompts ? (
+          <span className="paper-secondary">{message ?? "暂无待补充参数。"}</span>
+        ) : null}
       </div>
       <GlassCard className="paper-readable-card paper-plan-evidence">
         <h3>路线图整体依据</h3>

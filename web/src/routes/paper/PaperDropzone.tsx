@@ -71,8 +71,8 @@ export function PaperDropzone({
         onChange={(event) => handleFiles(event.target.files)}
       />
       <span className="upload-dropzone__mark">PDF</span>
-      <strong>拖拽论文文件</strong>
-      <span>或点击选择 .pdf / .docx 文件</span>
+      <strong>上传论文文件</strong>
+      <span>支持 PDF、Word(.pdf / .docx)</span>
       {errorMessage ? <p className="upload-dropzone__error">{errorMessage}</p> : null}
     </div>
   );
