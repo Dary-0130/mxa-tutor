@@ -2,6 +2,7 @@
 @import "./scene.css";
 @import "./upload.css";
 @import "./overview.css";
+@import "./paper.css";
 
 :root {
   --color-concrete: #2c2c2c;

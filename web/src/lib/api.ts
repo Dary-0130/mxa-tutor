@@ -86,13 +86,13 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function apiUploadTask(
+export function apiUploadTask<T = UploadResponse>(
   path: string,
   file: File,
   onProgress?: (percent: number) => void,
-): UploadTask<UploadResponse> {
+): UploadTask<T> {
   const xhr = new XMLHttpRequest();
-  const promise = new Promise<UploadResponse>((resolve, reject) => {
+  const promise = new Promise<T>((resolve, reject) => {
     const formData = new FormData();
     formData.append("file", file);
 
@@ -105,7 +105,7 @@ export function apiUploadTask(
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(xhr.response as UploadResponse);
+        resolve(xhr.response as T);
         return;
       }
       const body = xhr.response as Partial<ApiError> | null;
@@ -127,10 +127,10 @@ export function apiUploadTask(
   };
 }
 
-export async function apiUpload(
+export async function apiUpload<T = UploadResponse>(
   path: string,
   file: File,
   onProgress?: (percent: number) => void,
-): Promise<UploadResponse> {
-  return apiUploadTask(path, file, onProgress).promise;
+): Promise<T> {
+  return apiUploadTask<T>(path, file, onProgress).promise;
 }
