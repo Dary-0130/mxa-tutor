@@ -448,6 +448,7 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 | `subsystem_breakdown` | array[string] | 3-10 步 | 子系统拆分建议 |
 | `m_script_skeleton` | string \| null | 可空 | 尽力交付的 `.m` 骨架 |
 | `evidence` | array[`PaperEvidenceEntry`] | 至少 1 个 | 路线图证据 |
+| `build_steps` | array[`ModelBuildStep`] \| null | `null` 或至少 1 个;`[]` 非法 | 结构化人工建模步骤;TASK-507-A 阶段恒为 `null`,TASK-507-B 才开始非空生成 |
 
 子项草稿:
 
@@ -455,14 +456,24 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 |---|---|
 | `BlockRecommendation` | `block_type` / `purpose` / `paper_reference` |
 | `ParameterMapping` | `paper_param_name` / `model_param_name` / `value` / `unit` / `source` |
+| `StepBlockRef` | `block_ref_id` / `block_type` / `library_path` / `purpose` / `paper_reference` |
+| `ParameterMappingRef` | `paper_param_name` / `model_param_name` |
+| `ConnectionHint` | `from_block_ref` / `from_port` / `to_block_ref` / `to_port` / `signal_meaning` |
+| `ConfigurationHint` | `target` / `setting_name` / `instruction` / `evidence` |
+| `ModelBuildStep` | `step_id` / `title` / `intent` / `block_refs` / `parameter_refs` / `connection_hints` / `configuration_hints` / `depends_on` / `evidence` / `display_text` |
 
 **子项约束补充**(v0.3.2 微补丁,基于样本包实测驱动):
 
 - `ParameterMapping.unit` 允许为 `null`:配置参数如接线方式 `Yn / d11` / 模式选择 / 布尔配置等无物理单位的情况(实测样本包 `expected_updated_plan.json` 第 19 项变压器接线为此场景)
 - `ParameterMapping.value` 类型为 `string`(允许带单位文字描述,不强制 numeric)
 - `EquationEntry.equation_text` / `PaperEvidenceEntry.excerpt` 等已含字面约束的字段保持不变
+- `StepBlockRef.paper_reference` 允许为 `null`:库选型或工程常识类 block hint 可无论文证据,不得伪造 excerpt
+- `ParameterMappingRef` 通过 `paper_param_name` + `model_param_name` 复合键引用既有 `parameter_mapping`,本阶段不新增 mapping ID
+- `ConnectionHint` 只表达人工连线提示,端口字段可空,不是可执行 Simulink 端口契约
+- `ConfigurationHint.instruction` 承载求解器 / powergui / 仿真设置等配置类步骤,不得写入模型参数值
+- `ModelBuildStep.depends_on` 只引用前序 `step_id`;`display_text` 在 TASK-507-B 由 assembler 派生,TASK-507-A 只声明字段
 
-**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)
+**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)
 
 ### 12.6 TuningSuggestion schema
 

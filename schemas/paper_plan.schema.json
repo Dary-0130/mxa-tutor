@@ -25,6 +25,108 @@
       "title": "BlockRecommendationModel",
       "type": "object"
     },
+    "ConfigurationHintModel": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "setting_name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Setting Name"
+        },
+        "instruction": {
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/PaperEvidenceEntryModel"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "target",
+        "setting_name",
+        "instruction",
+        "evidence"
+      ],
+      "title": "ConfigurationHintModel",
+      "type": "object"
+    },
+    "ConnectionHintModel": {
+      "additionalProperties": false,
+      "properties": {
+        "from_block_ref": {
+          "minLength": 1,
+          "title": "From Block Ref",
+          "type": "string"
+        },
+        "from_port": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "From Port"
+        },
+        "to_block_ref": {
+          "minLength": 1,
+          "title": "To Block Ref",
+          "type": "string"
+        },
+        "to_port": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "To Port"
+        },
+        "signal_meaning": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Signal Meaning"
+        }
+      },
+      "required": [
+        "from_block_ref",
+        "from_port",
+        "to_block_ref",
+        "to_port",
+        "signal_meaning"
+      ],
+      "title": "ConnectionHintModel",
+      "type": "object"
+    },
     "EvidenceSource": {
       "description": "Source marker for paper-to-model evidence.",
       "enum": [
@@ -33,6 +135,87 @@
       ],
       "title": "EvidenceSource",
       "type": "string"
+    },
+    "ModelBuildStepModel": {
+      "additionalProperties": false,
+      "properties": {
+        "step_id": {
+          "minLength": 1,
+          "title": "Step Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "intent": {
+          "minLength": 1,
+          "title": "Intent",
+          "type": "string"
+        },
+        "block_refs": {
+          "items": {
+            "$ref": "#/$defs/StepBlockRefModel"
+          },
+          "title": "Block Refs",
+          "type": "array"
+        },
+        "parameter_refs": {
+          "items": {
+            "$ref": "#/$defs/ParameterMappingRefModel"
+          },
+          "title": "Parameter Refs",
+          "type": "array"
+        },
+        "connection_hints": {
+          "items": {
+            "$ref": "#/$defs/ConnectionHintModel"
+          },
+          "title": "Connection Hints",
+          "type": "array"
+        },
+        "configuration_hints": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationHintModel"
+          },
+          "title": "Configuration Hints",
+          "type": "array"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/PaperEvidenceEntryModel"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "display_text": {
+          "minLength": 1,
+          "title": "Display Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_id",
+        "title",
+        "intent",
+        "block_refs",
+        "parameter_refs",
+        "connection_hints",
+        "configuration_hints",
+        "depends_on",
+        "evidence",
+        "display_text"
+      ],
+      "title": "ModelBuildStepModel",
+      "type": "object"
     },
     "PaperEvidenceEntryModel": {
       "additionalProperties": false,
@@ -156,6 +339,78 @@
       ],
       "title": "ParameterMappingModel",
       "type": "object"
+    },
+    "ParameterMappingRefModel": {
+      "additionalProperties": false,
+      "properties": {
+        "paper_param_name": {
+          "minLength": 1,
+          "title": "Paper Param Name",
+          "type": "string"
+        },
+        "model_param_name": {
+          "minLength": 1,
+          "title": "Model Param Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "paper_param_name",
+        "model_param_name"
+      ],
+      "title": "ParameterMappingRefModel",
+      "type": "object"
+    },
+    "StepBlockRefModel": {
+      "additionalProperties": false,
+      "properties": {
+        "block_ref_id": {
+          "minLength": 1,
+          "title": "Block Ref Id",
+          "type": "string"
+        },
+        "block_type": {
+          "minLength": 1,
+          "title": "Block Type",
+          "type": "string"
+        },
+        "library_path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Library Path"
+        },
+        "purpose": {
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "paper_reference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PaperEvidenceEntryModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "block_ref_id",
+        "block_type",
+        "library_path",
+        "purpose",
+        "paper_reference"
+      ],
+      "title": "StepBlockRefModel",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -218,6 +473,22 @@
       "minItems": 1,
       "title": "Evidence",
       "type": "array"
+    },
+    "build_steps": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/ModelBuildStepModel"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Build Steps"
     }
   },
   "required": [

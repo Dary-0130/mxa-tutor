@@ -41,7 +41,7 @@
 
 ### 3.1 `golden/expected_paper_spec.json`
 
-含 9 个字段:
+含 10 个字段:
 - `paper_title`:论文标题(从剥离版第一段抽取)
 - `paper_type`:`"report"`(学生实验报告)
 - `domain`:`"motor_control"`(资料入口 6 类之一)
@@ -64,6 +64,7 @@
 - `subsystem_breakdown`:8 步搭建流程
 - `m_script_skeleton`:基于 EQ-01 的 .m 代码骨架(约 30 行)
 - `evidence`:3 个 PaperEvidenceEntry,全 document_extracted,引用核心论文段落
+- `build_steps`:TASK-507-A 契约 substrate 阶段固定为 `null`
 
 ---
 

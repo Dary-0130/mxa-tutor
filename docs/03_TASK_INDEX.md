@@ -349,16 +349,16 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅] 16/16 (paper-to-model TASK-500~506;MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅🔍✅✅✅✅✅✅✅✅✅] 16/17 (paper-to-model TASK-500~507-A;MATLAB bridge/engine TASK-510~519)
 
-总计: 47/49
+总计: 47/50
 ```
 
 ---
 
 ## 下一步
 
-**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 5/5;MATLAB bridge/engine 线 TASK-510~514 均已合并并验收通过,TASK-516 run-state 采集 + 独立通道契约已合并 main(PR #118 / df383c8)并验收完;TASK-517 b3-2a = 517-A substrate(PR #120)+517-B enforcement(PR #121)均已合并 main;TASK-518-A substrate 已合并 main(PR #123),TASK-518-B wiring 已合并 main(PR #124);TASK-519-A run-state 单轮陪调实现完成,等待验收。总进度为 43/49。下一步进入 TASK-519-A review / paper-to-model 后续 task / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
+**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 7/8(TASK-500~506 ✅,TASK-507-A 🔍);MATLAB bridge/engine 线 TASK-510~514 均已合并并验收通过,TASK-516 run-state 采集 + 独立通道契约已合并 main(PR #118 / df383c8)并验收完;TASK-517 b3-2a = 517-A substrate(PR #120)+517-B enforcement(PR #121)均已合并 main;TASK-518-A substrate 已合并 main(PR #123),TASK-518-B wiring 已合并 main(PR #124);TASK-519-A run-state 单轮陪调实现完成,等待验收。总进度为 47/50。下一步进入 TASK-507-A 验收 / TASK-519-A review / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
 
 ## Week 5+:paper-to-model 主线占位
 
@@ -373,6 +373,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-504 | 资料入口前端页(论文复现阅读工作台,paper-to-model v0.2 前端) | ✅ | Codex | 已合并 main(PR #129 / 5bc7c17);上传论文 → 纵向阅读工作台(摘要/子系统划分/建模步骤/参数对照带来源/调参建议);复用现有设计系统,仅消费现有后端数据,无后端改动 |
 | TASK-505 | 首页双线入口(工程导览 / 资料复现 标签切换 + 左栏清理) | ✅ | Codex | 已合并 main(PR #131 / 8ec54ce);首页「工程导览 / 资料复现」标签切换,露出资料复现入口 → /paper;busy 硬不变量 + tab a11y(role=tablist/tab/tabpanel + roving tabIndex + 方向键导航);清理左栏免责墙;无后端改动 |
 | TASK-506 | 建模指导结构化 · 目标形状 RFC(指导深度第一张) | ✅ | Codex | 设计/RFC 卡,只定形状不改代码;R1 + R6 双审通过 + PM 拍板(v0.3);定义结构化 build_steps + 参数值红线 + 兼容/降级 + 11 条 evaluator 规则,作为 TASK-507 绑定规格 |
+| TASK-507-A | 结构化建模步骤 · 契约 substrate | 🔍 | Codex | 只加 build_steps 契约 / schema / 向后兼容 / fixtures;不接生成、不渲染;合并后另走收尾 docs PR 标 ✅ |
 | TASK-510 | MATLAB Add-on 连接桥 spike(v0.3-a) | ✅ | Codex | 已合并 main(PR #108 / merge 2026-06-21);只证传输桥,不接 Engine;C 类人工补测由 PM 完成 |
 | TASK-511 | MATLAB bridge LLM 报错解释(v0.3-b b1) | ✅ | Codex | 已合并 main(PR #111 / 53e7861);机制 + 确定性护栏验收通过,质量评估留 seam |
 | TASK-512 | MATLAB Engine substrate gate(v0.3-b b2-0) | ✅ | Codex | 已合并 main(PR #110 / merge 2026-06-22);只证独立 Engine substrate,不接 bridge runtime |

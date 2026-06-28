@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
 from adapters.storage._connection import open_connection
 from adapters.storage.schema import init_schema
@@ -129,6 +131,19 @@ def test_get_paper_plan_plan_only_surfaces_store_error(tmp_path: Path) -> None:
     assert response.json()["error"] == "store_error"
 
 
+def test_sqlite_get_plan_record_reads_legacy_plan_without_build_steps(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "paper.db"
+    store = _initialized_store_at(db_path)
+    asyncio.run(_insert_legacy_ready_bundle(str(db_path)))
+
+    record = asyncio.run(store.get_plan_record("paper-1"))
+
+    assert record is not None
+    assert record.plan.build_steps is None
+
+
 def test_user_supply_updates_sqlite_view_then_get_and_tuning_read_updated_record(
     tmp_path: Path,
 ) -> None:
@@ -203,6 +218,44 @@ async def _insert_plan_only(db_path: str) -> None:
                 created_at, updated_at
             ) VALUES ('paper-1', '{}', '[]', '[]', 'now', 'now')
             """
+        )
+        await conn.commit()
+
+
+async def _insert_legacy_ready_bundle(db_path: str) -> None:
+    record = _record()
+    plan_payload = TypeAdapter(ModelGenerationPlan).dump_python(record.plan, mode="json")
+    assert isinstance(plan_payload, dict)
+    plan_payload.pop("build_steps")
+    async with open_connection(db_path) as conn:
+        await conn.execute(
+            """
+            INSERT INTO paper_spec_cache(
+                paper_id, paper_spec_json, created_at, updated_at
+            ) VALUES (?, ?, 'now', 'now')
+            """,
+            (
+                record.paper_id,
+                TypeAdapter(PaperSpec).dump_json(record.spec).decode("utf-8"),
+            ),
+        )
+        await conn.execute(
+            """
+            INSERT INTO paper_plan_cache(
+                paper_id, plan_json, missing_prompts_json, missing_bindings_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'now', 'now')
+            """,
+            (
+                record.paper_id,
+                json.dumps(plan_payload),
+                TypeAdapter(list[MissingParameterPrompt])
+                .dump_json(record.missing_prompts)
+                .decode("utf-8"),
+                TypeAdapter(list[MissingParameterBinding])
+                .dump_json(record.missing_bindings)
+                .decode("utf-8"),
+            ),
         )
         await conn.commit()
 

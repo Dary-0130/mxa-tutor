@@ -53,6 +53,47 @@ export interface ParameterMapping {
   source: EvidenceSource;
 }
 
+export interface StepBlockRef {
+  block_ref_id: string;
+  block_type: string;
+  library_path: string | null;
+  purpose: string;
+  paper_reference: PaperEvidenceEntry | null;
+}
+
+export interface ParameterMappingRef {
+  paper_param_name: string;
+  model_param_name: string;
+}
+
+export interface ConnectionHint {
+  from_block_ref: string;
+  from_port: string | null;
+  to_block_ref: string;
+  to_port: string | null;
+  signal_meaning: string | null;
+}
+
+export interface ConfigurationHint {
+  target: string;
+  setting_name: string | null;
+  instruction: string;
+  evidence: PaperEvidenceEntry[];
+}
+
+export interface ModelBuildStep {
+  step_id: string;
+  title: string;
+  intent: string;
+  block_refs: StepBlockRef[];
+  parameter_refs: ParameterMappingRef[];
+  connection_hints: ConnectionHint[];
+  configuration_hints: ConfigurationHint[];
+  depends_on: string[];
+  evidence: PaperEvidenceEntry[];
+  display_text: string;
+}
+
 export interface ModelGenerationPlan {
   plan_id: string;
   paper_spec_id: string;
@@ -62,6 +103,7 @@ export interface ModelGenerationPlan {
   subsystem_breakdown: string[];
   m_script_skeleton?: string | null;
   evidence: PaperEvidenceEntry[];
+  build_steps: ModelBuildStep[] | null;
 }
 
 export interface MissingParameterPrompt {
