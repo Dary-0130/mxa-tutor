@@ -78,7 +78,7 @@
 - `subsystem_breakdown`:9 步搭建流程(比 material_to_plan case 多一步变压器与初始化配置)
 - `m_script_skeleton`:基于 EQ-01 + α0 = 1.5708 的 .m 代码骨架
 - `evidence`:**9 个 PaperEvidenceEntry** = 3 个 document_extracted(指向论文核心段落:S2 参数 / S3 公式 / S5 仿真配置)+ 6 个 user_supplied(每个关联到参考样例中的用户补充参数;判分真值仍以 R2 truth source + actual 链路为准)
-- `build_steps`:TASK-507-A 契约 substrate 阶段固定为 `null`
+- `build_steps`:golden sample 仍为 `null`;live run 自 TASK-507-B 起可生成非空结构化步骤,build_steps 指标留 TASK-509 接入
 
 **评分重点**:本 case 测试 R1a-pre/R1a-post 缺失识别死规则 + R2 真值源(冲突 / 幻觉)+ R3 来源真实性一票否决 + R4 一对一基数 + R5 全链 canonical name 一致 + 更新后 plan 可执行性(O1 / O2)
 

@@ -11,14 +11,14 @@ import pytest
 from pydantic import ValidationError
 
 import eval.run_paper_eval as subject
-from core.domain.exceptions import PaperPlanGenerationError
+from core.domain.exceptions import LLMRateLimitError, PaperPlanGenerationError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import BlockRecommendation, ModelGenerationPlan, ParameterMapping
 from core.domain.paper_spec import FigureRef, PaperSpec
 from eval._paper_eval_csv import write_paper_eval_csv
 from features.paper.paper_plan_cache import InMemoryPaperPlanCache
-from features.paper.paper_plan_helpers import MissingBindingModel
+from features.paper.paper_plan_helpers import BuildStepsSemanticValidationError, MissingBindingModel
 from features.paper.paper_schemas import MissingParameterPromptModel
 from features.paper.paper_user_input_schemas import (
     UserSuppliedResponseBatch,
@@ -47,7 +47,7 @@ class FakePlanService:
         plan: ModelGenerationPlan | None = None,
         prompts: list[MissingParameterPrompt] | None = None,
         bindings: list[MissingBindingModel] | None = None,
-        error: PaperPlanGenerationError | None = None,
+        error: Exception | None = None,
     ) -> None:
         self.plan = plan
         self.prompts = prompts or []
@@ -208,6 +208,48 @@ async def test_unknown_generation_error_is_case_boundary_failure() -> None:
     assert result.execution_status == "case_failed"
     assert result.verdict == "not_evaluated"
     assert result.failure == "missing_binding_ambiguous"
+    assert result.failure_stage == "plan_generate"
+
+
+@pytest.mark.asyncio
+async def test_provider_true_exception_records_case_failed() -> None:
+    result = await subject._run_case(
+        MISSING_CASE,
+        subject.EvaluatorServices(
+            spec_service=FakeSpecService(_spec()),
+            plan_service=FakePlanService(error=LLMRateLimitError("rate")),
+            plan_cache=InMemoryPaperPlanCache(),
+            user_supply_service=object(),
+        ),
+        CASES_ROOT,
+    )
+
+    assert result.execution_status == "case_failed"
+    assert result.verdict == "not_evaluated"
+    assert result.exception_type == "LLMRateLimitError"
+    assert result.failure == "LLMRateLimitError"
+    assert result.actual_plan is None
+
+
+@pytest.mark.asyncio
+async def test_escaped_structured_build_step_error_is_visible_case_failure() -> None:
+    result = await subject._run_case(
+        MISSING_CASE,
+        subject.EvaluatorServices(
+            spec_service=FakeSpecService(_spec()),
+            plan_service=FakePlanService(
+                error=BuildStepsSemanticValidationError("escaped_structured_bug")
+            ),
+            plan_cache=InMemoryPaperPlanCache(),
+            user_supply_service=object(),
+        ),
+        CASES_ROOT,
+    )
+
+    assert result.execution_status == "case_failed"
+    assert result.verdict == "not_evaluated"
+    assert result.exception_type == "BuildStepsSemanticValidationError"
+    assert result.failure == "BuildStepsSemanticValidationError"
     assert result.failure_stage == "plan_generate"
 
 

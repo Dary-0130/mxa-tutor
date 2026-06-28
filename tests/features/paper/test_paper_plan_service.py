@@ -22,8 +22,11 @@ from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, Paramete
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
+    BuildStepsJsonParseError,
+    BuildStepsStructuredError,
     EvidenceTagger,
     MissingBindingModel,
+    ModelBuildStepDraft,
 )
 from features.paper.paper_plan_service import PaperPlanService
 
@@ -76,7 +79,7 @@ class QueueTextProvider(TextProvider):
 class PayloadPaperPlanService(PaperPlanService):
     def __init__(
         self,
-        payloads: dict[str, dict[str, Any]],
+        payloads: dict[str, dict[str, Any] | Exception],
         evidence_tagger: EvidenceTagger | None = None,
     ) -> None:
         super().__init__(NoopTextProvider(), evidence_tagger=evidence_tagger)
@@ -90,7 +93,10 @@ class PayloadPaperPlanService(PaperPlanService):
     ) -> dict[str, Any]:
         _ = messages
         self.calls.append(role_name)
-        return copy.deepcopy(self.payloads[role_name])
+        payload = self.payloads[role_name]
+        if isinstance(payload, Exception):
+            raise payload
+        return copy.deepcopy(payload)
 
 
 class RecordingEvidenceTagger(EvidenceTagger):
@@ -109,6 +115,10 @@ class RecordingEvidenceTagger(EvidenceTagger):
             raise PaperPlanGenerationError("forced_evidence_failure")
 
 
+def test_build_steps_structured_error_is_independent_from_generation_error() -> None:
+    assert not issubclass(BuildStepsStructuredError, PaperPlanGenerationError)
+
+
 @pytest.mark.asyncio
 async def test_generate_happy_path_returns_plan_missing_bindings() -> None:
     service = PayloadPaperPlanService(_payloads())
@@ -119,11 +129,13 @@ async def test_generate_happy_path_returns_plan_missing_bindings() -> None:
         "plan_composer",
         "mscript_drafter",
         "missing_detector",
-        "subsystem_planner",
+        "build_step_planner",
     ]
     assert plan.plan_id == "PLAN-PAPER-001"
     assert plan.paper_spec_id == "PAPER-001"
-    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+    assert plan.build_steps is not None
+    assert len(plan.build_steps) == 3
+    assert plan.subsystem_breakdown == [step.display_text for step in plan.build_steps]
     assert (
         plan.m_script_skeleton
         == "clear; clc;\n% 参数区\nfigure; subplot(1,1,1); title('短路电流');"
@@ -175,13 +187,14 @@ async def test_two_llm_calls_run_concurrently_in_each_dag_phase() -> None:
             _ = spec
             return await self._parallel(None)  # type: ignore[return-value]
 
-        async def _llm_subsystem_plan(
+        async def _llm_build_steps(
             self,
             block_recommendations: list[BlockRecommendation],
+            parameter_mapping: list[ParameterMapping],
             evidence: list[PaperEvidenceEntry],
-        ) -> list[str]:
-            _ = block_recommendations, evidence
-            return ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+        ) -> list[ModelBuildStepDraft]:
+            _ = block_recommendations, parameter_mapping, evidence
+            return await self._parallel(_build_step_drafts())  # type: ignore[return-value]
 
     service = ConcurrentService()
 
@@ -191,7 +204,7 @@ async def test_two_llm_calls_run_concurrently_in_each_dag_phase() -> None:
 
 
 @pytest.mark.asyncio
-async def test_step2_subsystem_planner_awaits_plan_composer_block_recommendations() -> None:
+async def test_step2_build_step_planner_awaits_plan_composer_block_recommendations() -> None:
     class OrderedService(PaperPlanService):
         def __init__(self) -> None:
             super().__init__(NoopTextProvider())
@@ -221,15 +234,16 @@ async def test_step2_subsystem_planner_awaits_plan_composer_block_recommendation
             _ = spec
             return None
 
-        async def _llm_subsystem_plan(
+        async def _llm_build_steps(
             self,
             block_recommendations: list[BlockRecommendation],
+            parameter_mapping: list[ParameterMapping],
             evidence: list[PaperEvidenceEntry],
-        ) -> list[str]:
-            _ = evidence
+        ) -> list[ModelBuildStepDraft]:
+            _ = parameter_mapping, evidence
             assert self.plan_done
             assert block_recommendations[0].block_type == "Synchronous Machine"
-            return ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+            return _build_step_drafts()
 
     await OrderedService().generate(_spec(), "PAPER-001")
 
@@ -249,12 +263,18 @@ async def test_all_role_helpers_use_call_llm_json(monkeypatch: pytest.MonkeyPatc
     await service._llm_missing_detect(_spec(), "PAPER-001", [_sentinel_mapping()])
     await service._llm_plan_compose(_spec(), "PLAN-PAPER-001", "PAPER-001")
     await service._llm_subsystem_plan([_block_recommendation()], [_document_evidence()])
+    await service._llm_build_steps(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        [_document_evidence()],
+    )
     await service._llm_mscript_draft(_spec())
 
     assert calls == [
         "missing_detector",
         "plan_composer",
         "subsystem_planner",
+        "build_step_planner",
         "mscript_drafter",
     ]
 
@@ -482,6 +502,120 @@ async def test_mscript_drafter_allows_null_output() -> None:
 
 
 @pytest.mark.asyncio
+async def test_structured_build_steps_invalid_payload_falls_back_to_legacy() -> None:
+    payloads = _payloads()
+    payloads["build_step_planner"] = {"build_steps": []}
+    service = PayloadPaperPlanService(payloads)
+
+    plan, missing_prompts, _ = await service.generate(_spec(), "PAPER-001")
+
+    assert plan.build_steps is None
+    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+    assert [prompt.prompt_id for prompt in missing_prompts] == ["MISS-001"]
+    assert service.calls == [
+        "plan_composer",
+        "mscript_drafter",
+        "missing_detector",
+        "build_step_planner",
+        "subsystem_planner",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_redline_value_leak_falls_back_to_legacy() -> None:
+    payloads = _payloads()
+    payloads["missing_detector"] = {"missing_prompts": []}
+    payloads["plan_composer"]["parameter_mapping"] = [
+        {
+            "paper_param_name": "Rs",
+            "model_param_name": "Synchronous Machine.Rs",
+            "value": "0.05",
+            "unit": "Ω",
+            "source": "document_extracted",
+        }
+    ]
+    payloads["build_step_planner"] = _build_steps_payload(
+        paper_param_name="Rs",
+        model_param_name="Synchronous Machine.Rs",
+    )
+    payloads["build_step_planner"]["build_steps"][0]["title"] = "Place Rs block with 0.05 Ω"
+
+    plan, _, _ = await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
+
+    assert plan.build_steps is None
+    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+
+
+@pytest.mark.asyncio
+async def test_structured_fallback_log_is_reason_coded_metadata_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warning_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_warning(*args: object, **kwargs: object) -> None:
+        warning_calls.append((args, kwargs))
+
+    monkeypatch.setattr(service_module.logger, "warning", fake_warning)
+    payloads = _payloads()
+    payloads["missing_detector"] = {"missing_prompts": []}
+    payloads["plan_composer"]["parameter_mapping"] = [
+        {
+            "paper_param_name": "Rs",
+            "model_param_name": "Synchronous Machine.Rs",
+            "value": "0.05",
+            "unit": "Ω",
+            "source": "document_extracted",
+        }
+    ]
+    payloads["build_step_planner"] = _build_steps_payload(
+        paper_param_name="Rs",
+        model_param_name="Synchronous Machine.Rs",
+    )
+    payloads["build_step_planner"]["build_steps"][0]["title"] = "Place Rs block with 0.05 Ω"
+
+    await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
+
+    logged = repr(warning_calls)
+    assert "paper_plan_build_steps_fallback reason_code=%s exc_type=%s" in logged
+    assert "parameter_value_leak" in logged
+    assert "0.05" not in logged
+    assert "Ω" not in logged
+
+
+@pytest.mark.asyncio
+async def test_user_supplied_build_step_evidence_falls_back_to_legacy() -> None:
+    payloads = _payloads()
+    payloads["build_step_planner"]["build_steps"][0]["evidence"] = [_user_evidence_payload()]
+
+    plan, _, _ = await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
+
+    assert plan.build_steps is None
+    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+
+
+@pytest.mark.asyncio
+async def test_build_step_provider_error_propagates_without_legacy_fallback() -> None:
+    payloads = _payloads()
+    payloads["build_step_planner"] = LLMRateLimitError("rate")
+    service = PayloadPaperPlanService(payloads)
+
+    with pytest.raises(LLMRateLimitError):
+        await service.generate(_spec(), "PAPER-001")
+
+    assert "subsystem_planner" not in service.calls
+
+
+@pytest.mark.asyncio
+async def test_legacy_error_after_structured_fallback_propagates() -> None:
+    payloads = _payloads()
+    payloads["build_step_planner"] = {"build_steps": []}
+    payloads["subsystem_planner"] = PaperPlanGenerationError("legacy_failed")
+
+    with pytest.raises(PaperPlanGenerationError, match="legacy_failed"):
+        await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
+
+
+@pytest.mark.asyncio
 async def test_composer_missing_sentinel_fails_in_detector_cardinality() -> None:
     payloads = _payloads()
     payloads["plan_composer"]["parameter_mapping"][0]["value"] = "3.5"
@@ -553,6 +687,14 @@ async def test_invalid_json_raises_paper_plan_generation_error() -> None:
 
     with pytest.raises(PaperPlanGenerationError, match="invalid_json"):
         await service._call_llm_json([LLMMessage("system", "x")], "plan_composer")
+
+
+@pytest.mark.asyncio
+async def test_build_step_invalid_json_raises_structured_error() -> None:
+    service = PaperPlanService(QueueTextProvider(["not json", "still not json"]))
+
+    with pytest.raises(BuildStepsJsonParseError, match="json_parse_failed"):
+        await service._call_llm_json([LLMMessage("system", "x")], "build_step_planner")
 
 
 @pytest.mark.asyncio
@@ -632,6 +774,7 @@ def _payloads() -> dict[str, dict[str, Any]]:
     return {
         "missing_detector": {"missing_prompts": [_missing_prompt_payload()]},
         "plan_composer": _plan_payload(),
+        "build_step_planner": _build_steps_payload(),
         "subsystem_planner": {
             "subsystem_breakdown": ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
         },
@@ -639,6 +782,74 @@ def _payloads() -> dict[str, dict[str, Any]]:
             "m_script_skeleton": "clear; clc;\n% 参数区\nfigure; subplot(1,1,1); title('短路电流');"
         },
     }
+
+
+def _build_steps_payload(
+    *,
+    paper_param_name: str = "H",
+    model_param_name: str = "Synchronous Machine.H",
+) -> dict[str, Any]:
+    return {
+        "build_steps": [
+            {
+                "step_id": "STEP-001",
+                "title": "Place machine block",
+                "intent": "Create the machine subsystem entry point.",
+                "block_refs": [
+                    {
+                        "block_ref_id": "B1",
+                        "block_type": "Synchronous Machine",
+                        "library_path": None,
+                        "purpose": "Model the generator.",
+                        "paper_reference": _document_evidence_payload(),
+                    }
+                ],
+                "parameter_refs": [],
+                "connection_hints": [],
+                "configuration_hints": [],
+                "depends_on": [],
+                "evidence": [_document_evidence_payload()],
+            },
+            {
+                "step_id": "STEP-002",
+                "title": "Bind machine parameter",
+                "intent": "Link the paper parameter name to the model slot.",
+                "block_refs": [],
+                "parameter_refs": [
+                    {
+                        "paper_param_name": paper_param_name,
+                        "model_param_name": model_param_name,
+                    }
+                ],
+                "connection_hints": [],
+                "configuration_hints": [],
+                "depends_on": ["STEP-001"],
+                "evidence": [_document_evidence_payload()],
+            },
+            {
+                "step_id": "STEP-003",
+                "title": "Prepare simulation observation",
+                "intent": "Keep the simulation output ready for comparison.",
+                "block_refs": [],
+                "parameter_refs": [],
+                "connection_hints": [],
+                "configuration_hints": [
+                    {
+                        "target": "simulation",
+                        "setting_name": "Signal logging",
+                        "instruction": "Record the generated current signal.",
+                        "evidence": [_document_evidence_payload()],
+                    }
+                ],
+                "depends_on": ["STEP-001"],
+                "evidence": [_document_evidence_payload()],
+            },
+        ]
+    }
+
+
+def _build_step_drafts() -> list[ModelBuildStepDraft]:
+    return service_module._BuildStepsOutputModel.model_validate(_build_steps_payload()).to_drafts()
 
 
 def _plan_payload() -> dict[str, Any]:

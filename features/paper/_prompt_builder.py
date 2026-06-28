@@ -40,7 +40,7 @@ def build_messages(parsed: ParsedDocument) -> list[LLMMessage]:
 
 
 def _shared_paper_plan_constraints() -> str:
-    """Return the shared system snippet for the four paper plan role prompts."""
+    """Return the shared system snippet for the paper plan role prompts."""
 
     return """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
@@ -144,6 +144,40 @@ def build_messages_for_subsystem_plan(
                 [
                     BlockRecommendationModel.from_domain(block).model_dump(mode="json")
                     for block in block_recommendations
+                ]
+            ),
+            "paper_evidence_json": _json_dumps(
+                [
+                    PaperEvidenceEntryModel.from_domain(entry).model_dump(mode="json")
+                    for entry in evidence
+                ]
+            ),
+        },
+    )
+    return _role_messages(template.system, user)
+
+
+def build_messages_for_build_steps(
+    block_recommendations: list[BlockRecommendation],
+    parameter_mapping: list[ParameterMapping],
+    evidence: list[PaperEvidenceEntry],
+) -> list[LLMMessage]:
+    """Build BuildStepPlanner messages."""
+
+    template = load_prompt_template("paper_plan_build_steps.yaml")
+    user = _render_user(
+        template.user,
+        {
+            "block_recommendations_json": _json_dumps(
+                [
+                    BlockRecommendationModel.from_domain(block).model_dump(mode="json")
+                    for block in block_recommendations
+                ]
+            ),
+            "parameter_mapping_json": _json_dumps(
+                [
+                    ParameterMappingModel.from_domain(mapping).model_dump(mode="json")
+                    for mapping in parameter_mapping
                 ]
             ),
             "paper_evidence_json": _json_dumps(

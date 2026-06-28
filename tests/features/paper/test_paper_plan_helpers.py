@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError, fields
+from dataclasses import FrozenInstanceError, fields, replace
 
 import pytest
 
@@ -7,17 +7,26 @@ from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
     BlockRecommendation,
+    ConfigurationHint,
+    ConnectionHint,
     ModelGenerationPlan,
     PaperPlanRecord,
     ParameterMapping,
+    ParameterMappingRef,
+    StepBlockRef,
 )
 from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
+    BuildStepsEvidenceError,
+    BuildStepsRedLineError,
+    BuildStepsSemanticValidationError,
     EvidenceTagger,
     MissingBindingModel,
+    ModelBuildStepDraft,
     PlanAssembler,
     resolved_prompt_ids,
+    validate_build_step_evidence_for_spec,
 )
 
 
@@ -255,6 +264,314 @@ def test_validate_for_record_rejects_unresolved_user_evidence() -> None:
         )
 
 
+def test_validate_and_derive_build_steps_success_derives_display_text() -> None:
+    steps = PlanAssembler().validate_and_derive_build_steps(
+        _build_step_drafts(),
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [_block_recommendation()],
+    )
+
+    assert [step.step_id for step in steps] == ["STEP-001", "STEP-002", "STEP-003"]
+    assert all(step.display_text for step in steps)
+    assert steps[0].display_text.startswith("STEP-001 Place machine block")
+
+
+def test_build_steps_can_be_topologically_sorted_before_validation() -> None:
+    drafts = _build_step_drafts()
+
+    steps = PlanAssembler().validate_and_derive_build_steps(
+        [drafts[1], drafts[0], drafts[2]],
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [_block_recommendation()],
+    )
+
+    assert [step.step_id for step in steps] == ["STEP-001", "STEP-002", "STEP-003"]
+
+
+@pytest.mark.parametrize(
+    ("drafts_factory", "reason"),
+    [
+        (lambda: [], "empty_steps"),
+        (
+            lambda: [replace(step, step_id="BAD-1") for step in _build_step_drafts()],
+            "step_id_invalid",
+        ),
+        (
+            lambda: [replace(step, step_id="STEP-001") for step in _build_step_drafts()],
+            "step_id_duplicate",
+        ),
+        (
+            lambda: [
+                replace(_build_step_drafts()[0], depends_on=["STEP-003"]),
+                *_build_step_drafts()[1:],
+            ],
+            "depends_on_cycle",
+        ),
+    ],
+)
+def test_build_steps_reject_step_id_and_dependency_errors(
+    drafts_factory: object,
+    reason: str,
+) -> None:
+    drafts = drafts_factory()
+    with pytest.raises(BuildStepsSemanticValidationError, match=reason):
+        PlanAssembler().validate_and_derive_build_steps(
+            drafts,
+            [_mapping("H", MISSING_VALUE_SENTINEL)],
+            [_block_recommendation()],
+        )
+
+
+def test_parameter_mapping_refs_require_exact_composite_match() -> None:
+    drafts = _build_step_drafts()
+
+    with pytest.raises(BuildStepsSemanticValidationError, match="parameter_ref_no_match"):
+        PlanAssembler().validate_and_derive_build_steps(
+            drafts,
+            [
+                ParameterMapping(
+                    paper_param_name="H",
+                    model_param_name="Different.H",
+                    value=MISSING_VALUE_SENTINEL,
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                )
+            ],
+            [_block_recommendation()],
+        )
+
+    with pytest.raises(BuildStepsSemanticValidationError, match="parameter_mapping_duplicate"):
+        PlanAssembler().validate_and_derive_build_steps(
+            drafts,
+            [_mapping("H", MISSING_VALUE_SENTINEL), _mapping("H", "4.0")],
+            [_block_recommendation()],
+        )
+
+
+def test_block_refs_match_recommendations_by_normalized_type_and_purpose() -> None:
+    drafts = _build_step_drafts()
+    drafts[0] = replace(
+        drafts[0],
+        block_refs=[
+            replace(
+                drafts[0].block_refs[0],
+                block_type=" synchronous   machine ",
+                purpose=" model  THE generator. ",
+            )
+        ],
+    )
+
+    steps = PlanAssembler().validate_and_derive_build_steps(
+        drafts,
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [_block_recommendation()],
+    )
+
+    assert steps[0].block_refs[0].block_ref_id == "B1"
+
+
+def test_block_recommendation_internal_keys_are_deterministic_by_array_order() -> None:
+    recommendation_index = PlanAssembler()._build_recommendation_index(
+        [
+            _block_recommendation(),
+            BlockRecommendation("Scope", "Display current.", _document_evidence()),
+        ]
+    )
+
+    assert list(recommendation_index.values()) == ["BR-001", "BR-002"]
+
+
+def test_block_refs_reject_no_match_and_duplicate_recommendation_pair() -> None:
+    drafts = _build_step_drafts()
+
+    with pytest.raises(BuildStepsSemanticValidationError, match="br_no_match"):
+        PlanAssembler().validate_and_derive_build_steps(
+            drafts,
+            [_mapping("H", MISSING_VALUE_SENTINEL)],
+            [
+                BlockRecommendation(
+                    block_type="Scope",
+                    purpose="Display current.",
+                    paper_reference=_document_evidence(),
+                )
+            ],
+        )
+
+    with pytest.raises(BuildStepsSemanticValidationError, match="br_ambiguous"):
+        PlanAssembler().validate_and_derive_build_steps(
+            drafts,
+            [_mapping("H", MISSING_VALUE_SENTINEL)],
+            [_block_recommendation(), _block_recommendation()],
+        )
+
+
+def test_block_ref_id_is_global_and_connection_refs_must_be_visible() -> None:
+    drafts = _build_step_drafts()
+    drafts[1] = replace(
+        drafts[1],
+        block_refs=[replace(drafts[0].block_refs[0], block_ref_id="B1")],
+        parameter_refs=[],
+    )
+
+    with pytest.raises(BuildStepsSemanticValidationError, match="block_ref_id_duplicate"):
+        PlanAssembler().validate_and_derive_build_steps(
+            drafts,
+            [_mapping("H", MISSING_VALUE_SENTINEL)],
+            [_block_recommendation()],
+        )
+
+    invisible = _build_step_drafts()
+    invisible[2] = replace(
+        invisible[2],
+        connection_hints=[
+            ConnectionHint(
+                from_block_ref="B99",
+                from_port=None,
+                to_block_ref="B1",
+                to_port=None,
+                signal_meaning="route measured current",
+            )
+        ],
+        configuration_hints=[],
+    )
+    with pytest.raises(BuildStepsSemanticValidationError, match="connection_ref_not_visible"):
+        PlanAssembler().validate_and_derive_build_steps(
+            invisible,
+            [_mapping("H", MISSING_VALUE_SENTINEL)],
+            [_block_recommendation()],
+        )
+
+
+def test_each_step_must_have_operable_structure_and_cover_recommendations() -> None:
+    drafts = _build_step_drafts()
+    drafts[2] = replace(
+        drafts[2],
+        block_refs=[],
+        parameter_refs=[],
+        connection_hints=[],
+        configuration_hints=[],
+    )
+
+    with pytest.raises(BuildStepsSemanticValidationError, match="step_not_operable"):
+        PlanAssembler().validate_and_derive_build_steps(
+            drafts,
+            [_mapping("H", MISSING_VALUE_SENTINEL)],
+            [_block_recommendation()],
+        )
+
+    with pytest.raises(BuildStepsSemanticValidationError, match="coverage_missing"):
+        PlanAssembler().validate_and_derive_build_steps(
+            _build_step_drafts(),
+            [_mapping("H", MISSING_VALUE_SENTINEL)],
+            [
+                _block_recommendation(),
+                BlockRecommendation("Scope", "Display current.", _document_evidence()),
+            ],
+        )
+
+
+def test_coverage_is_vacuous_when_recommendations_are_empty() -> None:
+    drafts = _build_step_drafts()
+    drafts[0] = replace(drafts[0], block_refs=[], configuration_hints=[_config_hint()])
+
+    steps = PlanAssembler().validate_and_derive_build_steps(
+        drafts,
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [],
+    )
+
+    assert len(steps) == 3
+
+
+def test_display_text_does_not_dereference_parameter_value_or_unit() -> None:
+    steps = PlanAssembler().validate_and_derive_build_steps(
+        _build_step_drafts(paper_param_name="Rs", model_param_name="Synchronous Machine.Rs"),
+        [
+            ParameterMapping(
+                paper_param_name="Rs",
+                model_param_name="Synchronous Machine.Rs",
+                value="0.05",
+                unit="Ω",
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+            )
+        ],
+        [_block_recommendation()],
+    )
+
+    display_text = "\n".join(step.display_text for step in steps)
+    assert "Rs" in display_text
+    assert "0.05" not in display_text
+    assert "Ω" not in display_text
+
+
+def test_redline_rejects_naked_value_and_config_allowlist_has_reverse_check() -> None:
+    drafts = _build_step_drafts(paper_param_name="Rs", model_param_name="Synchronous Machine.Rs")
+    mapping = ParameterMapping(
+        paper_param_name="Rs",
+        model_param_name="Synchronous Machine.Rs",
+        value="0.05",
+        unit="Ω",
+        source=EvidenceSource.DOCUMENT_EXTRACTED,
+    )
+    leaking = list(drafts)
+    leaking[0] = replace(leaking[0], title="Place source with 0.05 Ω")
+
+    with pytest.raises(BuildStepsRedLineError, match="parameter_value_leak"):
+        PlanAssembler().validate_and_derive_build_steps(
+            leaking,
+            [mapping],
+            [_block_recommendation()],
+        )
+
+    allowed = list(drafts)
+    allowed[2] = replace(
+        allowed[2],
+        configuration_hints=[
+            ConfigurationHint(
+                target="solver",
+                setting_name="Relative tolerance",
+                instruction="Set solver tolerance to 0.05 Ω.",
+                evidence=[_document_evidence()],
+            )
+        ],
+    )
+    PlanAssembler().validate_and_derive_build_steps(allowed, [mapping], [_block_recommendation()])
+
+    reversed_setting = list(drafts)
+    reversed_setting[2] = replace(
+        reversed_setting[2],
+        configuration_hints=[
+            ConfigurationHint(
+                target="solver",
+                setting_name="Synchronous Machine.Rs",
+                instruction="Set solver tolerance to 0.05 Ω.",
+                evidence=[_document_evidence()],
+            )
+        ],
+    )
+    with pytest.raises(BuildStepsRedLineError, match="parameter_value_leak"):
+        PlanAssembler().validate_and_derive_build_steps(
+            reversed_setting,
+            [mapping],
+            [_block_recommendation()],
+        )
+
+
+def test_build_step_evidence_helper_rejects_unresolved_user_supplied_evidence() -> None:
+    with pytest.raises(BuildStepsEvidenceError, match="user_supplied_evidence_not_allowed"):
+        validate_build_step_evidence_for_spec(
+            [_user_evidence(missing_param_prompt_id="MISS-1")],
+            _spec(),
+            allowed_user_prompt_ids=frozenset(),
+        )
+
+    validate_build_step_evidence_for_spec(
+        [_user_evidence(missing_param_prompt_id="MISS-1")],
+        _spec(),
+        allowed_user_prompt_ids=frozenset({"MISS-1"}),
+    )
+
+
 def _spec() -> PaperSpec:
     evidence = _document_evidence()
     return PaperSpec(
@@ -283,6 +600,78 @@ def _spec() -> PaperSpec:
         ],
         pseudocode_blocks=[],
         evidence=[evidence],
+    )
+
+
+def _build_step_drafts(
+    *,
+    paper_param_name: str = "H",
+    model_param_name: str = "Synchronous Machine.H",
+) -> list[ModelBuildStepDraft]:
+    return [
+        ModelBuildStepDraft(
+            step_id="STEP-001",
+            title="Place machine block",
+            intent="Create the machine subsystem entry point.",
+            block_refs=[
+                StepBlockRef(
+                    block_ref_id="B1",
+                    block_type="Synchronous Machine",
+                    library_path=None,
+                    purpose="Model the generator.",
+                    paper_reference=_document_evidence(),
+                )
+            ],
+            parameter_refs=[],
+            connection_hints=[],
+            configuration_hints=[],
+            depends_on=[],
+            evidence=[_document_evidence()],
+        ),
+        ModelBuildStepDraft(
+            step_id="STEP-002",
+            title="Bind machine parameter",
+            intent="Link the paper parameter name to the model slot.",
+            block_refs=[],
+            parameter_refs=[
+                ParameterMappingRef(
+                    paper_param_name=paper_param_name,
+                    model_param_name=model_param_name,
+                )
+            ],
+            connection_hints=[],
+            configuration_hints=[],
+            depends_on=["STEP-001"],
+            evidence=[_document_evidence()],
+        ),
+        ModelBuildStepDraft(
+            step_id="STEP-003",
+            title="Prepare simulation observation",
+            intent="Keep the simulation output ready for comparison.",
+            block_refs=[],
+            parameter_refs=[],
+            connection_hints=[],
+            configuration_hints=[_config_hint()],
+            depends_on=["STEP-001"],
+            evidence=[_document_evidence()],
+        ),
+    ]
+
+
+def _config_hint() -> ConfigurationHint:
+    return ConfigurationHint(
+        target="simulation",
+        setting_name="Signal logging",
+        instruction="Record the generated current signal.",
+        evidence=[_document_evidence()],
+    )
+
+
+def _block_recommendation() -> BlockRecommendation:
+    return BlockRecommendation(
+        block_type="Synchronous Machine",
+        purpose="Model the generator.",
+        paper_reference=_document_evidence(),
     )
 
 
