@@ -13,10 +13,16 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from core.domain.exceptions import PaperPlanGenerationError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
-from core.domain.paper_plan import BlockRecommendation, ModelGenerationPlan, ParameterMapping
+from core.domain.paper_plan import (
+    BlockRecommendation,
+    ModelBuildStep,
+    ModelGenerationPlan,
+    ParameterMapping,
+)
 from core.domain.paper_spec import PaperSpec
 from core.interfaces.llm_provider import LLMMessage, TextProvider
 from features.paper._prompt_builder import (
+    build_messages_for_build_steps,
     build_messages_for_missing_detect,
     build_messages_for_mscript_draft,
     build_messages_for_plan_compose,
@@ -24,24 +30,34 @@ from features.paper._prompt_builder import (
 )
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
+    BuildStepsDtoValidationError,
+    BuildStepsJsonParseError,
+    BuildStepsStructuredError,
     EvidenceTagger,
     MissingBindingModel,
+    ModelBuildStepDraft,
     PlanAssembler,
+    validate_build_step_evidence_for_spec,
 )
 from features.paper.paper_schemas import (
     BlockRecommendationModel,
+    ConfigurationHintModel,
+    ConnectionHintModel,
     PaperEvidenceEntryModel,
     ParameterMappingModel,
+    ParameterMappingRefModel,
+    StepBlockRefModel,
 )
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS = 120.0
 DEFAULT_PAPER_PLAN_MAX_TOKENS = 8000  # R6 真启动调参,对齐 DeepSeek V3 8192 上限
+BUILD_STEP_ROLE_NAME = "build_step_planner"
 
 
 class PaperPlanService:
-    """Generate ModelGenerationPlan with a three-role parallel LLM DAG."""
+    """Generate ModelGenerationPlan with a four-call parallel LLM DAG plus fallback."""
 
     def __init__(
         self,
@@ -70,13 +86,39 @@ class PaperPlanService:
             self._llm_mscript_draft(spec),
         )
         sentinel_mappings = self._sentinel_mappings(plan_composer_output.parameter_mapping)
-        missing_prompts, subsystem_steps = await asyncio.gather(
+        missing_result, build_steps_result = await asyncio.gather(
             self._llm_missing_detect(spec, paper_id, sentinel_mappings),
-            self._llm_subsystem_plan(
+            self._llm_build_steps(
                 plan_composer_output.block_recommendations,
+                plan_composer_output.parameter_mapping,
                 spec.evidence,
             ),
+            return_exceptions=True,
         )
+        if isinstance(missing_result, BaseException):
+            raise missing_result
+        missing_prompts = missing_result
+
+        build_steps: list[ModelBuildStep] | None
+        try:
+            if isinstance(build_steps_result, BuildStepsStructuredError):
+                raise build_steps_result
+            if isinstance(build_steps_result, BaseException):
+                raise build_steps_result
+            build_steps = self._plan_assembler.validate_and_derive_build_steps(
+                build_steps_result,
+                plan_composer_output.parameter_mapping,
+                plan_composer_output.block_recommendations,
+            )
+            self._validate_build_step_evidence(build_steps, spec)
+            subsystem_steps = [step.display_text for step in build_steps]
+        except BuildStepsStructuredError as exc:
+            self._log_build_steps_fallback(exc)
+            build_steps = None
+            subsystem_steps = await self._llm_subsystem_plan(
+                plan_composer_output.block_recommendations,
+                spec.evidence,
+            )
 
         assembled_plan, missing_bindings = self._plan_assembler.merge(
             plan_composer_output=plan_composer_output,
@@ -84,6 +126,7 @@ class PaperPlanService:
             mscript=mscript,
             missing_prompts=missing_prompts,
             paper_id=paper_id,
+            build_steps=build_steps,
         )
 
         self._evidence_tagger.validate_for_spec(assembled_plan.evidence, spec)
@@ -132,9 +175,13 @@ class PaperPlanService:
                 role_name,
                 type(last_json_error).__name__,
             )
+            if role_name == BUILD_STEP_ROLE_NAME:
+                raise BuildStepsJsonParseError("json_parse_failed") from None
             raise PaperPlanGenerationError(f"role={role_name}: invalid_json") from None
 
         if not isinstance(payload, dict):
+            if role_name == BUILD_STEP_ROLE_NAME:
+                raise BuildStepsDtoValidationError("json_top_level_must_be_object")
             self._raise_generation_error(role_name, "json_top_level_must_be_object")
         return payload
 
@@ -234,6 +281,29 @@ class PaperPlanService:
             self._raise_generation_error(role_name, "subsystem_breakdown_item_invalid")
         return steps
 
+    async def _llm_build_steps(
+        self,
+        block_recommendations: list[BlockRecommendation],
+        parameter_mapping: list[ParameterMapping],
+        evidence: list[PaperEvidenceEntry],
+    ) -> list[ModelBuildStepDraft]:
+        data = await self._call_llm_json(
+            build_messages_for_build_steps(block_recommendations, parameter_mapping, evidence),
+            BUILD_STEP_ROLE_NAME,
+        )
+        if data.get("build_steps") == []:
+            raise BuildStepsDtoValidationError("empty_steps")
+        try:
+            model = _BuildStepsOutputModel.model_validate(data)
+        except ValidationError as exc:
+            logger.error(
+                "paper_plan_build_steps_dto_failed role=%s exc_type=%s",
+                BUILD_STEP_ROLE_NAME,
+                type(exc).__name__,
+            )
+            raise BuildStepsDtoValidationError("dto_invalid") from None
+        return model.to_drafts()
+
     async def _llm_mscript_draft(self, spec: PaperSpec) -> str | None:
         role_name = "mscript_drafter"
         data = await self._call_llm_json(
@@ -303,6 +373,40 @@ class PaperPlanService:
             if draft_name != sentinel_name:
                 self._raise_generation_error(role_name, "missing_prompt_parameter_mismatch")
 
+    def _validate_build_step_evidence(
+        self,
+        build_steps: list[ModelBuildStep],
+        spec: PaperSpec,
+    ) -> None:
+        for step in build_steps:
+            validate_build_step_evidence_for_spec(
+                step.evidence,
+                spec,
+                allowed_user_prompt_ids=frozenset(),
+            )
+            validate_build_step_evidence_for_spec(
+                [
+                    block_ref.paper_reference
+                    for block_ref in step.block_refs
+                    if block_ref.paper_reference is not None
+                ],
+                spec,
+                allowed_user_prompt_ids=frozenset(),
+            )
+            for configuration_hint in step.configuration_hints:
+                validate_build_step_evidence_for_spec(
+                    configuration_hint.evidence,
+                    spec,
+                    allowed_user_prompt_ids=frozenset(),
+                )
+
+    def _log_build_steps_fallback(self, exc: BuildStepsStructuredError) -> None:
+        logger.warning(
+            "paper_plan_build_steps_fallback reason_code=%s exc_type=%s",
+            exc.reason_code,
+            type(exc).__name__,
+        )
+
 
 class _PlanComposerOutputModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -339,3 +443,39 @@ class _MissingPromptDraftModel(BaseModel):
     paper_reference: PaperEvidenceEntryModel
     suggested_unit: str | None = Field(default=None, min_length=1)
     source: Literal["user_supplied"] = "user_supplied"
+
+
+class _ModelBuildStepDraftModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    intent: str = Field(min_length=1)
+    block_refs: list[StepBlockRefModel]
+    parameter_refs: list[ParameterMappingRefModel]
+    connection_hints: list[ConnectionHintModel]
+    configuration_hints: list[ConfigurationHintModel]
+    depends_on: list[str]
+    evidence: list[PaperEvidenceEntryModel]
+
+    def to_draft(self) -> ModelBuildStepDraft:
+        return ModelBuildStepDraft(
+            step_id=self.step_id,
+            title=self.title,
+            intent=self.intent,
+            block_refs=[entry.to_domain() for entry in self.block_refs],
+            parameter_refs=[entry.to_domain() for entry in self.parameter_refs],
+            connection_hints=[entry.to_domain() for entry in self.connection_hints],
+            configuration_hints=[entry.to_domain() for entry in self.configuration_hints],
+            depends_on=list(self.depends_on),
+            evidence=[entry.to_domain() for entry in self.evidence],
+        )
+
+
+class _BuildStepsOutputModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    build_steps: list[_ModelBuildStepDraftModel] = Field(min_length=3, max_length=10)
+
+    def to_drafts(self) -> list[ModelBuildStepDraft]:
+        return [step.to_draft() for step in self.build_steps]

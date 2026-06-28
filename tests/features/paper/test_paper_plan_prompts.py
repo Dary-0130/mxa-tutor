@@ -15,6 +15,7 @@ from core.domain.paper_plan import (
 from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
 from features.paper._prompt_builder import (
     _shared_paper_plan_constraints,
+    build_messages_for_build_steps,
     build_messages_for_missing_detect,
     build_messages_for_mscript_draft,
     build_messages_for_plan_compose,
@@ -26,6 +27,7 @@ from features.paper._prompt_loader import load_prompt_template
 PAPER_PLAN_PROMPTS = [
     "paper_plan_missing_detector.yaml",
     "paper_plan_composer.yaml",
+    "paper_plan_build_steps.yaml",
     "paper_plan_subsystem.yaml",
     "paper_plan_mscript.yaml",
     "paper_tuning_suggest.yaml",
@@ -60,6 +62,16 @@ def test_load_paper_plan_subsystem_yaml() -> None:
     assert template.version == "v0.1"
     assert "SubsystemPlanner" in template.system
     assert "{block_recommendations_json}" in template.user
+
+
+def test_load_paper_plan_build_steps_yaml() -> None:
+    template = load_prompt_template("paper_plan_build_steps.yaml")
+
+    assert template.version == "v0.1"
+    assert "BuildStepPlanner" in template.system
+    assert "{block_recommendations_json}" in template.user
+    assert "{parameter_mapping_json}" in template.user
+    assert "禁止输出 display_text" in template.system
 
 
 def test_load_paper_plan_mscript_yaml() -> None:
@@ -127,13 +139,18 @@ def test_shared_snippet_contains_plan_id_injection_rule() -> None:
     assert "plan_id / paper_spec_id 不要自生成,由系统注入,逐字照抄" in snippet
 
 
-def test_4_role_systems_all_inject_shared_snippet() -> None:
+def test_5_role_systems_all_inject_shared_snippet() -> None:
     systems = [
         build_messages_for_missing_detect(_spec(), [_sentinel_mapping()])[0].content,
         build_messages_for_plan_compose(_spec(), "PLAN-PAPER-001", "PAPER-001")[0].content,
         build_messages_for_subsystem_plan([_block_recommendation()], [_document_evidence()])[
             0
         ].content,
+        build_messages_for_build_steps(
+            [_block_recommendation()],
+            [_sentinel_mapping()],
+            [_document_evidence()],
+        )[0].content,
         build_messages_for_mscript_draft(_spec().equations, _spec().parameter_table)[0].content,
     ]
 
@@ -197,6 +214,31 @@ def test_subsystem_planner_system_specifies_3_to_10_steps() -> None:
 
     assert "3-10 步" in system
     assert "步骤少于 3 步或多于 10 步" in system
+
+
+def test_build_step_planner_system_specifies_structured_redline_contract() -> None:
+    system = load_prompt_template("paper_plan_build_steps.yaml").system
+
+    assert "build_steps 必须 3-10 步" in system
+    assert "不得输出空数组 []" in system
+    assert "逐字复用 block_recommendations" in system
+    assert 'source="document_extracted"' in system
+    assert '禁止输出 source="user_supplied"' in system
+    assert "不得包含参数具体值" in system
+    assert '禁止写"增大 10%"' in system
+
+
+def test_build_messages_for_build_steps_includes_blocks_params_and_evidence() -> None:
+    messages = build_messages_for_build_steps(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        [_document_evidence()],
+    )
+    user = messages[1].content
+
+    assert '"block_type": "Synchronous Machine"' in user
+    assert '"paper_param_name": "H 惯性时间常数"' in user
+    assert '"paper_section_id": "S1"' in user
 
 
 def test_mscript_drafter_system_allows_null_output() -> None:

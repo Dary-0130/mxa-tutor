@@ -64,7 +64,7 @@
 - `subsystem_breakdown`:8 步搭建流程
 - `m_script_skeleton`:基于 EQ-01 的 .m 代码骨架(约 30 行)
 - `evidence`:3 个 PaperEvidenceEntry,全 document_extracted,引用核心论文段落
-- `build_steps`:TASK-507-A 契约 substrate 阶段固定为 `null`
+- `build_steps`:golden sample 仍为 `null`;live run 自 TASK-507-B 起可生成非空结构化步骤,build_steps 指标留 TASK-509 接入
 
 ---
 
