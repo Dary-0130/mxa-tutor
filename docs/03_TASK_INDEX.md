@@ -349,9 +349,9 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅] 17/17 (paper-to-model TASK-500~507-A;MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅] 18/18 (paper-to-model TASK-500~507-B;MATLAB bridge/engine TASK-510~519)
 
-总计: 48/50
+总计: 49/51
 ```
 
 ---
@@ -374,6 +374,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-505 | 首页双线入口(工程导览 / 资料复现 标签切换 + 左栏清理) | ✅ | Codex | 已合并 main(PR #131 / 8ec54ce);首页「工程导览 / 资料复现」标签切换,露出资料复现入口 → /paper;busy 硬不变量 + tab a11y(role=tablist/tab/tabpanel + roving tabIndex + 方向键导航);清理左栏免责墙;无后端改动 |
 | TASK-506 | 建模指导结构化 · 目标形状 RFC(指导深度第一张) | ✅ | Codex | 设计/RFC 卡,只定形状不改代码;R1 + R6 双审通过 + PM 拍板(v0.3);定义结构化 build_steps + 参数值红线 + 兼容/降级 + 11 条 evaluator 规则,作为 TASK-507 绑定规格 |
 | TASK-507-A | 结构化建模步骤 · 契约 substrate | ✅ | Codex | 只加 build_steps 契约 / schema / 向后兼容 / fixtures;不接生成、不渲染;端到端恒 null,生成在 507-B |
+| TASK-507-B | 结构化建模步骤 · 生成 + 校验 + 降级 + 红线机检 | ✅ | Codex | 已合并 main(PR #136 / 2ae688a);build_step_planner 生成结构化 build_steps + PlanAssembler 11 条校验 + fail-closed 降级 legacy + 红线机检 + 证据双源;对外契约零变更(复用 507-A) |
 | TASK-510 | MATLAB Add-on 连接桥 spike(v0.3-a) | ✅ | Codex | 已合并 main(PR #108 / merge 2026-06-21);只证传输桥,不接 Engine;C 类人工补测由 PM 完成 |
 | TASK-511 | MATLAB bridge LLM 报错解释(v0.3-b b1) | ✅ | Codex | 已合并 main(PR #111 / 53e7861);机制 + 确定性护栏验收通过,质量评估留 seam |
 | TASK-512 | MATLAB Engine substrate gate(v0.3-b b2-0) | ✅ | Codex | 已合并 main(PR #110 / merge 2026-06-22);只证独立 Engine substrate,不接 bridge runtime |
