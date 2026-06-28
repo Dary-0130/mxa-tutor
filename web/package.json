@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "smoke:task402": "node scripts/task402-smoke.mjs",
     "smoke:task504": "node scripts/task504-smoke.mjs",
-    "smoke:task505": "node scripts/task505-smoke.mjs"
+    "smoke:task505": "node scripts/task505-smoke.mjs",
+    "smoke:task508": "node scripts/task508-smoke.mjs"
   },
   "dependencies": {
     "react": "^19.2.6",
