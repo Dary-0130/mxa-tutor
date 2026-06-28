@@ -43,6 +43,24 @@
 .paper-step-card{grid-template-columns:44px minmax(0,1fr);}
 .paper-step-card h3{margin:0 0 10px;overflow-wrap:anywhere;color:var(--color-ite);font-size:.98rem;}
 .paper-step-card small,.paper-plan-evidence li{color:var(--color-cold);font:800 .82rem var(--font-mono);line-height:1.6;}
+.paper-build-step-list{grid-template-columns:1fr;}
+.paper-build-step-card{align-items:start;}
+.paper-build-step-body{display:grid;min-width:0;gap:18px;}
+.paper-build-step-header{display:grid;gap:8px;}
+.paper-build-step-header h3,.paper-build-step-header p{margin:0;}
+.paper-build-step-group{display:grid;gap:10px;min-width:0;}
+.paper-build-step-group h4{margin:0;color:var(--color-signal);font:900 .78rem var(--font-mono);letter-spacing:0;}
+.paper-build-step-block-list,.paper-build-step-param-list,.paper-build-step-hint-list,.paper-build-step-dependency-list{display:grid;gap:10px;padding:0;margin:0;list-style:none;}
+.paper-build-step-block,.paper-build-step-hint-list>li{display:grid;gap:10px;min-width:0;border:1px solid rgba(220,230,220,.16);padding:12px;}
+.paper-build-step-block p,.paper-build-step-hint-list p{margin:0;}
+.paper-build-step-token-row,.paper-build-step-param-list li,.paper-build-step-wire,.paper-build-step-ports,.paper-build-step-dependency-list{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;}
+.paper-build-step-param-list li{border-left:2px solid var(--color-signal);padding-left:10px;}
+.paper-build-step-library{display:grid;gap:4px;}
+.paper-build-step-library>span:first-child{color:var(--color-signal);font:900 .76rem var(--font-mono);}
+.paper-build-step-card .paper-token{max-width:100%;overflow-wrap:anywhere;word-break:break-word;}
+.paper-build-step-library .paper-token{display:block;min-width:0;}
+.paper-build-step-meta-list{display:flex;flex-wrap:wrap;gap:8px;}
+.paper-build-step-meta{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px;max-width:100%;}
 
 .paper-parameter-area{display:grid;gap:16px;}
 .paper-param-table{display:grid;border:1px solid rgba(220,230,220,.16);background:rgba(8,13,13,.72);}
