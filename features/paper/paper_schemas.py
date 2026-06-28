@@ -10,8 +10,13 @@ from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
     BlockRecommendation,
+    ConfigurationHint,
+    ConnectionHint,
+    ModelBuildStep,
     ModelGenerationPlan,
     ParameterMapping,
+    ParameterMappingRef,
+    StepBlockRef,
 )
 from core.domain.paper_spec import (
     EquationEntry,
@@ -149,6 +154,95 @@ class ParameterMappingModel(_StrictBaseModel):
         )
 
 
+class StepBlockRefModel(_StrictBaseModel):
+    block_ref_id: str = Field(min_length=1)
+    block_type: str = Field(min_length=1)
+    library_path: str | None = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+    paper_reference: PaperEvidenceEntryModel | None
+
+    def to_domain(self) -> StepBlockRef:
+        return StepBlockRef(
+            block_ref_id=self.block_ref_id,
+            block_type=self.block_type,
+            library_path=self.library_path,
+            purpose=self.purpose,
+            paper_reference=(
+                self.paper_reference.to_domain() if self.paper_reference is not None else None
+            ),
+        )
+
+
+class ParameterMappingRefModel(_StrictBaseModel):
+    paper_param_name: str = Field(min_length=1)
+    model_param_name: str = Field(min_length=1)
+
+    def to_domain(self) -> ParameterMappingRef:
+        return ParameterMappingRef(
+            paper_param_name=self.paper_param_name,
+            model_param_name=self.model_param_name,
+        )
+
+
+class ConnectionHintModel(_StrictBaseModel):
+    from_block_ref: str = Field(min_length=1)
+    from_port: str | None = Field(min_length=1)
+    to_block_ref: str = Field(min_length=1)
+    to_port: str | None = Field(min_length=1)
+    signal_meaning: str | None = Field(min_length=1)
+
+    def to_domain(self) -> ConnectionHint:
+        return ConnectionHint(
+            from_block_ref=self.from_block_ref,
+            from_port=self.from_port,
+            to_block_ref=self.to_block_ref,
+            to_port=self.to_port,
+            signal_meaning=self.signal_meaning,
+        )
+
+
+class ConfigurationHintModel(_StrictBaseModel):
+    target: str = Field(min_length=1)
+    setting_name: str | None = Field(min_length=1)
+    instruction: str = Field(min_length=1)
+    evidence: list[PaperEvidenceEntryModel]
+
+    def to_domain(self) -> ConfigurationHint:
+        return ConfigurationHint(
+            target=self.target,
+            setting_name=self.setting_name,
+            instruction=self.instruction,
+            evidence=[entry.to_domain() for entry in self.evidence],
+        )
+
+
+class ModelBuildStepModel(_StrictBaseModel):
+    step_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    intent: str = Field(min_length=1)
+    block_refs: list[StepBlockRefModel]
+    parameter_refs: list[ParameterMappingRefModel]
+    connection_hints: list[ConnectionHintModel]
+    configuration_hints: list[ConfigurationHintModel]
+    depends_on: list[str]
+    evidence: list[PaperEvidenceEntryModel]
+    display_text: str = Field(min_length=1)
+
+    def to_domain(self) -> ModelBuildStep:
+        return ModelBuildStep(
+            step_id=self.step_id,
+            title=self.title,
+            intent=self.intent,
+            block_refs=[entry.to_domain() for entry in self.block_refs],
+            parameter_refs=[entry.to_domain() for entry in self.parameter_refs],
+            connection_hints=[entry.to_domain() for entry in self.connection_hints],
+            configuration_hints=[entry.to_domain() for entry in self.configuration_hints],
+            depends_on=self.depends_on,
+            evidence=[entry.to_domain() for entry in self.evidence],
+            display_text=self.display_text,
+        )
+
+
 class ParameterDirectionModel(_StrictBaseModel):
     param_name: str = Field(min_length=1)
     direction: ParameterDirectionValue
@@ -196,6 +290,7 @@ class ModelGenerationPlanModel(_StrictBaseModel):
     subsystem_breakdown: list[str] = Field(min_length=3, max_length=10)
     m_script_skeleton: str | None = None
     evidence: list[PaperEvidenceEntryModel] = Field(min_length=1)
+    build_steps: list[ModelBuildStepModel] | None = Field(default=None, min_length=1)
 
     def to_domain(self) -> ModelGenerationPlan:
         return ModelGenerationPlan(
@@ -207,6 +302,11 @@ class ModelGenerationPlanModel(_StrictBaseModel):
             subsystem_breakdown=self.subsystem_breakdown,
             m_script_skeleton=self.m_script_skeleton,
             evidence=[entry.to_domain() for entry in self.evidence],
+            build_steps=(
+                [entry.to_domain() for entry in self.build_steps]
+                if self.build_steps is not None
+                else None
+            ),
         )
 
 
