@@ -70,6 +70,7 @@ from features.paper import (
     PaperSpecService,
     UserSupplyService,
 )
+from features.paper.paper_ask_service import PaperAskService
 from features.paper.paper_plan_service import PaperPlanService
 from features.paper.paper_tuning_service import TuningSuggestionService
 
@@ -326,6 +327,13 @@ def get_paper_user_supply_service(
 ) -> UserSupplyService:
     """装配 UserSupplyService。"""
     return UserSupplyService(cache=cache)
+
+
+def get_paper_ask_service(
+    text_provider: Annotated[TextProvider, Depends(get_text_provider)],
+) -> PaperAskService:
+    """装配 PaperAskService。"""
+    return PaperAskService(text_provider=text_provider)
 
 
 def get_paper_tuning_service(

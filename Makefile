@@ -35,6 +35,7 @@ clean:
 export-schema:
 	python -m scripts.export_overview_schema
 	python -m scripts.export_bridge_schemas
+	python -m scripts.export_paper_schemas
 
 verify-schema: export-schema
 	@git diff --exit-code schemas/project_overview.schema.json \
@@ -58,3 +59,11 @@ verify-schema: export-schema
 		schemas/bridge_run_state_coaching_result.schema.json \
 		schemas/bridge_run_state_write_error.schema.json \
 		|| (echo "bridge schemas drifted. Regenerate with 'make export-schema' and commit." && exit 1)
+	@git diff --exit-code schemas/paper_evidence.schema.json \
+		schemas/paper_spec.schema.json \
+		schemas/paper_plan.schema.json \
+		schemas/paper_tuning.schema.json \
+		schemas/paper_missing.schema.json \
+		schemas/paper_ask_request.schema.json \
+		schemas/paper_ask_response.schema.json \
+		|| (echo "paper schemas drifted. Regenerate with 'make export-schema' and commit." && exit 1)

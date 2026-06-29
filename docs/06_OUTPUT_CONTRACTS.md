@@ -518,7 +518,70 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 `paper_reference.source` 必须是 `document_extracted`,用于指出缺失线索来自哪里;用户回填后的参数证据
 另以 `source = user_supplied` 的 `PaperEvidenceEntry` 表示。
 
-### 12.8 反模式
+### 12.8 PaperAsk schema
+
+`PaperAsk` 描述资料追问端点 `POST /api/v1/papers/{paper_id}/ask` 的对外请求和响应。
+它是 stateless v0: `session_id` 只回显或由服务端生成,服务端不据此读取历史。
+
+同步项:
+
+| 层 | 路径 |
+|---|---|
+| Domain | `core/domain/paper_ask.py` |
+| Pydantic wrapper | `features/paper/paper_ask_schemas.py` |
+| JSON Schema | `schemas/paper_ask_request.schema.json` / `schemas/paper_ask_response.schema.json` |
+| Service | `features/paper/paper_ask_service.py` |
+| Prompt | `core/prompts/paper_ask.yaml` |
+| TS mirror | `web/src/lib/paperTypes.ts` |
+
+`PaperAskRequest`:
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `question` | string | 1..1000;strip 后不能为空 | 用户本次追问;服务端保留原文,不自动 trim 进 LLM |
+| `session_id` | string/null | 可选 | 仅回显;不代表多轮记忆 |
+
+`PaperAskResponse`:
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `session_id` | string | 必填 | 请求回显或服务端新生成 |
+| `message_id` | string | 必填 | 单次回答 ID |
+| `answer` | string | 1..3000 | 面向用户的回答 |
+| `confidence` | `high` / `medium` / `low` | fallback 恒 `low` | 回答置信度 |
+| `citations` | array[`PaperAskCitation`] | 非 fallback 至少 1 条;fallback 为空 | 本次响应内临时 source_id 展开的引用 |
+| `follow_up_suggestions` | array[string] | 最多 3 条,每条 1..100 | 后续问题建议;fallback 可为空 |
+| `is_fallback` | bool | 默认 false | 是否降级回答 |
+| `fallback_reason` | enum/null | fallback 必填,非 fallback 为 null | 降级原因 |
+
+`fallback_reason` 只接受:
+
+| 字面值 | 语义 |
+|---|---|
+| `insufficient_evidence` | 当前解析结果没有足够合法出处 |
+| `invalid_or_missing_citations` | LLM 输出缺失、格式错、引用未知 source_id 或含越权跳转信息 |
+| `citation_target_unresolved` | source_id 对应语义 target 已无法在当前 spec/plan 中解析 |
+| `out_of_scope` | 问题超出资料复现范围 |
+
+`PaperAskCitation` 字段为 `source_id` / `label` / `excerpt` / `source_kind` / `target`。
+`document_extracted` citation 必须带 1..300 字 `excerpt`;该 excerpt 只能来自真实文档摘录结构
+(`PaperSpec.abstract`、`EquationEntry.latex_or_text`、`PaperEvidenceEntry.excerpt`)。用户补充和
+plan 生成文本不得伪装成文档 excerpt。`user_supplied` citation 的 `excerpt` 必须为 null。
+
+`target` 是语义 target,不是 DOM id。四种形态:
+
+| target | 字段 | 语义 |
+|---|---|---|
+| `SectionTarget` | `kind="section"`, `result_section` | 粗粒度结果区块:`paper-summary` / `paper-subsystems` / `paper-build-steps` / `paper-parameters` / `paper-tuning` |
+| `EquationTarget` | `kind="equation"`, `equation_id` | PaperSpec 中存在的公式 |
+| `PlanMappingParameterTarget` | `kind="parameter"`, `origin="plan_mapping"`, `row_index`, names | 当前 plan parameter table 的 0-based 行位序;名字只作展示 |
+| `MissingPromptParameterTarget` | `kind="parameter"`, `origin="missing_prompt"`, `prompt_id`, `parameter_name` | 当前 remaining missing prompts 中仍待补的提示 |
+
+三层真值源固定:后端 source_table 只生成临时 `S?` 引用并校验语义 target;后端不生成前端
+DOM id;前端 AnchorRegistry 负责把合法语义 target 解析为可点击位置。非 fallback 必须至少有
+一个合法 citation;fallback 必须 `confidence="low"`、`citations=[]` 且 `fallback_reason` 非空。
+
+### 12.9 反模式
 
 反模式 1:资料入口使用 `general`:
 

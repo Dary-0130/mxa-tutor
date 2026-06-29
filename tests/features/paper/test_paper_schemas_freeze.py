@@ -2,8 +2,18 @@ from dataclasses import fields
 from typing import Any, get_args
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from core.domain.paper_ask import (
+    EquationTarget,
+    MissingPromptParameterTarget,
+    PaperAskCitation,
+    PaperAskFallbackReason,
+    PaperAskRequest,
+    PaperAskResponse,
+    PlanMappingParameterTarget,
+    SectionTarget,
+)
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
@@ -18,6 +28,16 @@ from core.domain.paper_plan import (
 )
 from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
 from core.domain.paper_tuning import ParameterDirection, TuningSuggestion
+from features.paper.paper_ask_schemas import (
+    EquationTargetModel,
+    MissingPromptParameterTargetModel,
+    PaperAskCitationModel,
+    PaperAskRequestModel,
+    PaperAskResponseModel,
+    PaperCitationTargetModel,
+    PlanMappingParameterTargetModel,
+    SectionTargetModel,
+)
 from features.paper.paper_schemas import (
     BlockRecommendationModel,
     ConfigurationHintModel,
@@ -43,6 +63,8 @@ TOP_LEVEL_MODELS = (
     ModelGenerationPlanModel,
     TuningSuggestionModel,
     MissingParameterPromptModel,
+    PaperAskRequestModel,
+    PaperAskResponseModel,
 )
 
 NESTED_MODELS = (
@@ -57,6 +79,11 @@ NESTED_MODELS = (
     ConfigurationHintModel,
     ModelBuildStepModel,
     ParameterDirectionModel,
+    PaperAskCitationModel,
+    SectionTargetModel,
+    EquationTargetModel,
+    PlanMappingParameterTargetModel,
+    MissingPromptParameterTargetModel,
 )
 
 
@@ -82,6 +109,25 @@ def _user_evidence_payload() -> dict[str, object]:
     }
 
 
+def _paper_ask_citation_payload(
+    *,
+    source_kind: str = "document_extracted",
+    excerpt: str | None = "The report states the machine component.",
+    target: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "source_id": "S1",
+        "label": "Paper summary",
+        "excerpt": excerpt,
+        "source_kind": source_kind,
+        "target": target
+        or {
+            "kind": "section",
+            "result_section": "paper-summary",
+        },
+    }
+
+
 def _constraint_value(schema_cls: type[BaseModel], field_name: str, constraint_name: str) -> Any:
     field_info = schema_cls.model_fields[field_name]
     for item in field_info.metadata:
@@ -97,6 +143,8 @@ def test_top_level_model_count_and_names_are_frozen() -> None:
         "ModelGenerationPlanModel",
         "TuningSuggestionModel",
         "MissingParameterPromptModel",
+        "PaperAskRequestModel",
+        "PaperAskResponseModel",
     ]
 
 
@@ -113,6 +161,11 @@ def test_nested_model_count_and_names_are_frozen() -> None:
         "ConfigurationHintModel",
         "ModelBuildStepModel",
         "ParameterDirectionModel",
+        "PaperAskCitationModel",
+        "SectionTargetModel",
+        "EquationTargetModel",
+        "PlanMappingParameterTargetModel",
+        "MissingPromptParameterTargetModel",
     ]
 
 
@@ -138,6 +191,12 @@ def test_serialize_only_field_order_matches_domain() -> None:
     )
     assert tuple(MissingParameterPromptModel.model_fields) == tuple(
         field.name for field in fields(MissingParameterPrompt)
+    )
+    assert tuple(PaperAskRequestModel.model_fields) == tuple(
+        field.name for field in fields(PaperAskRequest)
+    )
+    assert tuple(PaperAskResponseModel.model_fields) == tuple(
+        field.name for field in fields(PaperAskResponse)
     )
 
 
@@ -173,6 +232,21 @@ def test_nested_field_order_matches_domain() -> None:
     assert tuple(ParameterDirectionModel.model_fields) == tuple(
         field.name for field in fields(ParameterDirection)
     )
+    assert tuple(PaperAskCitationModel.model_fields) == tuple(
+        field.name for field in fields(PaperAskCitation)
+    )
+    assert tuple(SectionTargetModel.model_fields) == tuple(
+        field.name for field in fields(SectionTarget)
+    )
+    assert tuple(EquationTargetModel.model_fields) == tuple(
+        field.name for field in fields(EquationTarget)
+    )
+    assert tuple(PlanMappingParameterTargetModel.model_fields) == tuple(
+        field.name for field in fields(PlanMappingParameterTarget)
+    )
+    assert tuple(MissingPromptParameterTargetModel.model_fields) == tuple(
+        field.name for field in fields(MissingPromptParameterTarget)
+    )
 
 
 def test_model_generation_plan_micro_patch_constraints_are_frozen() -> None:
@@ -207,6 +281,100 @@ def test_build_steps_empty_rejected_and_json_schema_has_min_items() -> None:
 
     build_steps_schema = ModelGenerationPlanModel.model_json_schema()["properties"]["build_steps"]
     assert build_steps_schema["anyOf"][0]["minItems"] == 1
+
+
+def test_paper_ask_defaults_and_literals_are_frozen() -> None:
+    assert PaperAskRequestModel.model_fields["session_id"].default is None
+    assert PaperAskResponseModel.model_fields["is_fallback"].default is False
+    assert PaperAskResponseModel.model_fields["fallback_reason"].default is None
+    assert get_args(PaperAskFallbackReason) == (
+        "insufficient_evidence",
+        "invalid_or_missing_citations",
+        "citation_target_unresolved",
+        "out_of_scope",
+    )
+
+
+def test_paper_ask_target_union_roundtrips_four_variants() -> None:
+    adapter = TypeAdapter(PaperCitationTargetModel)
+    payloads = [
+        {"kind": "section", "result_section": "paper-summary"},
+        {"kind": "equation", "equation_id": "EQ-main"},
+        {
+            "kind": "parameter",
+            "origin": "plan_mapping",
+            "row_index": 0,
+            "paper_param_name": "Inertia",
+            "model_param_name": "Machine inertia",
+        },
+        {
+            "kind": "parameter",
+            "origin": "missing_prompt",
+            "prompt_id": "MISS-H",
+            "parameter_name": "Damping",
+        },
+    ]
+
+    for payload in payloads:
+        model = adapter.validate_python(payload)
+        assert adapter.dump_python(model, mode="json") == payload
+
+
+def test_paper_ask_response_invariants_are_enforced() -> None:
+    success_payload = {
+        "session_id": "session-1",
+        "message_id": "message-1",
+        "answer": "The source supports this answer.",
+        "confidence": "medium",
+        "citations": [_paper_ask_citation_payload()],
+        "follow_up_suggestions": [],
+        "is_fallback": False,
+        "fallback_reason": None,
+    }
+    fallback_payload = {
+        **success_payload,
+        "citations": [],
+        "confidence": "low",
+        "is_fallback": True,
+        "fallback_reason": "insufficient_evidence",
+    }
+
+    assert PaperAskResponseModel.model_validate(success_payload).to_domain().citations
+    assert PaperAskResponseModel.model_validate(fallback_payload).to_domain().is_fallback
+
+    with pytest.raises(ValidationError):
+        PaperAskResponseModel.model_validate({**success_payload, "citations": []})
+    with pytest.raises(ValidationError):
+        PaperAskResponseModel.model_validate({**fallback_payload, "confidence": "medium"})
+
+
+def test_paper_ask_source_kind_excerpt_invariant_is_enforced() -> None:
+    assert PaperAskCitationModel.model_validate(_paper_ask_citation_payload()).excerpt
+    assert (
+        PaperAskCitationModel.model_validate(
+            _paper_ask_citation_payload(source_kind="user_supplied", excerpt=None)
+        ).excerpt
+        is None
+    )
+
+    with pytest.raises(ValidationError):
+        PaperAskCitationModel.model_validate(_paper_ask_citation_payload(excerpt=None))
+    with pytest.raises(ValidationError):
+        PaperAskCitationModel.model_validate(
+            _paper_ask_citation_payload(source_kind="user_supplied", excerpt="bad")
+        )
+
+
+def test_paper_ask_question_blank_rejected_without_trimming_value() -> None:
+    model = PaperAskRequestModel.model_validate({"question": "  keep me  "})
+    assert model.question == "  keep me  "
+    with pytest.raises(ValidationError):
+        PaperAskRequestModel.model_validate({"question": "   "})
+
+
+def test_answer_kind_is_internal_and_not_exported_in_public_response_schema() -> None:
+    schema_text = str(PaperAskResponseModel.model_json_schema())
+    assert "answer_kind" not in schema_text
 
 
 def test_new_build_step_submodel_extra_forbid_is_enforced() -> None:

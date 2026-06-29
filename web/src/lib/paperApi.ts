@@ -1,5 +1,7 @@
 import { apiGet, apiPost, apiUploadTask, type UploadTask } from "./api";
 import type {
+  PaperAskRequest,
+  PaperAskResponse,
   PaperPlanResponse,
   PaperSpecResponse,
   TuningSuggestRequest,
@@ -33,6 +35,13 @@ export function postTuningSuggest(
   request: TuningSuggestRequest,
 ): Promise<TuningSuggestResponse> {
   return apiPost<TuningSuggestResponse>(paperPath(paperId, "/tuning-suggest"), request);
+}
+
+export function postPaperAsk(
+  paperId: string,
+  request: PaperAskRequest,
+): Promise<PaperAskResponse> {
+  return apiPost<PaperAskResponse>(paperPath(paperId, "/ask"), request);
 }
 
 export function postUserSupply(
