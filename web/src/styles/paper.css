@@ -35,6 +35,11 @@
 .paper-subsystem-card>span,.paper-step-index{color:var(--color-signal);font-weight:950;}
 .paper-subsystem-card p,.paper-step-card p{margin:0;}
 
+.paper-equation-list{display:grid;gap:12px;padding:0;margin:0;list-style:none;}
+.paper-equation-item{display:grid;grid-template-columns:minmax(96px,.2fr) minmax(0,1fr);gap:12px;align-items:start;border:1px solid rgba(220,230,220,.16);background:rgba(8,13,13,.72);padding:14px;}
+.paper-equation-id{color:var(--color-signal);font:900 .78rem var(--font-mono);line-height:1.5;}
+.paper-equation-body{min-width:0;margin:0;color:var(--color-ite);font:800 .94rem var(--font-mono);line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;}
+
 .paper-build-steps{display:grid;gap:18px;}
 .paper-library-choice{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin:0;color:var(--color-cold);}
 .paper-library-choice span{font-weight:850;}
@@ -70,6 +75,7 @@
 .paper-param-row--head{min-height:44px;background:rgba(220,230,220,.06);}
 .paper-param-row--head>span{color:var(--color-cold);font:900 .78rem var(--font-mono);}
 .paper-param-row small{margin-left:6px;color:var(--color-cold);font:800 .78rem var(--font-mono);}
+.paper-anchor-stub{display:block;width:0;height:0;overflow:hidden;line-height:0;}
 
 .paper-source-badge{display:inline-flex;width:fit-content;align-items:center;gap:6px;border:1px solid var(--color-signal);padding:6px 8px;color:var(--color-concrete);background:var(--color-signal);font:900 .76rem var(--font-mono);}
 .paper-source-badge[data-kind="user_supplied_resolved"]{color:var(--color-signal);background:transparent;}
@@ -115,7 +121,7 @@
   .paper-header h1{font-size:2.3rem;}
   .paper-section-nav{position:sticky;top:0;left:auto;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));width:auto;margin:0 -16px 24px;padding:10px 16px;background:rgba(8,13,13,.88);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);}
   .paper-section-nav a{border-left:0;border-bottom:2px solid rgba(220,230,220,.18);padding:8px 0;text-align:center;}
-  .paper-param-row,.paper-direction-item,.paper-tuning-form{grid-template-columns:1fr;}
+  .paper-param-row,.paper-direction-item,.paper-tuning-form,.paper-equation-item{grid-template-columns:1fr;}
   .paper-param-row--head{display:none;}
   .paper-param-row>span{border-top:1px solid rgba(220,230,220,.08);}
 }

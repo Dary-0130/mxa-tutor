@@ -1,4 +1,5 @@
 import { GlassCard } from "../../components/ui/GlassCard";
+import { formatEvidence } from "../../lib/paperEvidence";
 import type {
   ModelBuildStep,
   ModelGenerationPlan,
@@ -6,20 +7,6 @@ import type {
   StepBlockRef,
 } from "../../lib/paperTypes";
 import { SourceBadge, type SourceBadgeKind } from "./SourceBadge";
-
-function formatEvidence(entry: PaperEvidenceEntry): string {
-  const parts: string[] = [];
-  if (entry.paper_section_id) {
-    parts.push(`章节 ${entry.paper_section_id}`);
-  }
-  if (entry.equation_id) {
-    parts.push(`式(${entry.equation_id})`);
-  }
-  if (entry.figure_id) {
-    parts.push(`图(${entry.figure_id})`);
-  }
-  return parts.length > 0 ? `依据:${parts.join(" · ")}` : "";
-}
 
 function sourceToBadgeKind(source: PaperEvidenceEntry["source"]): SourceBadgeKind | null {
   if (source === "document_extracted") return "document_extracted";

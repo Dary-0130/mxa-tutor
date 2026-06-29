@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const SECTIONS = [
   { id: "paper-summary", label: "论文摘要" },
@@ -8,8 +8,22 @@ const SECTIONS = [
   { id: "paper-tuning", label: "调参建议" },
 ] as const;
 
-export function SectionNav() {
-  const [activeId, setActiveId] = useState<string>(SECTIONS[0].id);
+const EQUATION_SECTION = { id: "paper-equations", label: "公式" } as const;
+
+interface SectionNavProps {
+  includeEquations?: boolean;
+}
+
+export function SectionNav({ includeEquations = false }: SectionNavProps) {
+  const sections = useMemo(
+    () =>
+      includeEquations
+        ? [SECTIONS[0], EQUATION_SECTION, ...SECTIONS.slice(1)]
+        : [...SECTIONS],
+    [includeEquations],
+  );
+  const [activeId, setActiveId] = useState<string>(sections[0].id);
+  const visibleActiveId = sections.some((section) => section.id === activeId) ? activeId : sections[0].id;
 
   useEffect(() => {
     if (!("IntersectionObserver" in window)) {
@@ -26,22 +40,22 @@ export function SectionNav() {
       },
       { rootMargin: "-18% 0px -62% 0px", threshold: [0.2, 0.45, 0.7] },
     );
-    for (const section of SECTIONS) {
+    for (const section of sections) {
       const element = document.getElementById(section.id);
       if (element) {
         observer.observe(element);
       }
     }
     return () => observer.disconnect();
-  }, []);
+  }, [sections]);
 
   return (
     <nav className="paper-section-nav" aria-label="论文工作台章节">
-      {SECTIONS.map((section) => (
+      {sections.map((section) => (
         <a
           key={section.id}
           href={`#${section.id}`}
-          data-active={activeId === section.id ? "true" : undefined}
+          data-active={visibleActiveId === section.id ? "true" : undefined}
           onClick={() => setActiveId(section.id)}
         >
           {section.label}
