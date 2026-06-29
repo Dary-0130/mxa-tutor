@@ -3,6 +3,7 @@ import { PanoramaScene } from "../components/scene/PanoramaScene";
 import { ApiException } from "../lib/api";
 import { resolveErrorMessage } from "../lib/errorMessages";
 import { BuildSteps } from "./paper/BuildSteps";
+import { EquationList } from "./paper/EquationList";
 import { PaperHeader } from "./paper/PaperHeader";
 import { ParameterTable } from "./paper/ParameterTable";
 import { SectionNav } from "./paper/SectionNav";
@@ -56,6 +57,8 @@ export function PaperResultPage() {
       />
     );
   }
+  const renderableEquations = data.spec.equations.filter((equation) => equation.latex_or_text.trim() !== "");
+  const includeEquations = renderableEquations.length > 0;
 
   return (
     <main className="paper-page">
@@ -63,7 +66,7 @@ export function PaperResultPage() {
       <p className="sr-only">
         论文复现阅读工作台包含论文摘要、子系统划分、建模步骤、参数对照和调参建议。
       </p>
-      <SectionNav />
+      <SectionNav includeEquations={includeEquations} />
       <div className="paper-shell">
         <PaperHeader spec={data.spec} />
         <section id="paper-summary" className="paper-section" aria-labelledby="paper-summary-title">
@@ -72,6 +75,12 @@ export function PaperResultPage() {
             <p className="paper-copy">{data.spec.abstract}</p>
           </div>
         </section>
+        {includeEquations ? (
+          <section id="paper-equations" className="paper-section" aria-labelledby="paper-equations-title">
+            <h2 id="paper-equations-title">公式</h2>
+            <EquationList items={renderableEquations} />
+          </section>
+        ) : null}
         <section id="paper-subsystems" className="paper-section" aria-labelledby="paper-subsystems-title">
           <h2 id="paper-subsystems-title">子系统划分</h2>
           <SubsystemMap items={data.plan.subsystem_breakdown} />

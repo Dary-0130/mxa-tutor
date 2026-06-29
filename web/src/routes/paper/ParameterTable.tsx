@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { GlassCard } from "../../components/ui/GlassCard";
+import { formatEvidence } from "../../lib/paperEvidence";
 import type {
   MissingParameterPrompt,
   ModelGenerationPlan,
-  PaperEvidenceEntry,
   ParameterMapping,
   UserSuppliedResponse,
 } from "../../lib/paperTypes";
+import { makeMissingPromptAnchorId, makePlanMappingAnchorId } from "./paperAnchors";
 import { SourceBadge, type SourceBadgeKind } from "./SourceBadge";
 import type { PaperPlanUpdate } from "./usePaperResult";
 import { useUserSupply } from "./useUserSupply";
@@ -22,6 +23,7 @@ type DraftMap = Record<string, { value: string; unit: string }>;
 
 type ParameterRow = {
   key: string;
+  mappingIndex?: number;
   mapping?: ParameterMapping;
   prompt?: MissingParameterPrompt;
 };
@@ -32,20 +34,6 @@ type SourceRow = {
   value?: string | null;
   user_supplied_value?: string | null;
 };
-
-function formatEvidence(entry: PaperEvidenceEntry): string {
-  const parts: string[] = [];
-  if (entry.paper_section_id) {
-    parts.push(`章节 ${entry.paper_section_id}`);
-  }
-  if (entry.equation_id) {
-    parts.push(`式(${entry.equation_id})`);
-  }
-  if (entry.figure_id) {
-    parts.push(`图(${entry.figure_id})`);
-  }
-  return parts.length > 0 ? `依据:${parts.join(" · ")}` : "依据:未标注";
-}
 
 function mergeRows(
   mappings: ParameterMapping[],
@@ -65,7 +53,7 @@ function mergeRows(
     if (prompt) {
       usedPromptIds.add(prompt.prompt_id);
     }
-    return { key: `mapping-${mapping.paper_param_name}-${index}`, mapping, prompt };
+    return { key: `mapping-${mapping.paper_param_name}-${index}`, mappingIndex: index, mapping, prompt };
   });
   for (const prompt of prompts) {
     if (!usedPromptIds.has(prompt.prompt_id)) {
@@ -170,6 +158,16 @@ export function ParameterTable({
         </div>
         {rows.map((row) => {
           const prompt = row.prompt;
+          const promptAnchorId = prompt ? makeMissingPromptAnchorId(prompt.prompt_id) : undefined;
+          const mappingAnchorId =
+            row.mapping && row.mappingIndex !== undefined
+              ? makePlanMappingAnchorId(
+                  row.mappingIndex,
+                  row.mapping.paper_param_name,
+                  row.mapping.model_param_name,
+                )
+              : undefined;
+          const rowAnchorId = mappingAnchorId ?? (!row.mapping ? promptAnchorId : undefined);
           const draft = prompt ? drafts[prompt.prompt_id] : undefined;
           const sourceKind = getParamSourceKind({
             kind: prompt && !prompt.user_supplied_value ? "missing" : "mapping",
@@ -178,7 +176,7 @@ export function ParameterTable({
             user_supplied_value: prompt?.user_supplied_value,
           });
           return (
-            <div className="paper-param-row" role="row" key={row.key}>
+            <div className="paper-param-row" role="row" key={row.key} id={rowAnchorId}>
               <span className="paper-token" role="cell">
                 {row.mapping?.paper_param_name ?? prompt?.parameter_name}
               </span>
@@ -193,6 +191,9 @@ export function ParameterTable({
                 <SourceBadge kind={sourceKind} />
               </span>
               <span role="cell">
+                {row.mapping && promptAnchorId ? (
+                  <span id={promptAnchorId} className="paper-anchor-stub" aria-hidden="true" />
+                ) : null}
                 {prompt && !prompt.user_supplied_value ? (
                   <label className="paper-missing-input">
                     <input
@@ -205,7 +206,7 @@ export function ParameterTable({
                       placeholder={prompt.suggested_unit ?? "单位"}
                       onChange={(event) => updateDraft(prompt.prompt_id, "unit", event.target.value)}
                     />
-                    <small>{formatEvidence(prompt.paper_reference)}</small>
+                    <small>{formatEvidence(prompt.paper_reference, { emptyText: "依据:未标注" })}</small>
                   </label>
                 ) : (
                   null
@@ -235,7 +236,9 @@ export function ParameterTable({
         ) : (
           <ul>
             {plan.evidence.map((entry, index) => (
-              <li key={`${entry.paper_section_id ?? "evidence"}-${index}`}>{formatEvidence(entry)}</li>
+              <li key={`${entry.paper_section_id ?? "evidence"}-${index}`}>
+                {formatEvidence(entry, { emptyText: "依据:未标注" })}
+              </li>
             ))}
           </ul>
         )}
