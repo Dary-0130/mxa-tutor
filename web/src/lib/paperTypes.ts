@@ -9,6 +9,11 @@ export type PaperDomain =
 export type PaperType = "paper" | "report" | "thesis";
 export type TuningDirection = "increase" | "decrease" | "tune_within_range";
 export type Confidence = "high" | "medium" | "low";
+export type PaperAskFallbackReason =
+  | "insufficient_evidence"
+  | "invalid_or_missing_citations"
+  | "citation_target_unresolved"
+  | "out_of_scope";
 
 export type PaperCitationTarget =
   | SectionTarget
@@ -178,6 +183,30 @@ export interface TuningSuggestion {
   confidence: Confidence;
   evidence: PaperEvidenceEntry[];
   disclaimer: string;
+}
+
+export interface PaperAskRequest {
+  question: string;
+  session_id?: string | null;
+}
+
+export interface PaperAskCitation {
+  source_id: string;
+  label: string;
+  excerpt: string | null;
+  source_kind: EvidenceSource;
+  target: PaperCitationTarget;
+}
+
+export interface PaperAskResponse {
+  session_id: string;
+  message_id: string;
+  answer: string;
+  confidence: Confidence;
+  citations: PaperAskCitation[];
+  follow_up_suggestions: string[];
+  is_fallback: boolean;
+  fallback_reason: PaperAskFallbackReason | null;
 }
 
 export interface UploadDocumentResponse {

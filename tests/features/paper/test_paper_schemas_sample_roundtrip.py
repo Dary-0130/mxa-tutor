@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from features.paper.paper_ask_schemas import PaperAskRequestModel, PaperAskResponseModel
 from features.paper.paper_schemas import (
     MissingParameterPromptModel,
     ModelGenerationPlanModel,
@@ -66,3 +67,96 @@ def test_expected_updated_plan_roundtrip_matches_sample_json() -> None:
     assert data["build_steps"] is None
     assert model.build_steps is None
     assert _json_dump(ModelGenerationPlanModel.from_domain(model.to_domain())) == data
+
+
+def test_paper_ask_request_roundtrip_matches_sample_json() -> None:
+    data = {
+        "question": "How should I interpret the model structure?",
+        "session_id": None,
+    }
+    model = PaperAskRequestModel.model_validate(data)
+
+    assert _json_dump(PaperAskRequestModel.from_domain(model.to_domain())) == data
+
+
+def test_paper_ask_success_multi_citation_roundtrip_matches_sample_json() -> None:
+    data = {
+        "session_id": "session-a",
+        "message_id": "message-a",
+        "answer": "The document summary and equation both support the modelling choice.",
+        "confidence": "medium",
+        "citations": [
+            {
+                "source_id": "S1",
+                "label": "Paper summary",
+                "excerpt": "The document describes the machine and the reproduction goal.",
+                "source_kind": "document_extracted",
+                "target": {"kind": "section", "result_section": "paper-summary"},
+            },
+            {
+                "source_id": "S2",
+                "label": "Equation EQ-main",
+                "excerpt": "The governing relation links the machine state to the response.",
+                "source_kind": "document_extracted",
+                "target": {"kind": "equation", "equation_id": "EQ-main"},
+            },
+        ],
+        "follow_up_suggestions": ["Which subsystem should I inspect first?"],
+        "is_fallback": False,
+        "fallback_reason": None,
+    }
+    model = PaperAskResponseModel.model_validate(data)
+
+    assert _json_dump(PaperAskResponseModel.from_domain(model.to_domain())) == data
+
+
+def test_paper_ask_user_supplied_citation_roundtrip_matches_sample_json() -> None:
+    data = {
+        "session_id": "session-b",
+        "message_id": "message-b",
+        "answer": "The mapped parameter came from the user-supplied completion.",
+        "confidence": "low",
+        "citations": [
+            {
+                "source_id": "S3",
+                "label": "User-supplied parameter: inertia",
+                "excerpt": None,
+                "source_kind": "user_supplied",
+                "target": {
+                    "kind": "parameter",
+                    "origin": "plan_mapping",
+                    "row_index": 0,
+                    "paper_param_name": "inertia",
+                    "model_param_name": "machine inertia",
+                },
+            }
+        ],
+        "follow_up_suggestions": [],
+        "is_fallback": False,
+        "fallback_reason": None,
+    }
+    model = PaperAskResponseModel.model_validate(data)
+
+    assert _json_dump(PaperAskResponseModel.from_domain(model.to_domain())) == data
+
+
+def test_paper_ask_fallback_reasons_roundtrip_match_sample_json() -> None:
+    for reason in (
+        "insufficient_evidence",
+        "invalid_or_missing_citations",
+        "citation_target_unresolved",
+        "out_of_scope",
+    ):
+        data = {
+            "session_id": "session-fallback",
+            "message_id": f"message-{reason}",
+            "answer": "Current parsed sources do not provide a citable answer.",
+            "confidence": "low",
+            "citations": [],
+            "follow_up_suggestions": [],
+            "is_fallback": True,
+            "fallback_reason": reason,
+        }
+        model = PaperAskResponseModel.model_validate(data)
+
+        assert _json_dump(PaperAskResponseModel.from_domain(model.to_domain())) == data

@@ -1,0 +1,280 @@
+{
+  "$defs": {
+    "EquationTargetModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "equation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "equation_id": {
+          "minLength": 1,
+          "title": "Equation Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "equation_id"
+      ],
+      "title": "EquationTargetModel",
+      "type": "object"
+    },
+    "EvidenceSource": {
+      "description": "Source marker for paper-to-model evidence.",
+      "enum": [
+        "document_extracted",
+        "user_supplied"
+      ],
+      "title": "EvidenceSource",
+      "type": "string"
+    },
+    "MissingPromptParameterTargetModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "parameter",
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "const": "missing_prompt",
+          "title": "Origin",
+          "type": "string"
+        },
+        "prompt_id": {
+          "minLength": 1,
+          "title": "Prompt Id",
+          "type": "string"
+        },
+        "parameter_name": {
+          "minLength": 1,
+          "title": "Parameter Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "origin",
+        "prompt_id",
+        "parameter_name"
+      ],
+      "title": "MissingPromptParameterTargetModel",
+      "type": "object"
+    },
+    "PaperAskCitationModel": {
+      "additionalProperties": false,
+      "properties": {
+        "source_id": {
+          "pattern": "^S[1-9][0-9]*$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/EvidenceSource"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SectionTargetModel"
+            },
+            {
+              "$ref": "#/$defs/EquationTargetModel"
+            },
+            {
+              "discriminator": {
+                "mapping": {
+                  "missing_prompt": "#/$defs/MissingPromptParameterTargetModel",
+                  "plan_mapping": "#/$defs/PlanMappingParameterTargetModel"
+                },
+                "propertyName": "origin"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PlanMappingParameterTargetModel"
+                },
+                {
+                  "$ref": "#/$defs/MissingPromptParameterTargetModel"
+                }
+              ]
+            }
+          ],
+          "title": "Target"
+        }
+      },
+      "required": [
+        "source_id",
+        "label",
+        "source_kind",
+        "target"
+      ],
+      "title": "PaperAskCitationModel",
+      "type": "object"
+    },
+    "PlanMappingParameterTargetModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "parameter",
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "const": "plan_mapping",
+          "title": "Origin",
+          "type": "string"
+        },
+        "row_index": {
+          "minimum": 0,
+          "title": "Row Index",
+          "type": "integer"
+        },
+        "paper_param_name": {
+          "minLength": 1,
+          "title": "Paper Param Name",
+          "type": "string"
+        },
+        "model_param_name": {
+          "minLength": 1,
+          "title": "Model Param Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "origin",
+        "row_index",
+        "paper_param_name",
+        "model_param_name"
+      ],
+      "title": "PlanMappingParameterTargetModel",
+      "type": "object"
+    },
+    "SectionTargetModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "section",
+          "title": "Kind",
+          "type": "string"
+        },
+        "result_section": {
+          "enum": [
+            "paper-summary",
+            "paper-subsystems",
+            "paper-build-steps",
+            "paper-parameters",
+            "paper-tuning"
+          ],
+          "title": "Result Section",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "result_section"
+      ],
+      "title": "SectionTargetModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "minLength": 1,
+      "title": "Session Id",
+      "type": "string"
+    },
+    "message_id": {
+      "minLength": 1,
+      "title": "Message Id",
+      "type": "string"
+    },
+    "answer": {
+      "maxLength": 3000,
+      "minLength": 1,
+      "title": "Answer",
+      "type": "string"
+    },
+    "confidence": {
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "citations": {
+      "items": {
+        "$ref": "#/$defs/PaperAskCitationModel"
+      },
+      "title": "Citations",
+      "type": "array"
+    },
+    "follow_up_suggestions": {
+      "items": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 3,
+      "title": "Follow Up Suggestions",
+      "type": "array"
+    },
+    "is_fallback": {
+      "default": false,
+      "title": "Is Fallback",
+      "type": "boolean"
+    },
+    "fallback_reason": {
+      "anyOf": [
+        {
+          "enum": [
+            "insufficient_evidence",
+            "invalid_or_missing_citations",
+            "citation_target_unresolved",
+            "out_of_scope"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fallback Reason"
+    }
+  },
+  "required": [
+    "session_id",
+    "message_id",
+    "answer",
+    "confidence",
+    "citations",
+    "follow_up_suggestions"
+  ],
+  "title": "PaperAskResponseModel",
+  "type": "object"
+}

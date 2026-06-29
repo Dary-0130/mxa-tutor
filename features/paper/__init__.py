@@ -1,6 +1,7 @@
 """Paper-to-model feature package."""
 
 from features.paper._paper_spec_cache import InMemoryPaperSpecCache, PaperSpecCache
+from features.paper.paper_ask_service import PaperAskService
 from features.paper.paper_plan_cache import (
     InMemoryPaperPlanCache,
     PaperPlanCache,
@@ -15,6 +16,7 @@ __all__ = [
     "InMemoryPaperSpecCache",
     "PaperPlanCache",
     "PaperPlanRecord",
+    "PaperAskService",
     "PaperSpecCache",
     "PaperSpecService",
     "TuningSuggestionService",

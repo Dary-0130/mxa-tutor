@@ -10,6 +10,7 @@ import json
 import sys
 from pathlib import Path
 
+from features.paper.paper_ask_schemas import PaperAskRequestSchema, PaperAskResponseSchema
 from features.paper.paper_schemas import (
     MissingParameterPromptSchema,
     ModelGenerationPlanSchema,
@@ -24,6 +25,8 @@ OUTPUTS = {
     Path("schemas/paper_plan.schema.json"): ModelGenerationPlanSchema,
     Path("schemas/paper_tuning.schema.json"): TuningSuggestionSchema,
     Path("schemas/paper_missing.schema.json"): MissingParameterPromptSchema,
+    Path("schemas/paper_ask_request.schema.json"): PaperAskRequestSchema,
+    Path("schemas/paper_ask_response.schema.json"): PaperAskResponseSchema,
 }
 
 
