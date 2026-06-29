@@ -10,6 +10,42 @@ export type PaperType = "paper" | "report" | "thesis";
 export type TuningDirection = "increase" | "decrease" | "tune_within_range";
 export type Confidence = "high" | "medium" | "low";
 
+export type PaperCitationTarget =
+  | SectionTarget
+  | EquationTarget
+  | PlanMappingParameterTarget
+  | MissingPromptParameterTarget;
+
+export interface SectionTarget {
+  kind: "section";
+  result_section:
+    | "paper-summary"
+    | "paper-subsystems"
+    | "paper-build-steps"
+    | "paper-parameters"
+    | "paper-tuning";
+}
+
+export interface EquationTarget {
+  kind: "equation";
+  equation_id: string;
+}
+
+export interface PlanMappingParameterTarget {
+  kind: "parameter";
+  origin: "plan_mapping";
+  row_index: number;
+  paper_param_name: string;
+  model_param_name: string;
+}
+
+export interface MissingPromptParameterTarget {
+  kind: "parameter";
+  origin: "missing_prompt";
+  prompt_id: string;
+  parameter_name: string;
+}
+
 export interface PaperEvidenceEntry {
   source: EvidenceSource;
   paper_section_id?: string | null;
