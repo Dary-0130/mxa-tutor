@@ -197,9 +197,9 @@ async def test_two_llm_calls_run_concurrently_in_each_dag_phase() -> None:
             self,
             block_recommendations: list[BlockRecommendation],
             parameter_mapping: list[ParameterMapping],
-            evidence: list[PaperEvidenceEntry],
+            spec: PaperSpec,
         ) -> list[ModelBuildStepDraft]:
-            _ = block_recommendations, parameter_mapping, evidence
+            _ = block_recommendations, parameter_mapping, spec
             return await self._parallel(_build_step_drafts())  # type: ignore[return-value]
 
     service = ConcurrentService()
@@ -244,9 +244,9 @@ async def test_step2_build_step_planner_awaits_plan_composer_block_recommendatio
             self,
             block_recommendations: list[BlockRecommendation],
             parameter_mapping: list[ParameterMapping],
-            evidence: list[PaperEvidenceEntry],
+            spec: PaperSpec,
         ) -> list[ModelBuildStepDraft]:
-            _ = parameter_mapping, evidence
+            _ = parameter_mapping, spec
             assert self.plan_done
             assert block_recommendations[0].block_type == "Synchronous Machine"
             return _build_step_drafts()
@@ -272,7 +272,7 @@ async def test_all_role_helpers_use_call_llm_json(monkeypatch: pytest.MonkeyPatc
     await service._llm_build_steps(
         [_block_recommendation()],
         [_sentinel_mapping()],
-        [_document_evidence()],
+        _spec(),
     )
     await service._llm_mscript_draft(_spec())
 
@@ -342,6 +342,17 @@ async def test_llm_returned_plan_id_is_overridden_by_python_injection() -> None:
 
 
 @pytest.mark.asyncio
+async def test_plan_composer_strips_private_source_ref_after_stamping_document() -> None:
+    plan = await PayloadPaperPlanService(_payloads())._llm_plan_compose(
+        _spec(), "PLAN-PAPER-001", "PAPER-001"
+    )
+
+    assert plan.evidence[0].document_id == "DOC-001"
+    assert plan.evidence[0].paper_section_id == "S1"
+    assert not hasattr(plan.evidence[0], "source_ref")
+
+
+@pytest.mark.asyncio
 async def test_missing_detector_rejects_paper_reference_not_document_extracted() -> None:
     payloads = _payloads()
     payloads["missing_detector"]["missing_prompts"][0]["paper_reference"] = _user_evidence_payload()
@@ -354,7 +365,7 @@ async def test_missing_detector_rejects_paper_reference_not_document_extracted()
 @pytest.mark.asyncio
 async def test_missing_detector_rejects_figure_id_not_in_spec_whitelist() -> None:
     payloads = _payloads()
-    payloads["missing_detector"]["missing_prompts"][0]["paper_reference"]["figure_id"] = "FIG-99"
+    payloads["missing_detector"]["missing_prompts"][0]["paper_reference"]["source_ref"] = "REF-999"
     service = PayloadPaperPlanService(payloads)
 
     with pytest.raises(PaperPlanGenerationError):
@@ -681,7 +692,7 @@ async def test_evidence_tagger_validates_missing_prompts_paper_reference() -> No
 @pytest.mark.asyncio
 async def test_evidence_tagger_locator_whitelist_fail_raises_502() -> None:
     payloads = _payloads()
-    payloads["plan_composer"]["evidence"][0]["paper_section_id"] = "S9"
+    payloads["plan_composer"]["evidence"][0]["source_ref"] = "REF-999"
 
     with pytest.raises(PaperPlanGenerationError):
         await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
@@ -855,7 +866,11 @@ def _build_steps_payload(
 
 
 def _build_step_drafts() -> list[ModelBuildStepDraft]:
-    return service_module._BuildStepsOutputModel.model_validate(_build_steps_payload()).to_drafts()
+    payload = service_module.apply_plan_evidence_reference_bridge(
+        _build_steps_payload(),
+        service_module.build_plan_evidence_source_refs(_spec()),
+    )
+    return service_module._BuildStepsOutputModel.model_validate(payload).to_drafts()
 
 
 def _plan_payload() -> dict[str, Any]:
@@ -908,6 +923,7 @@ def _spec() -> PaperSpec:
                 equation_id="EQ-01",
                 latex_or_text="H = 3.5",
                 paper_section_id="S1",
+                document_id="DOC-001",
             )
         ],
         parameter_table=[
@@ -921,7 +937,12 @@ def _spec() -> PaperSpec:
             )
         ],
         figure_locations=[
-            FigureRef(figure_id="FIG-01", caption="Machine parameters", paper_section_id="S1")
+            FigureRef(
+                figure_id="FIG-01",
+                caption="Machine parameters",
+                paper_section_id="S1",
+                document_id="DOC-001",
+            )
         ],
         pseudocode_blocks=[],
         evidence=[evidence],
@@ -991,14 +1012,19 @@ def _document_evidence_payload(
     equation_id: str | None = None,
     figure_id: str | None = None,
 ) -> dict[str, Any]:
+    source_ref = "REF-001"
+    if equation_id is not None:
+        source_ref = "REF-002"
+    if figure_id is not None:
+        source_ref = "REF-003"
     return {
         "source": "document_extracted",
-        "document_id": "DOC-001",
-        "paper_section_id": paper_section_id,
-        "equation_id": equation_id,
-        "figure_id": figure_id,
+        "paper_section_id": None,
+        "equation_id": None,
+        "figure_id": None,
         "excerpt": "The report states the machine parameter.",
         "missing_param_prompt_id": None,
+        "source_ref": source_ref,
     }
 
 

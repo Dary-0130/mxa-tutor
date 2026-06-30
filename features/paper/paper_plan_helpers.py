@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import re
 from collections import Counter
 from dataclasses import dataclass, replace
-from typing import NoReturn, Protocol
+from typing import Any, Literal, NoReturn, Protocol
 
 from core.domain.exceptions import MxaError, PaperPlanGenerationError, PaperUserSupplyError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
@@ -24,6 +25,7 @@ from core.domain.paper_plan import (
 from core.domain.paper_spec import PaperSpec
 
 MISSING_VALUE_SENTINEL: str = "null"
+PLAN_EVIDENCE_SOURCE_REF_FIELD: str = "source_ref"
 MissingBindingModel = MissingParameterBinding
 _STEP_ID_RE = re.compile(r"^STEP-\d{3}$")
 _CONFIG_REDLINE_TARGETS = frozenset({"solver", "powergui", "simulation"})
@@ -86,6 +88,18 @@ class ModelBuildStepDraft:
     evidence: list[PaperEvidenceEntry]
 
 
+@dataclass(frozen=True)
+class PlanEvidenceSourceRef:
+    """Backend-owned source tag that plan LLM roles may cite transiently."""
+
+    source_ref: str
+    document_id: str
+    locator_kind: Literal["paper_section_id", "equation_id", "figure_id"]
+    locator_id: str
+    filename: str
+    excerpt: str
+
+
 class EvidenceTagger:
     """Validate and create evidence entries without inventing locators."""
 
@@ -97,10 +111,20 @@ class EvidenceTagger:
         """Validate double-source invariants and PaperSpec locator whitelists."""
 
         allowed_sections = {
-            entry.paper_section_id for entry in spec.evidence if entry.paper_section_id is not None
+            (entry.document_id, entry.paper_section_id)
+            for entry in spec.evidence
+            if entry.document_id is not None and entry.paper_section_id is not None
         }
-        allowed_equations = {entry.equation_id for entry in spec.equations}
-        allowed_figures = {entry.figure_id for entry in spec.figure_locations}
+        allowed_equations = {
+            (entry.document_id, entry.equation_id)
+            for entry in spec.equations
+            if entry.document_id is not None
+        }
+        allowed_figures = {
+            (entry.document_id, entry.figure_id)
+            for entry in spec.figure_locations
+            if entry.document_id is not None
+        }
         allowed_document_ids = {document.document_id for document in spec.documents}
 
         for entry in evidence:
@@ -187,16 +211,195 @@ class EvidenceTagger:
         self,
         *,
         entry: PaperEvidenceEntry,
-        allowed_sections: set[str],
-        allowed_equations: set[str],
-        allowed_figures: set[str],
+        allowed_sections: set[tuple[str, str]],
+        allowed_equations: set[tuple[str, str]],
+        allowed_figures: set[tuple[str, str]],
     ) -> None:
-        if entry.paper_section_id is not None and entry.paper_section_id not in allowed_sections:
+        if entry.source is not EvidenceSource.DOCUMENT_EXTRACTED:
+            return
+        assert entry.document_id is not None
+        if (
+            entry.paper_section_id is not None
+            and (entry.document_id, entry.paper_section_id) not in allowed_sections
+        ):
             raise PaperPlanGenerationError("paper_section_id_outside_whitelist")
-        if entry.equation_id is not None and entry.equation_id not in allowed_equations:
+        if (
+            entry.equation_id is not None
+            and (entry.document_id, entry.equation_id) not in allowed_equations
+        ):
             raise PaperPlanGenerationError("equation_id_outside_whitelist")
-        if entry.figure_id is not None and entry.figure_id not in allowed_figures:
+        if (
+            entry.figure_id is not None
+            and (entry.document_id, entry.figure_id) not in allowed_figures
+        ):
             raise PaperPlanGenerationError("figure_id_outside_whitelist")
+
+
+def build_plan_evidence_source_refs(spec: PaperSpec) -> list[PlanEvidenceSourceRef]:
+    """Build backend-owned transient source tags for plan LLM evidence citation."""
+
+    filename_by_document_id = {
+        document.document_id: document.filename for document in spec.documents
+    }
+    sources: list[PlanEvidenceSourceRef] = []
+    seen: set[tuple[str, str, str, str]] = set()
+
+    def add(
+        *,
+        document_id: str | None,
+        locator_kind: Literal["paper_section_id", "equation_id", "figure_id"],
+        locator_id: str | None,
+        excerpt: str | None,
+    ) -> None:
+        if document_id is None or locator_id is None:
+            return
+        cleaned_excerpt = _source_ref_excerpt(excerpt)
+        if cleaned_excerpt is None:
+            return
+        key = (document_id, locator_kind, locator_id, cleaned_excerpt)
+        if key in seen:
+            return
+        seen.add(key)
+        sources.append(
+            PlanEvidenceSourceRef(
+                source_ref=f"REF-{len(sources) + 1:03d}",
+                document_id=document_id,
+                locator_kind=locator_kind,
+                locator_id=locator_id,
+                filename=filename_by_document_id.get(document_id, document_id),
+                excerpt=cleaned_excerpt,
+            )
+        )
+
+    for entry in spec.evidence:
+        if entry.source is not EvidenceSource.DOCUMENT_EXTRACTED:
+            continue
+        add(
+            document_id=entry.document_id,
+            locator_kind="paper_section_id",
+            locator_id=entry.paper_section_id,
+            excerpt=entry.excerpt,
+        )
+        add(
+            document_id=entry.document_id,
+            locator_kind="equation_id",
+            locator_id=entry.equation_id,
+            excerpt=entry.excerpt,
+        )
+        add(
+            document_id=entry.document_id,
+            locator_kind="figure_id",
+            locator_id=entry.figure_id,
+            excerpt=entry.excerpt,
+        )
+    for equation in spec.equations:
+        add(
+            document_id=equation.document_id,
+            locator_kind="equation_id",
+            locator_id=equation.equation_id,
+            excerpt=equation.latex_or_text,
+        )
+    for figure in spec.figure_locations:
+        add(
+            document_id=figure.document_id,
+            locator_kind="figure_id",
+            locator_id=figure.figure_id,
+            excerpt=figure.caption,
+        )
+    return sources
+
+
+def apply_plan_evidence_reference_bridge(
+    payload: dict[str, Any],
+    source_refs: list[PlanEvidenceSourceRef],
+) -> dict[str, Any]:
+    """Resolve transient source_ref tags to persisted canonical evidence fields."""
+
+    index = {entry.source_ref: entry for entry in source_refs}
+    bridged = _visit_plan_evidence_payloads(copy.deepcopy(payload), index)
+    if not isinstance(bridged, dict):
+        return {}
+    return bridged
+
+
+def _visit_plan_evidence_payloads(
+    value: Any,
+    index: dict[str, PlanEvidenceSourceRef],
+) -> Any:
+    if isinstance(value, list):
+        items_result: list[Any] = []
+        for item in value:
+            visited = _visit_plan_evidence_payloads(item, index)
+            if visited is not _DROP_EVIDENCE:
+                items_result.append(visited)
+        return items_result
+    if not isinstance(value, dict):
+        return value
+
+    object_result: dict[str, Any] = {}
+    for key, item in value.items():
+        visited = _visit_plan_evidence_payloads(item, index)
+        if visited is not _DROP_EVIDENCE:
+            object_result[key] = visited
+    if _looks_like_plan_evidence_payload(object_result):
+        return _bridge_plan_evidence_payload(object_result, index)
+    return object_result
+
+
+def _bridge_plan_evidence_payload(
+    payload: dict[str, Any],
+    index: dict[str, PlanEvidenceSourceRef],
+) -> dict[str, Any] | object:
+    source = payload.get("source")
+    if source in (EvidenceSource.USER_SUPPLIED, EvidenceSource.USER_SUPPLIED.value):
+        result = dict(payload)
+        result.pop(PLAN_EVIDENCE_SOURCE_REF_FIELD, None)
+        result["document_id"] = None
+        return result
+    if source not in (EvidenceSource.DOCUMENT_EXTRACTED, EvidenceSource.DOCUMENT_EXTRACTED.value):
+        return payload
+
+    source_ref = payload.get(PLAN_EVIDENCE_SOURCE_REF_FIELD)
+    if not isinstance(source_ref, str):
+        return _DROP_EVIDENCE
+    source_entry = index.get(source_ref)
+    if source_entry is None:
+        return _DROP_EVIDENCE
+
+    result = dict(payload)
+    result.pop(PLAN_EVIDENCE_SOURCE_REF_FIELD, None)
+    result["document_id"] = source_entry.document_id
+    result["paper_section_id"] = None
+    result["equation_id"] = None
+    result["figure_id"] = None
+    result[source_entry.locator_kind] = source_entry.locator_id
+    result["excerpt"] = source_entry.excerpt
+    result["missing_param_prompt_id"] = None
+    return result
+
+
+_PLAN_EVIDENCE_KEYS = frozenset(
+    {
+        "paper_section_id",
+        "equation_id",
+        "figure_id",
+        "excerpt",
+        "missing_param_prompt_id",
+        PLAN_EVIDENCE_SOURCE_REF_FIELD,
+    }
+)
+_DROP_EVIDENCE = object()
+
+
+def _looks_like_plan_evidence_payload(value: dict[str, Any]) -> bool:
+    return "source" in value and any(key in value for key in _PLAN_EVIDENCE_KEYS)
+
+
+def _source_ref_excerpt(value: str | None) -> str | None:
+    cleaned = _clean_text(value)
+    if not cleaned:
+        return None
+    return cleaned[:300]
 
 
 class PlanAssembler:

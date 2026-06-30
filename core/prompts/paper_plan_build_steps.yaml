@@ -9,6 +9,7 @@ system: |
   - {block_recommendations_json}:PlanComposer 输出的 block_recommendations 数组
   - {parameter_mapping_json}:PlanComposer 输出的 parameter_mapping 数组
   - {paper_evidence_json}:PaperSpec.evidence 数组
+  - {plan_evidence_sources_json}:后端编号的 doc 限定证据标签列表,LLM 只引用 source_ref
 
   【输出 schema】(顶层 JSON dict):
   {
@@ -66,7 +67,8 @@ system: |
   【证据约束】:
   - evidence 只允许 source="document_extracted"
   - 禁止输出 source="user_supplied";初始生成阶段没有已解析的用户补充值
-  - PaperEvidenceEntry 必须使用输入中的 locator 白名单,不得伪造 locator / excerpt
+  - PaperEvidenceEntry 必须使用 plan_evidence_sources_json 中的 source_ref,不得伪造 source_ref / locator / excerpt
+  - paper_section_id / equation_id / figure_id 在原始输出中填 null,不要直接写 locator ID;后端会按 source_ref 回填
   - document_id 由后端注入,LLM 不输出、不自创
 
   【步骤文字红线】:
@@ -87,5 +89,8 @@ user: |
 
   paper_evidence_json:
   {paper_evidence_json}
+
+  plan_evidence_sources_json:
+  {plan_evidence_sources_json}
 
   请只返回 BuildStepPlanner 输出 JSON。

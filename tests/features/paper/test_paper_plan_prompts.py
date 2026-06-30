@@ -30,6 +30,7 @@ from features.paper._prompt_builder import (
     build_messages_for_tuning_suggest,
 )
 from features.paper._prompt_loader import load_prompt_template
+from features.paper.paper_plan_helpers import build_plan_evidence_source_refs
 
 PAPER_PLAN_PROMPTS = [
     "paper_plan_missing_detector.yaml",
@@ -107,13 +108,12 @@ def test_shared_snippet_contains_evidence_double_source_contract() -> None:
     assert 'source = "user_supplied"' in snippet
 
 
-def test_shared_snippet_contains_locator_whitelist() -> None:
+def test_shared_snippet_contains_private_source_ref_bridge() -> None:
     snippet = _shared_paper_plan_constraints()
 
-    assert "locator 白名单" in snippet
-    assert "PaperSpec.evidence[*].paper_section_id" in snippet
-    assert "PaperSpec.equations[*].equation_id" in snippet
-    assert "PaperSpec.figure_locations[*].figure_id" in snippet
+    assert "私有引用桥" in snippet
+    assert "source_ref" in snippet
+    assert "后端会按 source_ref 解析" in snippet
 
 
 def test_shared_snippet_contains_field_name_hard_constraints() -> None:
@@ -158,13 +158,14 @@ def test_5_role_systems_all_inject_shared_snippet() -> None:
             [_block_recommendation()],
             [_sentinel_mapping()],
             [_document_evidence()],
+            build_plan_evidence_source_refs(_spec()),
         )[0].content,
         build_messages_for_mscript_draft(_spec().equations, _spec().parameter_table)[0].content,
     ]
 
     for system in systems:
         assert "evidence 双源契约" in system
-        assert "locator 白名单" in system
+        assert "私有引用桥" in system
         assert (
             "ParameterMapping 5 字段:paper_param_name / model_param_name / value / unit / source"
             in system
@@ -249,12 +250,14 @@ def test_build_messages_for_build_steps_includes_blocks_params_and_evidence() ->
         [_block_recommendation()],
         [_sentinel_mapping()],
         [_document_evidence()],
+        build_plan_evidence_source_refs(_spec()),
     )
     user = messages[1].content
 
     assert '"block_type": "Synchronous Machine"' in user
     assert '"paper_param_name": "H 惯性时间常数"' in user
     assert '"paper_section_id": "S1"' in user
+    assert '"source_ref": "REF-001"' in user
 
 
 def test_mscript_drafter_system_allows_null_output() -> None:
@@ -286,6 +289,7 @@ def _spec() -> PaperSpec:
                 equation_id="EQ-01",
                 latex_or_text="H = 3.5",
                 paper_section_id="S1",
+                document_id="DOC-001",
             )
         ],
         parameter_table=[
@@ -299,7 +303,12 @@ def _spec() -> PaperSpec:
             )
         ],
         figure_locations=[
-            FigureRef(figure_id="FIG-01", caption="Machine parameters", paper_section_id="S1")
+            FigureRef(
+                figure_id="FIG-01",
+                caption="Machine parameters",
+                paper_section_id="S1",
+                document_id="DOC-001",
+            )
         ],
         pseudocode_blocks=[],
         evidence=[evidence],

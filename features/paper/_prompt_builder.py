@@ -9,7 +9,12 @@ from core.domain.paper_plan import BlockRecommendation, PaperPlanRecord, Paramet
 from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterEntry
 from core.interfaces.document_parser import FigurePlaceholder, ParsedDocument
 from core.interfaces.llm_provider import LLMMessage
-from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL, resolved_prompt_ids
+from features.paper.paper_plan_helpers import (
+    MISSING_VALUE_SENTINEL,
+    PlanEvidenceSourceRef,
+    build_plan_evidence_source_refs,
+    resolved_prompt_ids,
+)
 from features.paper.paper_schemas import (
     BlockRecommendationModel,
     EquationEntryModel,
@@ -48,13 +53,13 @@ def _shared_paper_plan_constraints() -> str:
 【evidence 双源契约】(每个 PaperEvidenceEntry 必守):
 - LLM 输出字段(6 个,逐字匹配):source / paper_section_id / equation_id / figure_id / excerpt / missing_param_prompt_id
 - document_id 是后端注入的第 7 个契约字段,LLM 不输出、不自创
-- source = "document_extracted":三 locator 至少一个非 null;excerpt 1-300 字非空;missing_param_prompt_id = null;document_id 由系统注入 DOC-001
+- source = "document_extracted":必须填写私有 source_ref(来自 plan_evidence_sources_json);三 locator 填 null;excerpt 由后端按 source_ref 回填;missing_param_prompt_id = null;document_id 由后端按 source_ref 注入
 - source = "user_supplied":三 locator 全 null;excerpt = null;missing_param_prompt_id 必填(关联 MissingParameterPrompt.prompt_id);document_id 由系统注入 null
 
-【locator 白名单】(只能从 PaperSpec 给出的 ID 集中选,严禁自创):
-- paper_section_id 只能来自 PaperSpec.evidence[*].paper_section_id
-- equation_id 只能来自 PaperSpec.equations[*].equation_id
-- figure_id 只能来自 PaperSpec.figure_locations[*].figure_id
+【私有引用桥】:
+- document_extracted evidence 只能引用 plan_evidence_sources_json 里的 source_ref,形如 REF-001;严禁自创 source_ref
+- 不输出 document_id;不直接输出 paper_section_id / equation_id / figure_id 的真实 ID;后端会按 source_ref 解析、stamp document_id、回填 canonical locator、并 strip source_ref
+- user_supplied evidence 不填 source_ref
 
 【字段名硬约束】(逐字匹配,禁止自创字段名,沿用 TASK-501 v0.3):
 - BlockRecommendation 3 字段:block_type / purpose / paper_reference
@@ -107,6 +112,9 @@ def build_messages_for_missing_detect(
                     for mapping in sentinel_mappings
                 ]
             ),
+            "plan_evidence_sources_json": _plan_evidence_sources_json(
+                build_plan_evidence_source_refs(spec)
+            ),
         },
     )
     return _role_messages(template.system, user)
@@ -124,6 +132,9 @@ def build_messages_for_plan_compose(
         template.user,
         {
             "paper_spec_json": _paper_spec_json(spec),
+            "plan_evidence_sources_json": _plan_evidence_sources_json(
+                build_plan_evidence_source_refs(spec)
+            ),
             "plan_id": plan_id,
             "paper_spec_id": paper_spec_id,
         },
@@ -162,6 +173,7 @@ def build_messages_for_build_steps(
     block_recommendations: list[BlockRecommendation],
     parameter_mapping: list[ParameterMapping],
     evidence: list[PaperEvidenceEntry],
+    source_refs: list[PlanEvidenceSourceRef],
 ) -> list[LLMMessage]:
     """Build BuildStepPlanner messages."""
 
@@ -187,6 +199,7 @@ def build_messages_for_build_steps(
                     for entry in evidence
                 ]
             ),
+            "plan_evidence_sources_json": _plan_evidence_sources_json(source_refs),
         },
     )
     return _role_messages(template.system, user)
@@ -300,6 +313,22 @@ def _render_user(template: str, values: dict[str, str]) -> str:
 
 def _paper_spec_json(spec: PaperSpec) -> str:
     return _json_dumps(PaperSpecModel.from_domain(spec).model_dump(mode="json"))
+
+
+def _plan_evidence_sources_json(source_refs: list[PlanEvidenceSourceRef]) -> str:
+    return _json_dumps(
+        [
+            {
+                "source_ref": entry.source_ref,
+                "document_id": entry.document_id,
+                "locator_kind": entry.locator_kind,
+                "locator_id": entry.locator_id,
+                "filename": entry.filename,
+                "excerpt": entry.excerpt,
+            }
+            for entry in source_refs
+        ]
+    )
 
 
 def _dedupe_evidence(entries: list[PaperEvidenceEntry]) -> list[PaperEvidenceEntry]:
