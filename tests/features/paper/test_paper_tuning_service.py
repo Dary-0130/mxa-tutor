@@ -269,6 +269,7 @@ def _spec() -> PaperSpec:
                 equation_id="EQ-01",
                 latex_or_text="H = 3.5",
                 paper_section_id="S1",
+                document_id="DOC-001",
             )
         ],
         parameter_table=[
@@ -282,7 +283,12 @@ def _spec() -> PaperSpec:
             )
         ],
         figure_locations=[
-            FigureRef(figure_id="FIG-01", caption="Machine parameters", paper_section_id="S1")
+            FigureRef(
+                figure_id="FIG-01",
+                caption="Machine parameters",
+                paper_section_id="S1",
+                document_id="DOC-001",
+            )
         ],
         pseudocode_blocks=[],
         evidence=[evidence],

@@ -14,7 +14,8 @@
     {
       "equation_id": "EQ-01",
       "latex_or_text": "ia = -cos(ωt+α0) - 1.4·e^(-2.97t)·cos(ωt+α0) - 2.34·e^(0.608t)·cos(ωt+α0) + 4·e^(-6.3t)·cos(-α0) + 0.77·e^(-6.3t)·cos(2ωt+α0)",
-      "paper_section_id": "S3"
+      "paper_section_id": "S3",
+      "document_id": "DOC-001"
     }
   ],
   "parameter_table": [

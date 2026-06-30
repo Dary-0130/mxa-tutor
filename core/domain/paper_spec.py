@@ -23,6 +23,7 @@ class EquationEntry:
     equation_id: str
     latex_or_text: str
     paper_section_id: str
+    document_id: str | None
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class FigureRef:
     figure_id: str
     caption: str
     paper_section_id: str
+    document_id: str | None
 
 
 @dataclass(frozen=True)

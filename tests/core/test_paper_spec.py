@@ -51,6 +51,7 @@ def test_paper_spec_required_fields() -> None:
         equation_id="EQ-1",
         latex_or_text="i = C e^{-t}",
         paper_section_id="S2",
+        document_id="DOC-001",
     )
     parameter = ParameterEntry(
         name="Rated voltage",
@@ -60,7 +61,9 @@ def test_paper_spec_required_fields() -> None:
         source=EvidenceSource.DOCUMENT_EXTRACTED,
         document_id="DOC-001",
     )
-    figure = FigureRef(figure_id="FIG-1", caption="Model diagram", paper_section_id="S3")
+    figure = FigureRef(
+        figure_id="FIG-1", caption="Model diagram", paper_section_id="S3", document_id="DOC-001"
+    )
     spec = PaperSpec(
         paper_title="Short-circuit report",
         paper_type="report",

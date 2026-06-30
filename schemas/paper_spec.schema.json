@@ -17,12 +17,26 @@
           "minLength": 1,
           "title": "Paper Section Id",
           "type": "string"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^DOC-\\d{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Document Id"
         }
       },
       "required": [
         "equation_id",
         "latex_or_text",
-        "paper_section_id"
+        "paper_section_id",
+        "document_id"
       ],
       "title": "EquationEntryModel",
       "type": "object"
@@ -53,12 +67,26 @@
           "minLength": 1,
           "title": "Paper Section Id",
           "type": "string"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^DOC-\\d{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Document Id"
         }
       },
       "required": [
         "figure_id",
         "caption",
-        "paper_section_id"
+        "paper_section_id",
+        "document_id"
       ],
       "title": "FigureRefModel",
       "type": "object"

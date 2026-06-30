@@ -413,6 +413,9 @@ def _migrate_spec_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if legacy_identity:
         _add_missing_document_ids_to_spec_evidence(migrated.get("evidence"))
         _add_missing_document_ids_to_parameters(migrated.get("parameter_table"))
+    if _is_legacy_single_document_payload(migrated):
+        _add_missing_document_ids_to_extracted_items(migrated.get("equations"))
+        _add_missing_document_ids_to_extracted_items(migrated.get("figure_locations"))
     return migrated
 
 
@@ -441,6 +444,22 @@ def _add_missing_document_ids_to_parameters(value: Any) -> None:
         document_id = _document_id_for_source(entry.get("source"))
         if document_id is not _MISSING:
             entry["document_id"] = document_id
+
+
+def _add_missing_document_ids_to_extracted_items(value: Any) -> None:
+    if not isinstance(value, list):
+        return
+    for entry in value:
+        if isinstance(entry, dict) and "document_id" not in entry:
+            entry["document_id"] = DEFAULT_DOCUMENT_ID
+
+
+def _is_legacy_single_document_payload(payload: dict[str, Any]) -> bool:
+    documents = payload.get("documents")
+    if not isinstance(documents, list) or len(documents) != 1:
+        return False
+    document = documents[0]
+    return isinstance(document, dict) and document.get("document_id") == DEFAULT_DOCUMENT_ID
 
 
 def _visit_evidence_payloads(value: Any, *, fill_missing: bool) -> Any:

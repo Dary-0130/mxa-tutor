@@ -65,6 +65,7 @@ export interface EquationEntry {
   equation_id: string;
   latex_or_text: string;
   paper_section_id: string;
+  document_id: string | null;
 }
 
 export interface ParameterEntry {
@@ -80,6 +81,7 @@ export interface FigureRef {
   figure_id: string;
   caption: string;
   paper_section_id: string;
+  document_id: string | null;
 }
 
 export interface PaperDocument {
@@ -223,6 +225,14 @@ export interface UploadDocumentResponse {
   spec: PaperSpec;
   plan: ModelGenerationPlan;
   missing_prompts: MissingParameterPrompt[];
+  document_statuses: UploadDocumentStatus[];
+}
+
+export interface UploadDocumentStatus {
+  document_id: string;
+  filename: string;
+  status: "succeeded" | "failed";
+  error_code: string | null;
 }
 
 export interface PaperSpecResponse {

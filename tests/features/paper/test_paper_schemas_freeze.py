@@ -213,7 +213,7 @@ def test_serialize_only_field_order_matches_domain() -> None:
 
 def test_nested_field_order_matches_domain() -> None:
     assert tuple(EquationEntryModel.model_fields) == tuple(
-        fields(EquationEntry)[i].name for i in range(3)
+        field.name for field in fields(EquationEntry)
     )
     assert tuple(ParameterEntryModel.model_fields) == tuple(
         field.name for field in fields(ParameterEntry)
@@ -279,6 +279,8 @@ def test_document_identity_fields_are_required_but_nullable_where_expected() -> 
     assert PaperSpecModel.model_fields["primary_document_id"].is_required()
     assert PaperEvidenceEntryModel.model_fields["document_id"].is_required()
     assert ParameterEntryModel.model_fields["document_id"].is_required()
+    assert EquationEntryModel.model_fields["document_id"].is_required()
+    assert FigureRefModel.model_fields["document_id"].is_required()
 
     spec_payload = _paper_spec_payload(primary_document_id=None)
     assert PaperSpecModel.model_validate(spec_payload).primary_document_id is None
@@ -293,9 +295,17 @@ def test_document_identity_fields_are_required_but_nullable_where_expected() -> 
         )
     with pytest.raises(ValidationError):
         ParameterEntryModel.model_validate(_without(_document_parameter_payload(), "document_id"))
+    with pytest.raises(ValidationError):
+        EquationEntryModel.model_validate(_without(_equation_payload(), "document_id"))
+    with pytest.raises(ValidationError):
+        FigureRefModel.model_validate(_without(_figure_payload(), "document_id"))
 
     assert PaperEvidenceEntryModel.model_validate(_user_evidence_payload()).document_id is None
     assert ParameterEntryModel.model_validate(_user_parameter_payload()).document_id is None
+    assert (
+        EquationEntryModel.model_validate(_equation_payload(document_id=None)).document_id is None
+    )
+    assert FigureRefModel.model_validate(_figure_payload(document_id=None)).document_id is None
 
 
 def test_paper_spec_document_identity_invariants_are_enforced() -> None:
@@ -317,6 +327,8 @@ def test_paper_spec_document_identity_invariants_are_enforced() -> None:
         _paper_spec_payload(
             parameter_table=[{**_document_parameter_payload(), "document_id": "DOC-999"}]
         ),
+        _paper_spec_payload(equations=[{**_equation_payload(), "document_id": "DOC-999"}]),
+        _paper_spec_payload(figure_locations=[{**_figure_payload(), "document_id": "DOC-999"}]),
         _paper_spec_payload(
             parameter_table=[{**_user_parameter_payload(), "document_id": "DOC-001"}]
         ),
@@ -571,6 +583,8 @@ def _paper_spec_payload(
     documents: list[dict[str, object]] | None = None,
     primary_document_id: str | None = None,
     parameter_table: list[dict[str, object]] | None = None,
+    equations: list[dict[str, object]] | None = None,
+    figure_locations: list[dict[str, object]] | None = None,
     evidence: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
@@ -582,11 +596,13 @@ def _paper_spec_payload(
         else [{"document_id": "DOC-001", "filename": "paper.pdf"}],
         "primary_document_id": primary_document_id,
         "abstract": "Abstract",
-        "equations": [],
+        "equations": equations if equations is not None else [_equation_payload()],
         "parameter_table": parameter_table
         if parameter_table is not None
         else [_document_parameter_payload()],
-        "figure_locations": [],
+        "figure_locations": figure_locations
+        if figure_locations is not None
+        else [_figure_payload()],
         "pseudocode_blocks": [],
         "evidence": evidence if evidence is not None else [_document_evidence_payload()],
     }
@@ -611,6 +627,24 @@ def _user_parameter_payload() -> dict[str, object]:
         "unit": "s",
         "source": "user_supplied",
         "document_id": None,
+    }
+
+
+def _equation_payload(document_id: str | None = "DOC-001") -> dict[str, object]:
+    return {
+        "equation_id": "EQ-01",
+        "latex_or_text": "H = 3.5",
+        "paper_section_id": "S1",
+        "document_id": document_id,
+    }
+
+
+def _figure_payload(document_id: str | None = "DOC-001") -> dict[str, object]:
+    return {
+        "figure_id": "FIG-01",
+        "caption": "Machine parameters",
+        "paper_section_id": "S1",
+        "document_id": document_id,
     }
 
 

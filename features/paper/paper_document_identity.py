@@ -39,13 +39,14 @@ def enrich_single_document_spec_payload(
     payload: dict[str, Any],
     *,
     display_filename: str | None,
+    document_id: str = DEFAULT_DOCUMENT_ID,
 ) -> dict[str, Any]:
     """Inject server-owned single-document identity into a raw PaperSpec payload."""
 
     enriched = copy.deepcopy(payload)
     enriched["documents"] = [
         {
-            "document_id": DEFAULT_DOCUMENT_ID,
+            "document_id": document_id,
             "filename": sanitize_paper_display_filename(display_filename),
         }
     ]
@@ -53,29 +54,45 @@ def enrich_single_document_spec_payload(
     for parameter in enriched.get("parameter_table", []):
         if not isinstance(parameter, dict):
             continue
-        document_id = _document_id_for_source(parameter.get("source"))
-        if document_id is not _MISSING:
-            parameter["document_id"] = document_id
-    return enrich_single_document_evidence_payloads(enriched)
+        parameter_document_id = _document_id_for_source(parameter.get("source"), document_id)
+        if parameter_document_id is not _MISSING:
+            parameter["document_id"] = parameter_document_id
+    for equation in enriched.get("equations", []):
+        if isinstance(equation, dict):
+            equation["document_id"] = document_id
+    for figure in enriched.get("figure_locations", []):
+        if isinstance(figure, dict):
+            figure["document_id"] = document_id
+    return enrich_single_document_evidence_payloads(enriched, document_id=document_id)
 
 
-def enrich_single_document_evidence_payloads(value: Any) -> Any:
+def enrich_single_document_evidence_payloads(
+    value: Any,
+    *,
+    document_id: str = DEFAULT_DOCUMENT_ID,
+) -> Any:
     """Inject DOC-001/None document IDs into raw LLM PaperEvidenceEntry payloads."""
 
-    return _visit_evidence_payloads(value, override=True)
+    return _visit_evidence_payloads(value, override=True, document_id=document_id)
 
 
-def _visit_evidence_payloads(value: Any, *, override: bool) -> Any:
+def _visit_evidence_payloads(value: Any, *, override: bool, document_id: str) -> Any:
     if isinstance(value, list):
-        return [_visit_evidence_payloads(item, override=override) for item in value]
+        return [
+            _visit_evidence_payloads(item, override=override, document_id=document_id)
+            for item in value
+        ]
     if not isinstance(value, dict):
         return value
 
-    result = {key: _visit_evidence_payloads(item, override=override) for key, item in value.items()}
+    result = {
+        key: _visit_evidence_payloads(item, override=override, document_id=document_id)
+        for key, item in value.items()
+    }
     if _looks_like_evidence_payload(result):
-        document_id = _document_id_for_source(result.get("source"))
-        if document_id is not _MISSING and (override or "document_id" not in result):
-            result["document_id"] = document_id
+        resolved_document_id = _document_id_for_source(result.get("source"), document_id)
+        if resolved_document_id is not _MISSING and (override or "document_id" not in result):
+            result["document_id"] = resolved_document_id
     return result
 
 
@@ -83,9 +100,9 @@ def _looks_like_evidence_payload(value: dict[str, Any]) -> bool:
     return "source" in value and any(key in value for key in _EVIDENCE_KEYS)
 
 
-def _document_id_for_source(source: object) -> str | None | object:
+def _document_id_for_source(source: object, document_id: str) -> str | None | object:
     if source in (EvidenceSource.DOCUMENT_EXTRACTED, EvidenceSource.DOCUMENT_EXTRACTED.value):
-        return DEFAULT_DOCUMENT_ID
+        return document_id
     if source in (EvidenceSource.USER_SUPPLIED, EvidenceSource.USER_SUPPLIED.value):
         return None
     return _MISSING

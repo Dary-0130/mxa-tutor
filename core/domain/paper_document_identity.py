@@ -46,6 +46,18 @@ def validate_paper_spec_document_identity(spec: PaperSpec) -> None:
             document_id_set=document_id_set,
             item_name="parameter",
         )
+    for equation in spec.equations:
+        _validate_extracted_document_ref(
+            document_id=equation.document_id,
+            document_id_set=document_id_set,
+            item_name="equation",
+        )
+    for figure in spec.figure_locations:
+        _validate_extracted_document_ref(
+            document_id=figure.document_id,
+            document_id_set=document_id_set,
+            item_name="figure",
+        )
 
 
 def _validate_document_ref(
@@ -68,3 +80,15 @@ def _validate_document_ref(
         return
 
     raise ValueError(f"unknown {item_name} source")
+
+
+def _validate_extracted_document_ref(
+    *,
+    document_id: str | None,
+    document_id_set: set[str],
+    item_name: str,
+) -> None:
+    if document_id is None:
+        raise ValueError(f"document_extracted {item_name} requires document_id")
+    if document_id not in document_id_set:
+        raise ValueError(f"document_extracted {item_name} document_id must reference documents")
