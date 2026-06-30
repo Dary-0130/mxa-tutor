@@ -13,6 +13,7 @@ def test_evidence_source_values_match_contract() -> None:
 def test_paper_evidence_entry_fields_match_contract_order() -> None:
     assert [field.name for field in fields(PaperEvidenceEntry)] == [
         "source",
+        "document_id",
         "paper_section_id",
         "equation_id",
         "figure_id",
@@ -24,6 +25,7 @@ def test_paper_evidence_entry_fields_match_contract_order() -> None:
 def test_paper_evidence_entry_accepts_document_extracted_shape() -> None:
     entry = PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id="S1",
         equation_id=None,
         figure_id=None,

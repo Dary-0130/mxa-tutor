@@ -10,7 +10,7 @@ from core.domain.paper_plan import (
     PaperPlanRecord,
     ParameterMapping,
 )
-from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterEntry
+from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec, ParameterEntry
 from core.interfaces.paper_cache import PaperBundleStore, PaperPlanCache, PaperSpecCache
 
 
@@ -67,6 +67,7 @@ def test_bundle_store_is_not_a_spec_or_plan_cache() -> None:
 def _record() -> PaperPlanRecord:
     evidence = PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id="S1",
         equation_id=None,
         figure_id=None,
@@ -79,6 +80,8 @@ def _record() -> PaperPlanRecord:
             paper_title="Short-circuit report",
             paper_type="report",
             domain="motor_control",
+            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            primary_document_id=None,
             abstract="A report.",
             equations=[
                 EquationEntry(
@@ -94,6 +97,7 @@ def _record() -> PaperPlanRecord:
                     value="3.5",
                     unit="s",
                     source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-001",
                 )
             ],
             figure_locations=[],

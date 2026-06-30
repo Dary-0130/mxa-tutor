@@ -4,8 +4,19 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
+from core.domain.paper_document_identity import (
+    DOCUMENT_ID_PATTERN,
+    validate_paper_spec_document_identity,
+)
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
@@ -21,6 +32,7 @@ from core.domain.paper_plan import (
 from core.domain.paper_spec import (
     EquationEntry,
     FigureRef,
+    PaperDocument,
     PaperDomain,
     PaperSpec,
     PaperType,
@@ -44,6 +56,7 @@ class _StrictBaseModel(BaseModel):
 
 class PaperEvidenceEntryModel(_StrictBaseModel):
     source: EvidenceSource
+    document_id: str | None = Field(min_length=1, pattern=DOCUMENT_ID_PATTERN)
     paper_section_id: str | None = Field(default=None, min_length=1)
     equation_id: str | None = Field(default=None, min_length=1)
     figure_id: str | None = Field(default=None, min_length=1)
@@ -54,6 +67,8 @@ class PaperEvidenceEntryModel(_StrictBaseModel):
     def validate_source_invariants(self) -> Self:
         locators = (self.paper_section_id, self.equation_id, self.figure_id)
         if self.source is EvidenceSource.DOCUMENT_EXTRACTED:
+            if self.document_id is None:
+                raise ValueError("document_extracted evidence requires document_id")
             if not any(locator is not None for locator in locators):
                 raise ValueError("document_extracted evidence requires at least one locator")
             if self.excerpt is None:
@@ -62,6 +77,8 @@ class PaperEvidenceEntryModel(_StrictBaseModel):
                 raise ValueError("document_extracted evidence cannot link missing prompt")
             return self
 
+        if self.document_id is not None:
+            raise ValueError("user_supplied evidence document_id must be null")
         if any(locator is not None for locator in locators):
             raise ValueError("user_supplied evidence cannot have paper locators")
         if self.excerpt is not None:
@@ -73,6 +90,7 @@ class PaperEvidenceEntryModel(_StrictBaseModel):
     def to_domain(self) -> PaperEvidenceEntry:
         return PaperEvidenceEntry(
             source=self.source,
+            document_id=self.document_id,
             paper_section_id=self.paper_section_id,
             equation_id=self.equation_id,
             figure_id=self.figure_id,
@@ -100,6 +118,15 @@ class ParameterEntryModel(_StrictBaseModel):
     value: str = Field(min_length=1)
     unit: str = Field(min_length=1)
     source: EvidenceSource
+    document_id: str | None = Field(min_length=1, pattern=DOCUMENT_ID_PATTERN)
+
+    @model_validator(mode="after")
+    def validate_document_source(self) -> Self:
+        if self.source is EvidenceSource.DOCUMENT_EXTRACTED and self.document_id is None:
+            raise ValueError("document_extracted parameter requires document_id")
+        if self.source is EvidenceSource.USER_SUPPLIED and self.document_id is not None:
+            raise ValueError("user_supplied parameter document_id must be null")
+        return self
 
     def to_domain(self) -> ParameterEntry:
         return ParameterEntry(
@@ -108,6 +135,27 @@ class ParameterEntryModel(_StrictBaseModel):
             value=self.value,
             unit=self.unit,
             source=self.source,
+            document_id=self.document_id,
+        )
+
+
+class PaperDocumentModel(_StrictBaseModel):
+    document_id: str = Field(min_length=1, pattern=DOCUMENT_ID_PATTERN)
+    filename: str = Field(min_length=1, max_length=255)
+
+    @field_validator("filename")
+    @classmethod
+    def validate_clean_filename(cls, value: str) -> str:
+        if "/" in value or "\\" in value:
+            raise ValueError("filename must not contain path separators")
+        if any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("filename must not contain control characters")
+        return value
+
+    def to_domain(self) -> PaperDocument:
+        return PaperDocument(
+            document_id=self.document_id,
+            filename=self.filename,
         )
 
 
@@ -260,6 +308,8 @@ class PaperSpecModel(_StrictBaseModel):
     paper_title: str = Field(min_length=1, max_length=200)
     paper_type: PaperType
     domain: PaperDomain
+    documents: list[PaperDocumentModel] = Field(min_length=1)
+    primary_document_id: str | None = Field(min_length=1, pattern=DOCUMENT_ID_PATTERN)
     abstract: str = Field(min_length=1, max_length=1000)
     equations: list[EquationEntryModel] = Field(default_factory=list)
     parameter_table: list[ParameterEntryModel] = Field(default_factory=list)
@@ -267,11 +317,18 @@ class PaperSpecModel(_StrictBaseModel):
     pseudocode_blocks: list[str] = Field(default_factory=list)
     evidence: list[PaperEvidenceEntryModel] = Field(min_length=1)
 
-    def to_domain(self) -> PaperSpec:
+    @model_validator(mode="after")
+    def validate_document_identity(self) -> Self:
+        validate_paper_spec_document_identity(self._to_domain_unchecked())
+        return self
+
+    def _to_domain_unchecked(self) -> PaperSpec:
         return PaperSpec(
             paper_title=self.paper_title,
             paper_type=self.paper_type,
             domain=self.domain,
+            documents=[entry.to_domain() for entry in self.documents],
+            primary_document_id=self.primary_document_id,
             abstract=self.abstract,
             equations=[entry.to_domain() for entry in self.equations],
             parameter_table=[entry.to_domain() for entry in self.parameter_table],
@@ -279,6 +336,11 @@ class PaperSpecModel(_StrictBaseModel):
             pseudocode_blocks=self.pseudocode_blocks,
             evidence=[entry.to_domain() for entry in self.evidence],
         )
+
+    def to_domain(self) -> PaperSpec:
+        spec = self._to_domain_unchecked()
+        validate_paper_spec_document_identity(spec)
+        return spec
 
 
 class ModelGenerationPlanModel(_StrictBaseModel):

@@ -10,6 +10,7 @@ from core.domain.paper_plan import (
 from core.domain.paper_spec import (
     EquationEntry,
     FigureRef,
+    PaperDocument,
     PaperSpec,
     ParameterEntry,
 )
@@ -19,6 +20,7 @@ from core.domain.paper_tuning import ParameterDirection, TuningSuggestion
 def _document_evidence() -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id="S1",
         equation_id=None,
         figure_id=None,
@@ -32,6 +34,8 @@ def test_paper_spec_fields_match_contract_order() -> None:
         "paper_title",
         "paper_type",
         "domain",
+        "documents",
+        "primary_document_id",
         "abstract",
         "equations",
         "parameter_table",
@@ -54,12 +58,15 @@ def test_paper_spec_required_fields() -> None:
         value="13.8",
         unit="kV",
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
     )
     figure = FigureRef(figure_id="FIG-1", caption="Model diagram", paper_section_id="S3")
     spec = PaperSpec(
         paper_title="Short-circuit report",
         paper_type="report",
         domain="motor_control",
+        documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+        primary_document_id=None,
         abstract="A report about short-circuit simulation.",
         equations=[equation],
         parameter_table=[parameter],

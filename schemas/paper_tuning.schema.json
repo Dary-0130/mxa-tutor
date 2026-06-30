@@ -15,6 +15,19 @@
         "source": {
           "$ref": "#/$defs/EvidenceSource"
         },
+        "document_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^DOC-\\d{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Document Id"
+        },
         "paper_section_id": {
           "anyOf": [
             {
@@ -83,7 +96,8 @@
         }
       },
       "required": [
-        "source"
+        "source",
+        "document_id"
       ],
       "title": "PaperEvidenceEntryModel",
       "type": "object"

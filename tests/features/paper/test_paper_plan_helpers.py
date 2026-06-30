@@ -15,7 +15,13 @@ from core.domain.paper_plan import (
     ParameterMappingRef,
     StepBlockRef,
 )
-from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
+from core.domain.paper_spec import (
+    EquationEntry,
+    FigureRef,
+    PaperDocument,
+    PaperSpec,
+    ParameterEntry,
+)
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     BuildStepsEvidenceError,
@@ -45,6 +51,7 @@ def _document_evidence(
 ) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id=paper_section_id,
         equation_id=equation_id,
         figure_id=figure_id,
@@ -63,6 +70,7 @@ def _user_evidence(
 ) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.USER_SUPPLIED,
+        document_id=None,
         paper_section_id=paper_section_id,
         equation_id=equation_id,
         figure_id=figure_id,
@@ -130,6 +138,7 @@ def test_tag_user_supplied_creates_user_evidence_entry() -> None:
 
     assert entry == PaperEvidenceEntry(
         source=EvidenceSource.USER_SUPPLIED,
+        document_id=None,
         paper_section_id=None,
         equation_id=None,
         figure_id=None,
@@ -578,6 +587,8 @@ def _spec() -> PaperSpec:
         paper_title="Short-circuit report",
         paper_type="report",
         domain="motor_control",
+        documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+        primary_document_id=None,
         abstract="A synchronous machine short-circuit report.",
         equations=[
             EquationEntry(
@@ -593,6 +604,7 @@ def _spec() -> PaperSpec:
                 value="3.5",
                 unit="s",
                 source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-001",
             )
         ],
         figure_locations=[

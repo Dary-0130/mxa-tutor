@@ -46,24 +46,25 @@
 - `paper_type`:`"report"`(学生实验报告)
 - `domain`:`"motor_control"`(资料入口 6 类之一)
 - `abstract`:对剥离版的摘要(系统应识别工况 / 方法 / 任务,1-1000 字)
+- `documents` / `primary_document_id`:单文件身份为 `DOC-001`,主文献为空
 - `equations`:1 个 EquationEntry(EQ-01 字面 = 论文公式)
-- `parameter_table`:15 个 ParameterEntry,逐项对应论文第 2 段给出的 12 个电机参数 + PN/UN/fN(论文显式标的"额定"三项),全 `source: document_extracted`
+- `parameter_table`:15 个 ParameterEntry,逐项对应论文第 2 段给出的 12 个电机参数 + PN/UN/fN(论文显式标的"额定"三项),全 `source: document_extracted` 且 `document_id: DOC-001`
 - `figure_locations`:**空数组**(剥离版剥离了所有图片占位,系统不应"幻觉"出 figure)
 - `pseudocode_blocks`:1 项,基于 EQ-01 的伪代码描述
-- `evidence`:4 个 PaperEvidenceEntry,全 document_extracted,引用 S2 / S3 / S4 / S5 段
+- `evidence`:4 个 PaperEvidenceEntry,全 document_extracted,引用 S2 / S3 / S4 / S5 段,`document_id` 均为 `DOC-001`
 
 **评分关注点**:Layer 2 的 **A1 字段完整 + A2 无幻觉(特别不能编造剥离版没有的内容,如不能输出 figure_locations 具体条目)+ E1 双源不变量**
 
 ### 3.2 `golden/expected_model_generation_plan.json`
 
-含 9 个字段:
+仍含 9 个顶层字段;其中嵌套的 `PaperEvidenceEntry` 为 7 字段(含 `document_id`):
 - `plan_id` / `paper_spec_id`:关联 ID
 - `library_choice`:`SimPowerSystems`(决策 22 § 4.4 PoC 实测结论)
 - `block_recommendations`:8 个核心 block(powergui / Synchronous Machine pu Standard / Three-Phase Fault / Three-Phase V-I Measurement / Three-Phase Series RLC Load / Three-Phase Transformer / Scope / Mux),每个含 block_type / purpose / paper_reference
 - `parameter_mapping`:20 个映射条目(15 个直接对应 + 5 个工程推断:5MW 负荷 / 平衡节点 / 0.2s 故障 / ode15s / 1s)
 - `subsystem_breakdown`:8 步搭建流程
 - `m_script_skeleton`:基于 EQ-01 的 .m 代码骨架(约 30 行)
-- `evidence`:3 个 PaperEvidenceEntry,全 document_extracted,引用核心论文段落
+- `evidence`:3 个 PaperEvidenceEntry,全 document_extracted,引用核心论文段落,`document_id` 均为 `DOC-001`
 - `build_steps`:golden sample 仍为 `null`;live run 自 TASK-507-B 起可生成非空结构化步骤,build_steps 指标留 TASK-509 接入
 
 ---

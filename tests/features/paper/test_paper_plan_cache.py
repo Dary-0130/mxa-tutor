@@ -9,7 +9,7 @@ from core.domain.paper_plan import (
     ModelGenerationPlan,
     ParameterMapping,
 )
-from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterEntry
+from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec, ParameterEntry
 from features.paper.paper_plan_cache import InMemoryPaperPlanCache, PaperPlanRecord
 from features.paper.paper_plan_helpers import MissingBindingModel
 
@@ -50,6 +50,8 @@ def _record() -> PaperPlanRecord:
             paper_title="Short-circuit report",
             paper_type="report",
             domain="motor_control",
+            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            primary_document_id=None,
             abstract="A synchronous machine short-circuit report.",
             equations=[
                 EquationEntry(
@@ -65,6 +67,7 @@ def _record() -> PaperPlanRecord:
                     value="3.5",
                     unit="s",
                     source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-001",
                 )
             ],
             figure_locations=[],
@@ -118,6 +121,7 @@ def _record() -> PaperPlanRecord:
 def _evidence() -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id="S1",
         equation_id=None,
         figure_id=None,

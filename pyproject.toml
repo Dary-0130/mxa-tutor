@@ -34,3 +34,7 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["matlab", "matlab.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["pypdf", "pypdf.*", "docx", "docx.*"]
+ignore_missing_imports = true

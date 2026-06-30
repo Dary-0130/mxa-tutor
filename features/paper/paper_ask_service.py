@@ -24,6 +24,7 @@ from core.domain.paper_ask import (
     PlanMappingParameterTarget,
     SectionTarget,
 )
+from core.domain.paper_document_identity import DEFAULT_DOCUMENT_ID
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_plan import ModelBuildStep, PaperPlanRecord
 from core.domain.paper_tuning import ConfidenceValue
@@ -62,9 +63,13 @@ class SourceTableEntry:
     label: str
     excerpt: str | None
     source_kind: EvidenceSource
+    document_id: str | None
+    document_label: str | None
     target: PaperCitationTarget
 
     def to_citation(self) -> PaperAskCitation:
+        """Return the public citation shape; document fields stay internal until 521-C."""
+
         return PaperAskCitation(
             source_id=self.source_id,
             label=self.label,
@@ -79,6 +84,8 @@ class _SourceCandidate:
     label: str
     excerpt: str | None
     source_kind: EvidenceSource
+    document_id: str | None
+    document_label: str | None
     target: PaperCitationTarget
 
 
@@ -244,6 +251,8 @@ def build_paper_ask_source_table(record: PaperPlanRecord) -> list[SourceTableEnt
             label=candidate.label,
             excerpt=candidate.excerpt,
             source_kind=candidate.source_kind,
+            document_id=candidate.document_id,
+            document_label=candidate.document_label,
             target=candidate.target,
         )
         for index, candidate in enumerate(candidates, start=1)
@@ -255,6 +264,8 @@ def _spec_candidates(record: PaperPlanRecord) -> list[_SourceCandidate]:
     abstract = _document_candidate(
         label="Paper summary",
         excerpt=record.spec.abstract,
+        document_id=DEFAULT_DOCUMENT_ID,
+        document_label=_document_label(record, DEFAULT_DOCUMENT_ID),
         target=SectionTarget(kind="section", result_section="paper-summary"),
     )
     if abstract is not None:
@@ -264,6 +275,8 @@ def _spec_candidates(record: PaperPlanRecord) -> list[_SourceCandidate]:
         candidate = _document_candidate(
             label=f"Equation {equation.equation_id}",
             excerpt=equation.latex_or_text,
+            document_id=DEFAULT_DOCUMENT_ID,
+            document_label=_document_label(record, DEFAULT_DOCUMENT_ID),
             target=EquationTarget(kind="equation", equation_id=equation.equation_id),
         )
         if candidate is not None:
@@ -274,6 +287,7 @@ def _spec_candidates(record: PaperPlanRecord) -> list[_SourceCandidate]:
         candidate = _candidate_from_document_evidence(
             evidence,
             label="Document evidence",
+            document_label=_document_label(record, evidence.document_id),
             equation_ids=equation_ids,
             section_target="paper-summary",
         )
@@ -290,6 +304,7 @@ def _plan_document_section_candidates(record: PaperPlanRecord) -> list[_SourceCa
         candidate = _candidate_from_document_evidence(
             recommendation.paper_reference,
             label=f"Block recommendation: {recommendation.block_type}",
+            document_label=_document_label(record, recommendation.paper_reference.document_id),
             equation_ids=equation_ids,
             section_target="paper-subsystems",
         )
@@ -305,6 +320,7 @@ def _plan_document_section_candidates(record: PaperPlanRecord) -> list[_SourceCa
         candidate = _candidate_from_document_evidence(
             evidence,
             label="Build-step supporting evidence",
+            document_label=_document_label(record, evidence.document_id),
             equation_ids=equation_ids,
             section_target="paper-build-steps",
         )
@@ -323,6 +339,8 @@ def _user_supplied_parameter_candidates(record: PaperPlanRecord) -> list[_Source
                 label=_clean_label(f"User-supplied parameter: {mapping.paper_param_name}"),
                 excerpt=None,
                 source_kind=EvidenceSource.USER_SUPPLIED,
+                document_id=None,
+                document_label=None,
                 target=PlanMappingParameterTarget(
                     kind="parameter",
                     origin="plan_mapping",
@@ -346,6 +364,8 @@ def _remaining_missing_prompt_candidates(record: PaperPlanRecord) -> list[_Sourc
                 label=_clean_label(f"Missing parameter: {prompt.parameter_name}"),
                 excerpt=None,
                 source_kind=EvidenceSource.USER_SUPPLIED,
+                document_id=None,
+                document_label=None,
                 target=MissingPromptParameterTarget(
                     kind="parameter",
                     origin="missing_prompt",
@@ -372,6 +392,7 @@ def _candidate_from_document_evidence(
     evidence: PaperEvidenceEntry,
     *,
     label: str,
+    document_label: str | None,
     equation_ids: set[str],
     section_target: PaperResultSection,
 ) -> _SourceCandidate | None:
@@ -383,6 +404,8 @@ def _candidate_from_document_evidence(
         return _document_candidate(
             label=label,
             excerpt=evidence.excerpt,
+            document_id=evidence.document_id,
+            document_label=document_label,
             target=EquationTarget(kind="equation", equation_id=evidence.equation_id),
         )
     if evidence.paper_section_id is None:
@@ -390,6 +413,8 @@ def _candidate_from_document_evidence(
     return _document_candidate(
         label=label,
         excerpt=evidence.excerpt,
+        document_id=evidence.document_id,
+        document_label=document_label,
         target=SectionTarget(kind="section", result_section=section_target),
     )
 
@@ -398,6 +423,8 @@ def _document_candidate(
     *,
     label: str,
     excerpt: str | None,
+    document_id: str | None,
+    document_label: str | None,
     target: PaperCitationTarget,
 ) -> _SourceCandidate | None:
     cleaned_excerpt = _clean_excerpt(excerpt)
@@ -407,8 +434,19 @@ def _document_candidate(
         label=_clean_label(label),
         excerpt=cleaned_excerpt,
         source_kind=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id=document_id,
+        document_label=document_label,
         target=target,
     )
+
+
+def _document_label(record: PaperPlanRecord, document_id: str | None) -> str | None:
+    if document_id is None:
+        return None
+    for document in record.spec.documents:
+        if document.document_id == document_id:
+            return _clean_label(f"{document.document_id} - {document.filename}")
+    return None
 
 
 def _clean_excerpt(value: str | None) -> str | None:

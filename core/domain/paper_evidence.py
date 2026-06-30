@@ -16,6 +16,7 @@ class PaperEvidenceEntry:
     """Evidence entry for paper sections, equations, figures, or user-supplied params."""
 
     source: EvidenceSource
+    document_id: str | None
     paper_section_id: str | None
     equation_id: str | None
     figure_id: str | None

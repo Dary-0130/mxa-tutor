@@ -21,7 +21,7 @@ from core.domain.paper_plan import (
     PaperPlanRecord,
     ParameterMapping,
 )
-from core.domain.paper_spec import EquationEntry, PaperSpec
+from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.paper.paper_ask_service import (
     PaperAskService,
@@ -168,6 +168,8 @@ async def test_target_drift_falls_back_to_unresolved(
         label="Stale equation",
         excerpt="A stale equation excerpt.",
         source_kind=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
+        document_label="DOC-001 - paper.pdf",
         target=EquationTarget(kind="equation", equation_id="EQ-stale"),
     )
     monkeypatch.setattr(
@@ -313,6 +315,8 @@ def _record(
             paper_title="Short-circuit report",
             paper_type="report",
             domain="motor_control",
+            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            primary_document_id=None,
             abstract=abstract,
             equations=[
                 EquationEntry(
@@ -375,6 +379,8 @@ def _many_equation_record(count: int) -> PaperPlanRecord:
             paper_title=record.spec.paper_title,
             paper_type=record.spec.paper_type,
             domain=record.spec.domain,
+            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            primary_document_id=None,
             abstract=record.spec.abstract,
             equations=equations,
             parameter_table=[],
@@ -400,6 +406,8 @@ def _figure_only_record() -> PaperPlanRecord:
             paper_title="Figure report",
             paper_type="report",
             domain="motor_control",
+            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            primary_document_id=None,
             abstract="",
             equations=[],
             parameter_table=[],
@@ -421,6 +429,8 @@ def _section_only_record() -> PaperPlanRecord:
             paper_title="Section report",
             paper_type="report",
             domain="motor_control",
+            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            primary_document_id=None,
             abstract="",
             equations=[],
             parameter_table=[],
@@ -456,6 +466,8 @@ def _remaining_missing_record() -> PaperPlanRecord:
             paper_title="Missing report",
             paper_type="report",
             domain="motor_control",
+            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            primary_document_id=None,
             abstract="",
             equations=[],
             parameter_table=[],
@@ -514,6 +526,8 @@ def _user_mapping_only_record() -> PaperPlanRecord:
             paper_title="User report",
             paper_type="report",
             domain="motor_control",
+            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            primary_document_id=None,
             abstract="",
             equations=[],
             parameter_table=[],
@@ -577,6 +591,7 @@ def _document_evidence(
 ) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id=paper_section_id,
         equation_id=equation_id,
         figure_id=figure_id,
@@ -588,6 +603,7 @@ def _document_evidence(
 def _user_evidence(prompt_id: str) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.USER_SUPPLIED,
+        document_id=None,
         paper_section_id=None,
         equation_id=None,
         figure_id=None,

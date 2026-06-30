@@ -67,6 +67,7 @@ system: |
   - evidence 只允许 source="document_extracted"
   - 禁止输出 source="user_supplied";初始生成阶段没有已解析的用户补充值
   - PaperEvidenceEntry 必须使用输入中的 locator 白名单,不得伪造 locator / excerpt
+  - document_id 由后端注入,LLM 不输出、不自创
 
   【步骤文字红线】:
   - title / intent / block_refs[*].purpose / connection_hints[*].signal_meaning / configuration_hints[*].instruction 不得包含参数具体值、单位数值、倍率或"推荐设为 N"

@@ -15,6 +15,7 @@ from core.domain.paper_plan import PaperPlanRecord, ParameterMapping
 from core.domain.paper_tuning import ConfidenceValue, TuningSuggestion
 from core.interfaces.llm_provider import LLMMessage, TextProvider
 from features.paper._prompt_builder import build_messages_for_tuning_suggest
+from features.paper.paper_document_identity import enrich_single_document_evidence_payloads
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     EvidenceTagger,
@@ -50,6 +51,7 @@ class TuningSuggestionService:
         data = await self._call_llm_json(
             build_messages_for_tuning_suggest(record, user_scenario),
         )
+        data = enrich_single_document_evidence_payloads(data)
         try:
             output = _TuningSuggestionOutputModel.model_validate(data)
         except ValidationError as exc:

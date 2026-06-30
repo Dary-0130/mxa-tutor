@@ -31,7 +31,8 @@ system: |
 
   【block_recommendations.paper_reference 字段硬约束】(v0.2 R6 真启动微补丁):
 
-  paper_reference 必须是 PaperEvidenceEntry 嵌套 dict 对象,6 个字段全部出现
+  paper_reference 必须是 PaperEvidenceEntry 嵌套 dict 对象,LLM 输出 6 个字段全部出现
+  document_id 是后端注入的第 7 个契约字段,LLM 不输出、不自创
   不是字符串描述,不是 list,不是 null
   字段结构(逐字照抄,字段顺序与命名严格匹配):
 
@@ -63,7 +64,7 @@ system: |
   ❌ "paper_reference": "Simulink 仿真环境"(纯字符串,错!)
   ❌ "paper_reference": "S2", "S3"
   ❌ "paper_reference": null(错!)
-  ❌ "paper_reference": {"text": "...", "section": "S2"}(字段名错,不是 6 字段 schema)
+  ❌ "paper_reference": {"text": "...", "section": "S2"}(字段名错,不是 PaperEvidenceEntry LLM 输出字段 schema)
 
   【block_recommendations.paper_reference 正例】(照此形状输出):
 

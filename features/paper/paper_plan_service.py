@@ -28,6 +28,7 @@ from features.paper._prompt_builder import (
     build_messages_for_plan_compose,
     build_messages_for_subsystem_plan,
 )
+from features.paper.paper_document_identity import enrich_single_document_evidence_payloads
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     BuildStepsDtoValidationError,
@@ -194,6 +195,7 @@ class PaperPlanService:
         role_name = "missing_detector"
         messages = build_messages_for_missing_detect(spec, sentinel_mappings)
         data = await self._call_llm_json(messages, role_name)
+        data = enrich_single_document_evidence_payloads(data)
         prompts_payload = self._require_list_field(data, "missing_prompts", role_name)
         try:
             drafts = [_MissingPromptDraftModel.model_validate(item) for item in prompts_payload]
@@ -240,6 +242,7 @@ class PaperPlanService:
             build_messages_for_plan_compose(spec, plan_id, paper_spec_id),
             role_name,
         )
+        data = enrich_single_document_evidence_payloads(data)
         if data.get("subsystem_breakdown") != []:
             self._raise_generation_error(role_name, "subsystem_breakdown_must_be_empty")
         if "m_script_skeleton" not in data or data.get("m_script_skeleton") is not None:
@@ -291,6 +294,7 @@ class PaperPlanService:
             build_messages_for_build_steps(block_recommendations, parameter_mapping, evidence),
             BUILD_STEP_ROLE_NAME,
         )
+        data = enrich_single_document_evidence_payloads(data)
         if data.get("build_steps") == []:
             raise BuildStepsDtoValidationError("empty_steps")
         try:

@@ -26,7 +26,13 @@ from core.domain.paper_plan import (
     PaperPlanRecord,
     ParameterMapping,
 )
-from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
+from core.domain.paper_spec import (
+    EquationEntry,
+    FigureRef,
+    PaperDocument,
+    PaperSpec,
+    ParameterEntry,
+)
 from core.domain.paper_tuning import ParameterDirection, TuningSuggestion
 from features.paper.paper_tuning_service import TUNING_DISCLAIMER
 
@@ -299,6 +305,8 @@ def _spec() -> PaperSpec:
         paper_title="Short-circuit report",
         paper_type="report",
         domain="motor_control",
+        documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+        primary_document_id=None,
         abstract="A synchronous machine short-circuit report.",
         equations=[
             EquationEntry(
@@ -314,6 +322,7 @@ def _spec() -> PaperSpec:
                 value="3.5",
                 unit="s",
                 source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-001",
             )
         ],
         figure_locations=[
@@ -383,6 +392,7 @@ def _document_evidence(
 ) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id=paper_section_id,
         equation_id=equation_id,
         figure_id=figure_id,
@@ -394,6 +404,7 @@ def _document_evidence(
 def _user_evidence(prompt_id: str) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.USER_SUPPLIED,
+        document_id=None,
         paper_section_id=None,
         equation_id=None,
         figure_id=None,

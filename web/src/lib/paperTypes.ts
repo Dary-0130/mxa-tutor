@@ -53,6 +53,7 @@ export interface MissingPromptParameterTarget {
 
 export interface PaperEvidenceEntry {
   source: EvidenceSource;
+  document_id: string | null;
   paper_section_id?: string | null;
   equation_id?: string | null;
   figure_id?: string | null;
@@ -72,12 +73,18 @@ export interface ParameterEntry {
   value: string;
   unit: string;
   source: EvidenceSource;
+  document_id: string | null;
 }
 
 export interface FigureRef {
   figure_id: string;
   caption: string;
   paper_section_id: string;
+}
+
+export interface PaperDocument {
+  document_id: string;
+  filename: string;
 }
 
 export interface BlockRecommendation {
@@ -161,6 +168,8 @@ export interface PaperSpec {
   paper_title: string;
   paper_type: PaperType;
   domain: PaperDomain;
+  documents: PaperDocument[];
+  primary_document_id: string | null;
   abstract: string;
   equations: EquationEntry[];
   parameter_table: ParameterEntry[];

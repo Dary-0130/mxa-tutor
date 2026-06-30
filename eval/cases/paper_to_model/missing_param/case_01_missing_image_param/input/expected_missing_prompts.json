@@ -5,6 +5,7 @@
       "parameter_name": "同步发电机惯性时间常数 H",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": "FIG-01",
@@ -21,6 +22,7 @@
       "parameter_name": "同步发电机摩擦因数 F",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": "FIG-01",
@@ -37,6 +39,7 @@
       "parameter_name": "变压器变比(原边/副边电压比)",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": "FIG-02",
@@ -53,6 +56,7 @@
       "parameter_name": "变压器漏阻抗 X_T",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": "FIG-02",
@@ -69,6 +73,7 @@
       "parameter_name": "变压器接线方式(原边 / 副边连接组别)",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": "FIG-02",
@@ -85,6 +90,7 @@
       "parameter_name": "电机初相角 α0",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": "FIG-03",

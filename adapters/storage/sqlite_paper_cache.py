@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime
-from typing import TypeVar
+from typing import Any, TypeVar, cast
 
 import aiosqlite
 from loguru import logger
@@ -13,6 +14,11 @@ from pydantic import TypeAdapter
 
 from adapters.storage._connection import open_connection
 from core.domain.exceptions import StoreError
+from core.domain.paper_document_identity import (
+    DEFAULT_DOCUMENT_ID,
+    LEGACY_DOCUMENT_FILENAME,
+    validate_paper_spec_document_identity,
+)
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
 from core.domain.paper_plan import ModelGenerationPlan, PaperPlanRecord
 from core.domain.paper_spec import PaperSpec
@@ -244,6 +250,7 @@ class SqlitePaperBundleStore(PaperBundleStore):
                 raise
 
     async def set_plan(self, paper_id: str, record: PaperPlanRecord) -> None:
+        validate_paper_spec_document_identity(record.spec)
         plan_json = self._dump(self._PLAN_ADAPTER, record.plan, "paper_plan_serialize_failed")
         prompts_json = self._dump(
             self._PROMPTS_ADAPTER,
@@ -314,6 +321,8 @@ class SqlitePaperBundleStore(PaperBundleStore):
 
     def _dump(self, adapter: TypeAdapter[T], value: T, error_code: str) -> str:
         try:
+            if adapter is self._SPEC_ADAPTER:
+                validate_paper_spec_document_identity(cast(PaperSpec, value))
             return adapter.dump_json(value).decode("utf-8")
         except (TypeError, ValueError) as exc:
             logger.error(
@@ -324,8 +333,47 @@ class SqlitePaperBundleStore(PaperBundleStore):
             raise StoreError(error_code) from None
 
     def _load(self, adapter: TypeAdapter[T], payload: str, error_code: str) -> T:
+        if adapter is self._SPEC_ADAPTER:
+            return cast(T, self._load_spec_with_migration(payload, error_code))
+        if adapter is self._PLAN_ADAPTER or adapter is self._PROMPTS_ADAPTER:
+            return self._load_with_nested_evidence_migration(adapter, payload, error_code)
         try:
             return adapter.validate_json(payload)
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "SqlitePaperBundleStore deserialize failed: error_code={} exception={}",
+                error_code,
+                type(exc).__name__,
+            )
+            raise StoreError(error_code) from None
+
+    def _load_spec_with_migration(self, payload: str, error_code: str) -> PaperSpec:
+        try:
+            raw = json.loads(payload)
+            if not isinstance(raw, dict):
+                raise TypeError("paper spec payload must be an object")
+            migrated = _migrate_spec_payload(raw)
+            spec = self._SPEC_ADAPTER.validate_python(migrated)
+            validate_paper_spec_document_identity(spec)
+            return spec
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "SqlitePaperBundleStore deserialize failed: error_code={} exception={}",
+                error_code,
+                type(exc).__name__,
+            )
+            raise StoreError(error_code) from None
+
+    def _load_with_nested_evidence_migration(
+        self,
+        adapter: TypeAdapter[T],
+        payload: str,
+        error_code: str,
+    ) -> T:
+        try:
+            raw = json.loads(payload)
+            migrated = _migrate_nested_evidence_payloads(raw)
+            return adapter.validate_python(migrated)
         except (TypeError, ValueError) as exc:
             logger.error(
                 "SqlitePaperBundleStore deserialize failed: error_code={} exception={}",
@@ -347,6 +395,103 @@ class SqlitePaperBundleStore(PaperBundleStore):
                 paper_id,
                 type(rollback_exc).__name__,
             )
+
+
+def _migrate_spec_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    migrated = dict(payload)
+    legacy_identity = "documents" not in migrated or "primary_document_id" not in migrated
+    if "documents" not in migrated:
+        migrated["documents"] = [
+            {
+                "document_id": DEFAULT_DOCUMENT_ID,
+                "filename": LEGACY_DOCUMENT_FILENAME,
+            }
+        ]
+    if "primary_document_id" not in migrated:
+        migrated["primary_document_id"] = None
+
+    if legacy_identity:
+        _add_missing_document_ids_to_spec_evidence(migrated.get("evidence"))
+        _add_missing_document_ids_to_parameters(migrated.get("parameter_table"))
+    return migrated
+
+
+def _migrate_nested_evidence_payloads(payload: Any) -> Any:
+    legacy_evidence_payload = not _any_evidence_payload_has_document_id(payload)
+    return _visit_evidence_payloads(payload, fill_missing=legacy_evidence_payload)
+
+
+def _add_missing_document_ids_to_spec_evidence(value: Any) -> None:
+    if not isinstance(value, list):
+        return
+    for entry in value:
+        if not isinstance(entry, dict) or "document_id" in entry:
+            continue
+        document_id = _document_id_for_source(entry.get("source"))
+        if document_id is not _MISSING:
+            entry["document_id"] = document_id
+
+
+def _add_missing_document_ids_to_parameters(value: Any) -> None:
+    if not isinstance(value, list):
+        return
+    for entry in value:
+        if not isinstance(entry, dict) or "document_id" in entry:
+            continue
+        document_id = _document_id_for_source(entry.get("source"))
+        if document_id is not _MISSING:
+            entry["document_id"] = document_id
+
+
+def _visit_evidence_payloads(value: Any, *, fill_missing: bool) -> Any:
+    if isinstance(value, list):
+        return [_visit_evidence_payloads(item, fill_missing=fill_missing) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    result = {
+        key: _visit_evidence_payloads(item, fill_missing=fill_missing)
+        for key, item in value.items()
+    }
+    if fill_missing and _looks_like_evidence_payload(result) and "document_id" not in result:
+        document_id = _document_id_for_source(result.get("source"))
+        if document_id is not _MISSING:
+            result["document_id"] = document_id
+    return result
+
+
+def _any_evidence_payload_has_document_id(value: Any) -> bool:
+    if isinstance(value, list):
+        return any(_any_evidence_payload_has_document_id(item) for item in value)
+    if not isinstance(value, dict):
+        return False
+    if _looks_like_evidence_payload(value) and "document_id" in value:
+        return True
+    return any(_any_evidence_payload_has_document_id(item) for item in value.values())
+
+
+_EVIDENCE_KEYS = frozenset(
+    {
+        "paper_section_id",
+        "equation_id",
+        "figure_id",
+        "excerpt",
+        "missing_param_prompt_id",
+    }
+)
+_MISSING = object()
+
+
+def _looks_like_evidence_payload(value: dict[str, Any]) -> bool:
+    return "source" in value and any(key in value for key in _EVIDENCE_KEYS)
+
+
+def _document_id_for_source(source: object) -> str | None | object:
+    if source == "document_extracted":
+        return DEFAULT_DOCUMENT_ID
+    if source == "user_supplied":
+        return None
+    return _MISSING
 
 
 class SqlitePaperSpecCacheView(PaperSpecCache):

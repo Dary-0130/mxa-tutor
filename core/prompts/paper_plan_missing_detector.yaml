@@ -25,6 +25,7 @@ system: |
   - 只输出 parameter_name / paper_reference / suggested_unit / source 4 个字段
   - 禁止输出 prompt_id;prompt_id 由 Python 按 sentinel 顺序注入
   - 禁止输出 user_supplied_value / user_supplied_unit;Python 构造公共 MissingParameterPrompt 时填 null
+  - paper_reference.document_id 由后端注入,LLM 不输出、不自创
   - source 恒定 "user_supplied"
 
   【匹配规则】(方向 A):
