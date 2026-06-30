@@ -20,6 +20,7 @@ from api.dependencies import (
 from api.main import create_app
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
+from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
@@ -135,6 +136,18 @@ def test_get_paper_plan_plan_only_surfaces_store_error(tmp_path: Path) -> None:
 
     assert response.status_code == 500
     assert response.json()["error"] == "store_error"
+
+
+def test_get_paper_plan_rejects_stale_conflict_mapping(tmp_path: Path) -> None:
+    store = _initialized_store(tmp_path)
+    asyncio.run(store.save_ready_bundle(_stale_conflict_record()))
+    app = _create_app(store)
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/papers/paper-1/plan")
+
+    assert response.status_code == 502
+    assert response.json()["error"] == "paper_plan_generation_failed"
 
 
 def test_sqlite_get_plan_record_reads_legacy_plan_without_build_steps(
@@ -299,6 +312,20 @@ def _record(
     )
 
 
+def _stale_conflict_record() -> PaperPlanRecord:
+    return PaperPlanRecord(
+        paper_id="paper-1",
+        spec=_conflict_spec(),
+        plan=_plan(
+            first_value="3.5",
+            first_source=EvidenceSource.DOCUMENT_EXTRACTED,
+            plan_evidence=[_document_evidence()],
+        ),
+        missing_prompts=[],
+        missing_bindings=[],
+    )
+
+
 def _spec() -> PaperSpec:
     evidence = _document_evidence()
     return PaperSpec(
@@ -336,6 +363,45 @@ def _spec() -> PaperSpec:
         ],
         pseudocode_blocks=[],
         evidence=[evidence],
+    )
+
+
+def _conflict_spec() -> PaperSpec:
+    evidence = _document_evidence()
+    return with_parameter_conflicts(
+        PaperSpec(
+            paper_title="Short-circuit report",
+            paper_type="report",
+            domain="motor_control",
+            documents=[
+                PaperDocument(document_id="DOC-001", filename="paper-a.pdf"),
+                PaperDocument(document_id="DOC-002", filename="paper-b.pdf"),
+            ],
+            primary_document_id=None,
+            abstract="A synchronous machine short-circuit report.",
+            equations=[],
+            parameter_table=[
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="3.5",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-001",
+                ),
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="4.0",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-002",
+                ),
+            ],
+            figure_locations=[],
+            pseudocode_blocks=[],
+            evidence=[evidence],
+        )
     )
 
 

@@ -20,8 +20,12 @@ from core.domain.paper_document_identity import (
     validate_paper_spec_document_identity,
 )
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
+from core.domain.paper_parameter_conflicts import (
+    detect_parameter_conflicts,
+    validate_parameter_conflicts_materialized,
+)
 from core.domain.paper_plan import ModelGenerationPlan, PaperPlanRecord
-from core.domain.paper_spec import PaperSpec
+from core.domain.paper_spec import PaperSpec, ParameterConflict, ParameterEntry
 from core.interfaces.paper_cache import PaperBundleStore, PaperPlanCache, PaperSpecCache
 
 T = TypeVar("T")
@@ -322,7 +326,9 @@ class SqlitePaperBundleStore(PaperBundleStore):
     def _dump(self, adapter: TypeAdapter[T], value: T, error_code: str) -> str:
         try:
             if adapter is self._SPEC_ADAPTER:
-                validate_paper_spec_document_identity(cast(PaperSpec, value))
+                spec = cast(PaperSpec, value)
+                validate_paper_spec_document_identity(spec)
+                validate_parameter_conflicts_materialized(spec)
             return adapter.dump_json(value).decode("utf-8")
         except (TypeError, ValueError) as exc:
             logger.error(
@@ -355,6 +361,7 @@ class SqlitePaperBundleStore(PaperBundleStore):
             migrated = _migrate_spec_payload(raw)
             spec = self._SPEC_ADAPTER.validate_python(migrated)
             validate_paper_spec_document_identity(spec)
+            validate_parameter_conflicts_materialized(spec)
             return spec
         except (TypeError, ValueError) as exc:
             logger.error(
@@ -416,7 +423,23 @@ def _migrate_spec_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if _is_legacy_single_document_payload(migrated):
         _add_missing_document_ids_to_extracted_items(migrated.get("equations"))
         _add_missing_document_ids_to_extracted_items(migrated.get("figure_locations"))
+    _refresh_parameter_conflicts(migrated)
     return migrated
+
+
+def _refresh_parameter_conflicts(payload: dict[str, Any]) -> None:
+    parameters = TypeAdapter(list[ParameterEntry]).validate_python(
+        payload.get("parameter_table", [])
+    )
+    computed = TypeAdapter(list[ParameterConflict]).dump_python(
+        detect_parameter_conflicts(parameters),
+        mode="json",
+    )
+    if "parameter_conflicts" not in payload:
+        payload["parameter_conflicts"] = computed
+        return
+    if payload["parameter_conflicts"] != computed:
+        raise ValueError("parameter_conflicts_mismatch")
 
 
 def _migrate_nested_evidence_payloads(payload: Any) -> Any:

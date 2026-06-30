@@ -18,6 +18,7 @@ from core.domain.exceptions import (
 )
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
+from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
@@ -187,6 +188,20 @@ async def test_parameter_direction_rejects_unknown_param_name() -> None:
 
 
 @pytest.mark.asyncio
+async def test_parameter_direction_rejects_conflict_candidate_value_text() -> None:
+    payload = _llm_payload(
+        param_name="D",
+        physical_meaning="Avoid using 3.5 until the user confirms the source value.",
+    )
+
+    with pytest.raises(PaperTuningError):
+        await TuningSuggestionService(QueueTextProvider([json.dumps(payload)])).suggest(
+            _conflict_record_for_tuning(),
+            "Need damping",
+        )
+
+
+@pytest.mark.asyncio
 async def test_public_wrapper_validation_failure_raises_paper_tuning_error() -> None:
     payload = _llm_payload(expected_effect="x" * 501)
 
@@ -222,6 +237,7 @@ async def test_invalid_json_raises_paper_tuning_error_without_leaking_raw_text(
 def _llm_payload(
     *,
     param_name: str = "H",
+    physical_meaning: str = "Increasing H makes the rotor speed change more slowly.",
     expected_effect: str = "Higher inertia slows current transients.",
     evidence: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -230,7 +246,7 @@ def _llm_payload(
             {
                 "param_name": param_name,
                 "direction": "increase",
-                "physical_meaning": "Increasing H makes the rotor speed change more slowly.",
+                "physical_meaning": physical_meaning,
             }
         ],
         "expected_effect": expected_effect,
@@ -252,6 +268,40 @@ def _record(*, resolved: bool = True) -> PaperPlanRecord:
                 model_param_name="Synchronous Machine.H",
             )
         ],
+    )
+
+
+def _conflict_record_for_tuning() -> PaperPlanRecord:
+    evidence = _document_evidence()
+    return PaperPlanRecord(
+        paper_id="paper-1",
+        spec=_conflict_spec(),
+        plan=ModelGenerationPlan(
+            plan_id="PLAN-paper-1",
+            paper_spec_id="paper-1",
+            library_choice="SimPowerSystems",
+            block_recommendations=[
+                BlockRecommendation(
+                    block_type="Synchronous Machine",
+                    purpose="Model the generator.",
+                    paper_reference=evidence,
+                )
+            ],
+            parameter_mapping=[
+                ParameterMapping(
+                    paper_param_name="D",
+                    model_param_name="Synchronous Machine.D",
+                    value="0.1",
+                    unit="pu",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                )
+            ],
+            subsystem_breakdown=["Place machine", "Apply fault", "Observe current"],
+            m_script_skeleton=None,
+            evidence=[evidence],
+        ),
+        missing_prompts=[],
+        missing_bindings=[],
     )
 
 
@@ -292,6 +342,45 @@ def _spec() -> PaperSpec:
         ],
         pseudocode_blocks=[],
         evidence=[evidence],
+    )
+
+
+def _conflict_spec() -> PaperSpec:
+    evidence = _document_evidence()
+    return with_parameter_conflicts(
+        PaperSpec(
+            paper_title="Short-circuit report",
+            paper_type="report",
+            domain="motor_control",
+            documents=[
+                PaperDocument(document_id="DOC-001", filename="paper-a.pdf"),
+                PaperDocument(document_id="DOC-002", filename="paper-b.pdf"),
+            ],
+            primary_document_id=None,
+            abstract="A synchronous machine short-circuit report.",
+            equations=[],
+            parameter_table=[
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="3.5",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-001",
+                ),
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="4.0",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-002",
+                ),
+            ],
+            figure_locations=[],
+            pseudocode_blocks=[],
+            evidence=[evidence],
+        )
     )
 
 

@@ -13,6 +13,7 @@ import features.paper.paper_plan_service as service_module
 from core.domain.exceptions import LLMRateLimitError, PaperPlanGenerationError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
+from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
@@ -519,6 +520,41 @@ async def test_mscript_drafter_allows_null_output() -> None:
 
 
 @pytest.mark.asyncio
+async def test_conflicted_parameter_mapping_is_rejected_without_pruning() -> None:
+    with pytest.raises(PaperPlanGenerationError, match="parameter_conflict_mapping"):
+        await PayloadPaperPlanService(_payloads()).generate(_conflict_spec(), "PAPER-001")
+
+
+@pytest.mark.asyncio
+async def test_all_conflicted_parameters_can_abstain_and_fallback_build_steps() -> None:
+    payloads = _payloads()
+    payloads["plan_composer"]["parameter_mapping"] = []
+    payloads["missing_detector"] = {"missing_prompts": []}
+
+    plan, missing_prompts, missing_bindings = await PayloadPaperPlanService(payloads).generate(
+        _conflict_spec(),
+        "PAPER-001",
+    )
+
+    assert plan.parameter_mapping == []
+    assert missing_prompts == []
+    assert missing_bindings == []
+    assert plan.build_steps is None
+    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+
+
+@pytest.mark.asyncio
+async def test_mscript_drafter_rejects_conflict_candidate_assignment() -> None:
+    payloads = _payloads()
+    payloads["plan_composer"]["parameter_mapping"] = []
+    payloads["missing_detector"] = {"missing_prompts": []}
+    payloads["mscript_drafter"] = {"m_script_skeleton": "clear; clc;\nH = 3.5;"}
+
+    with pytest.raises(PaperPlanGenerationError, match="parameter_conflict_mscript"):
+        await PayloadPaperPlanService(payloads).generate(_conflict_spec(), "PAPER-001")
+
+
+@pytest.mark.asyncio
 async def test_structured_build_steps_invalid_payload_falls_back_to_legacy() -> None:
     payloads = _payloads()
     payloads["build_step_planner"] = {"build_steps": []}
@@ -946,6 +982,52 @@ def _spec() -> PaperSpec:
         ],
         pseudocode_blocks=[],
         evidence=[evidence],
+    )
+
+
+def _conflict_spec() -> PaperSpec:
+    evidence = _document_evidence()
+    return with_parameter_conflicts(
+        PaperSpec(
+            paper_title="Short-circuit report",
+            paper_type="report",
+            domain="motor_control",
+            documents=[
+                PaperDocument(document_id="DOC-001", filename="paper-a.pdf"),
+                PaperDocument(document_id="DOC-002", filename="paper-b.pdf"),
+            ],
+            primary_document_id=None,
+            abstract="A synchronous machine short-circuit report.",
+            equations=[],
+            parameter_table=[
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="3.5",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-001",
+                ),
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="4.0",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-002",
+                ),
+            ],
+            figure_locations=[
+                FigureRef(
+                    figure_id="FIG-01",
+                    caption="Machine parameters",
+                    paper_section_id="S1",
+                    document_id="DOC-001",
+                )
+            ],
+            pseudocode_blocks=[],
+            evidence=[evidence],
+        )
     )
 
 

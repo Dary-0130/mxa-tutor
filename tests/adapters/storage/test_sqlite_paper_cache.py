@@ -201,6 +201,45 @@ async def test_legacy_521a_spec_migrates_equation_and_figure_document_ids(
     assert spec.figure_locations[0].document_id == "DOC-001"
 
 
+async def test_legacy_spec_json_recomputes_missing_parameter_conflicts(
+    initialized_db_path: str,
+) -> None:
+    payload = _conflict_spec_payload()
+    payload.pop("parameter_conflicts")
+    await _insert_bundle(
+        initialized_db_path,
+        paper_spec_json=_json(payload),
+        plan_json=None,
+        missing_prompts_json=None,
+    )
+
+    spec = await SqlitePaperBundleStore(initialized_db_path).get_spec("paper-1")
+
+    assert spec is not None
+    assert [
+        (option.value, option.unit) for option in spec.parameter_conflicts[0].value_options
+    ] == [
+        ("3.5", "s"),
+        ("4.0", "s"),
+    ]
+
+
+async def test_stored_parameter_conflicts_must_match_recomputed_view(
+    initialized_db_path: str,
+) -> None:
+    payload = _conflict_spec_payload()
+    payload["parameter_conflicts"] = []
+    await _insert_bundle(
+        initialized_db_path,
+        paper_spec_json=_json(payload),
+        plan_json=None,
+        missing_prompts_json=None,
+    )
+
+    with pytest.raises(StoreError, match="paper_spec_deserialize_failed"):
+        await SqlitePaperBundleStore(initialized_db_path).get_spec("paper-1")
+
+
 async def test_legacy_plan_and_missing_json_migrates_nested_evidence(
     initialized_db_path: str,
 ) -> None:
@@ -417,6 +456,65 @@ def _old_spec_payload() -> dict[str, object]:
         "figure_locations": [],
         "pseudocode_blocks": [],
         "evidence": [_old_document_evidence_payload()],
+    }
+
+
+def _conflict_spec_payload() -> dict[str, object]:
+    evidence = {**_old_document_evidence_payload(), "document_id": "DOC-001"}
+    return {
+        "paper_title": "Short-circuit report",
+        "paper_type": "report",
+        "domain": "motor_control",
+        "documents": [
+            {"document_id": "DOC-001", "filename": "paper-a.pdf"},
+            {"document_id": "DOC-002", "filename": "paper-b.pdf"},
+        ],
+        "primary_document_id": None,
+        "abstract": "A synchronous machine short-circuit report.",
+        "equations": [],
+        "parameter_table": [
+            {
+                "name": "Inertia constant",
+                "symbol": "H",
+                "value": "3.5",
+                "unit": "s",
+                "source": "document_extracted",
+                "document_id": "DOC-001",
+            },
+            {
+                "name": "Inertia constant",
+                "symbol": "H",
+                "value": "4.0",
+                "unit": "s",
+                "source": "document_extracted",
+                "document_id": "DOC-002",
+            },
+        ],
+        "figure_locations": [],
+        "pseudocode_blocks": [],
+        "evidence": [evidence],
+        "parameter_conflicts": [
+            {
+                "parameter_name": "Inertia constant",
+                "parameter_symbol": "H",
+                "value_options": [
+                    {
+                        "value": "3.5",
+                        "unit": "s",
+                        "observations": [
+                            {"document_id": "DOC-001", "locator": None, "excerpt": None}
+                        ],
+                    },
+                    {
+                        "value": "4.0",
+                        "unit": "s",
+                        "observations": [
+                            {"document_id": "DOC-002", "locator": None, "excerpt": None}
+                        ],
+                    },
+                ],
+            }
+        ],
     }
 
 

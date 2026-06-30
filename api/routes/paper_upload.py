@@ -24,6 +24,7 @@ from api.dependencies import (
 from app.config import AppSettings
 from core.domain.exceptions import DocumentParseError, PaperSpecGenerationError
 from core.domain.paper_document_identity import validate_paper_spec_document_identity
+from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_spec import PaperSpec
 from core.interfaces.paper_cache import PaperBundleStore
 from features.paper.paper_document_identity import sanitize_paper_display_filename
@@ -292,6 +293,7 @@ def _fuse_successful_specs(
         ],
         evidence=[entry for success in successes for entry in success.spec.evidence],
     )
+    spec = with_parameter_conflicts(spec)
     validate_paper_spec_document_identity(spec)
     return spec
 

@@ -6,6 +6,7 @@ import pytest
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
+from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
@@ -202,6 +203,33 @@ def test_build_messages_for_plan_compose_substitutes_plan_id() -> None:
     assert "逐字照抄" in messages[0].content
 
 
+def test_plan_compose_prompt_filters_conflicted_parameter_values() -> None:
+    messages = build_messages_for_plan_compose(_conflict_spec(), "PLAN-PAPER-001", "PAPER-001")
+    user = messages[1].content
+
+    assert "parameter_conflicts_json" in user
+    assert "需用户确认" in user
+    assert "Inertia constant" in user
+    assert '"document_ids": [' in user
+    assert "3.5" not in user
+    assert "4.0" not in user
+
+
+def test_mscript_prompt_filters_conflicted_parameter_values() -> None:
+    spec = _conflict_spec()
+    messages = build_messages_for_mscript_draft(
+        spec.equations,
+        spec.parameter_table,
+        spec.parameter_conflicts,
+    )
+    user = messages[1].content
+
+    assert "parameter_conflicts_json" in user
+    assert "需用户确认" in user
+    assert "3.5" not in user
+    assert "4.0" not in user
+
+
 def test_missing_detector_system_specifies_prompt_fields() -> None:
     system = load_prompt_template("paper_plan_missing_detector.yaml").system
 
@@ -312,6 +340,53 @@ def _spec() -> PaperSpec:
         ],
         pseudocode_blocks=[],
         evidence=[evidence],
+    )
+
+
+def _conflict_spec() -> PaperSpec:
+    evidence = PaperEvidenceEntry(
+        source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
+        paper_section_id="S1",
+        equation_id=None,
+        figure_id=None,
+        excerpt="The report compares machine settings.",
+        missing_param_prompt_id=None,
+    )
+    return with_parameter_conflicts(
+        PaperSpec(
+            paper_title="Short-circuit report",
+            paper_type="report",
+            domain="motor_control",
+            documents=[
+                PaperDocument(document_id="DOC-001", filename="paper-a.pdf"),
+                PaperDocument(document_id="DOC-002", filename="paper-b.pdf"),
+            ],
+            primary_document_id=None,
+            abstract="A synchronous machine short-circuit report.",
+            equations=[],
+            parameter_table=[
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="3.5",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-001",
+                ),
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="4.0",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-002",
+                ),
+            ],
+            figure_locations=[],
+            pseudocode_blocks=[],
+            evidence=[evidence],
+        )
     )
 
 

@@ -13,6 +13,11 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from core.domain.exceptions import PaperPlanGenerationError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
+from core.domain.paper_parameter_conflicts import (
+    mscript_assigns_conflict_value,
+    validate_parameter_conflicts_materialized,
+    without_conflicted_parameter_entries,
+)
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelBuildStep,
@@ -41,6 +46,7 @@ from features.paper.paper_plan_helpers import (
     build_plan_evidence_source_refs,
     validate_build_step_evidence_for_spec,
 )
+from features.paper.paper_plan_integrity import validate_plan_does_not_resolve_conflicts
 from features.paper.paper_schemas import (
     BlockRecommendationModel,
     ConfigurationHintModel,
@@ -82,6 +88,10 @@ class PaperPlanService:
     ) -> tuple[ModelGenerationPlan, list[MissingParameterPrompt], list[MissingBindingModel]]:
         plan_id = f"PLAN-{paper_id}"
         paper_spec_id = paper_id
+        try:
+            validate_parameter_conflicts_materialized(spec)
+        except ValueError:
+            raise PaperPlanGenerationError("parameter_conflicts_mismatch") from None
 
         plan_composer_output, mscript = await asyncio.gather(
             self._llm_plan_compose(spec, plan_id, paper_spec_id),
@@ -140,6 +150,7 @@ class PaperPlanService:
             [prompt.paper_reference for prompt in missing_prompts],
             spec,
         )
+        validate_plan_does_not_resolve_conflicts(assembled_plan, spec.parameter_conflicts)
         return assembled_plan, missing_prompts, missing_bindings
 
     async def _call_llm_json(
@@ -268,6 +279,10 @@ class PaperPlanService:
             self._raise_validation_error(role_name, exc)
         plan = model.to_domain()
         self._validate_plan_composer_mappings(plan.parameter_mapping, role_name)
+        try:
+            validate_plan_does_not_resolve_conflicts(plan, spec.parameter_conflicts)
+        except PaperPlanGenerationError:
+            self._raise_generation_error(role_name, "parameter_conflict_mapping")
         return plan
 
     async def _llm_subsystem_plan(
@@ -319,8 +334,13 @@ class PaperPlanService:
 
     async def _llm_mscript_draft(self, spec: PaperSpec) -> str | None:
         role_name = "mscript_drafter"
+        sanitized_spec = without_conflicted_parameter_entries(spec)
         data = await self._call_llm_json(
-            build_messages_for_mscript_draft(spec.equations, spec.parameter_table),
+            build_messages_for_mscript_draft(
+                spec.equations,
+                sanitized_spec.parameter_table,
+                spec.parameter_conflicts,
+            ),
             role_name,
         )
         if "m_script_skeleton" not in data:
@@ -328,6 +348,10 @@ class PaperPlanService:
         mscript = data["m_script_skeleton"]
         if mscript is not None and not isinstance(mscript, str):
             self._raise_generation_error(role_name, "m_script_skeleton_invalid")
+        if mscript is not None and mscript_assigns_conflict_value(
+            mscript, spec.parameter_conflicts
+        ):
+            self._raise_generation_error(role_name, "parameter_conflict_mscript")
         return mscript
 
     def _require_list_field(

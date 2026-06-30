@@ -77,6 +77,24 @@ export interface ParameterEntry {
   document_id: string | null;
 }
 
+export interface ParameterConflictObservation {
+  document_id: string;
+  locator: string | null;
+  excerpt: string | null;
+}
+
+export interface ParameterConflictValueOption {
+  value: string;
+  unit: string;
+  observations: ParameterConflictObservation[];
+}
+
+export interface ParameterConflict {
+  parameter_name: string;
+  parameter_symbol: string;
+  value_options: ParameterConflictValueOption[];
+}
+
 export interface FigureRef {
   figure_id: string;
   caption: string;
@@ -178,6 +196,7 @@ export interface PaperSpec {
   figure_locations: FigureRef[];
   pseudocode_blocks: string[];
   evidence: PaperEvidenceEntry[];
+  parameter_conflicts: ParameterConflict[];
 }
 
 export interface ParameterDirection {

@@ -9,6 +9,7 @@ from api.main import create_app
 from core.domain.exceptions import PaperTuningError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
+from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
@@ -143,6 +144,21 @@ def test_post_tuning_suggest_paper_tuning_error_returns_502() -> None:
     assert response.json()["error"] == "paper_tuning_failed"
 
 
+def test_post_tuning_suggest_rejects_stale_conflict_mapping_before_service() -> None:
+    service = FakeTuningService()
+    app = _create_app(FakeBundleStore(_stale_conflict_record()), service)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/papers/paper-1/tuning-suggest",
+            json={"user_scenario": "Need damping"},
+        )
+
+    assert response.status_code == 502
+    assert response.json()["error"] == "paper_plan_generation_failed"
+    assert service.calls == []
+
+
 def _create_app(store: FakeBundleStore, service: FakeTuningService) -> Any:
     get_settings.cache_clear()
     app = create_app()
@@ -164,6 +180,16 @@ def _record() -> PaperPlanRecord:
                 model_param_name="Synchronous Machine.H",
             )
         ],
+    )
+
+
+def _stale_conflict_record() -> PaperPlanRecord:
+    return PaperPlanRecord(
+        paper_id="paper-1",
+        spec=_conflict_spec(),
+        plan=_plan(),
+        missing_prompts=[],
+        missing_bindings=[],
     )
 
 
@@ -204,6 +230,45 @@ def _spec() -> PaperSpec:
         ],
         pseudocode_blocks=[],
         evidence=[evidence],
+    )
+
+
+def _conflict_spec() -> PaperSpec:
+    evidence = _document_evidence()
+    return with_parameter_conflicts(
+        PaperSpec(
+            paper_title="Short-circuit report",
+            paper_type="report",
+            domain="motor_control",
+            documents=[
+                PaperDocument(document_id="DOC-001", filename="paper-a.pdf"),
+                PaperDocument(document_id="DOC-002", filename="paper-b.pdf"),
+            ],
+            primary_document_id=None,
+            abstract="A synchronous machine short-circuit report.",
+            equations=[],
+            parameter_table=[
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="3.5",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-001",
+                ),
+                ParameterEntry(
+                    name="Inertia constant",
+                    symbol="H",
+                    value="4.0",
+                    unit="s",
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-002",
+                ),
+            ],
+            figure_locations=[],
+            pseudocode_blocks=[],
+            evidence=[evidence],
+        )
     )
 
 

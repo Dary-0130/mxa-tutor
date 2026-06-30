@@ -181,5 +181,6 @@
       "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
       "missing_param_prompt_id": null
     }
-  ]
+  ],
+  "parameter_conflicts": []
 }
