@@ -30,11 +30,17 @@ from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL, MissingBin
 
 
 class FakePaperSpecService:
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        error: Exception | None = None,
+        errors_by_document_id: dict[str, Exception] | None = None,
+    ) -> None:
         self.error = error
+        self.errors_by_document_id = errors_by_document_id or {}
         self.paths: list[Path] = []
         self.bytes_seen: list[bytes] = []
         self.display_filenames: list[str | None] = []
+        self.document_ids: list[str] = []
 
     async def extract(self, file_path: Path, paper_id: str) -> PaperSpec:
         return await self.extract_uncached(file_path, paper_id, display_filename=file_path.name)
@@ -44,14 +50,17 @@ class FakePaperSpecService:
         file_path: Path,
         paper_id: str,
         display_filename: str | None = None,
+        document_id: str = "DOC-001",
     ) -> PaperSpec:
         uuid.UUID(paper_id)
         self.paths.append(file_path)
         self.display_filenames.append(display_filename)
+        self.document_ids.append(document_id)
         self.bytes_seen.append(file_path.read_bytes())
-        if self.error is not None:
-            raise self.error
-        return _paper_spec(display_filename or "paper.pdf")
+        error = self.errors_by_document_id.get(document_id) or self.error
+        if error is not None:
+            raise error
+        return _paper_spec(display_filename or "paper.pdf", document_id=document_id)
 
 
 class FakePaperPlanService:
@@ -146,6 +155,117 @@ def test_upload_writes_record_to_paper_bundle_store(
     assert record.paper_id == paper_id
     assert record.plan.plan_id == f"PLAN-{paper_id}"
     assert record.missing_bindings == [_missing_binding()]
+
+
+def test_upload_multiple_documents_fuses_one_spec_with_primary_index(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakePaperSpecService()
+    plan_service = FakePaperPlanService()
+    app = _create_app(tmp_path, monkeypatch, service, plan_service=plan_service)
+
+    with TestClient(app) as client:
+        response = _post_documents(
+            client,
+            [
+                (b"%PDF-1.7\nmain", "main.pdf"),
+                (b"%PDF-1.7\naux", "aux.pdf"),
+            ],
+            primary_index=1,
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert service.document_ids == ["DOC-001", "DOC-002"]
+    assert body["spec"]["primary_document_id"] == "DOC-002"
+    assert [document["document_id"] for document in body["spec"]["documents"]] == [
+        "DOC-001",
+        "DOC-002",
+    ]
+    assert [entry["document_id"] for entry in body["spec"]["equations"]] == [
+        "DOC-001",
+        "DOC-002",
+    ]
+    assert [status["status"] for status in body["document_statuses"]] == [
+        "succeeded",
+        "succeeded",
+    ]
+    assert plan_service.calls[0][0].primary_document_id == "DOC-002"
+
+
+def test_upload_auxiliary_failure_keeps_doc_gap_and_reports_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakePaperSpecService(
+        errors_by_document_id={"DOC-002": DocumentParseError("parse_failed")}
+    )
+    app = _create_app(tmp_path, monkeypatch, service)
+
+    with TestClient(app) as client:
+        response = _post_documents(
+            client,
+            [
+                (b"%PDF-1.7\none", "one.pdf"),
+                (b"%PDF-1.7\ntwo", "two.pdf"),
+                (b"%PDF-1.7\nthree", "three.pdf"),
+            ],
+        )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert [document["document_id"] for document in body["spec"]["documents"]] == [
+        "DOC-001",
+        "DOC-003",
+    ]
+    assert body["spec"]["primary_document_id"] is None
+    assert [(item["document_id"], item["status"]) for item in body["document_statuses"]] == [
+        ("DOC-001", "succeeded"),
+        ("DOC-002", "failed"),
+        ("DOC-003", "succeeded"),
+    ]
+    assert body["document_statuses"][1]["error_code"] == "document_parse_failed"
+
+
+def test_upload_primary_document_failure_fails_whole_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakePaperSpecService(
+        errors_by_document_id={"DOC-002": DocumentParseError("parse_failed")}
+    )
+    app = _create_app(tmp_path, monkeypatch, service)
+
+    with TestClient(app) as client:
+        response = _post_documents(
+            client,
+            [
+                (b"%PDF-1.7\none", "one.pdf"),
+                (b"%PDF-1.7\ntwo", "two.pdf"),
+            ],
+            primary_index=1,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "document_parse_failed"
+
+
+def test_upload_rejects_primary_index_out_of_range(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _create_app(tmp_path, monkeypatch, FakePaperSpecService())
+
+    with TestClient(app) as client:
+        response = _post_documents(
+            client,
+            [(b"%PDF-1.7\none", "one.pdf")],
+            primary_index=1,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "document_parse_failed"
 
 
 def test_upload_store_failure_does_not_run_application_compensation_delete(
@@ -326,10 +446,29 @@ def _post_document(client: TestClient, content: bytes, filename: str):
     )
 
 
-def _paper_spec(filename: str = "paper.pdf") -> PaperSpec:
+def _post_documents(
+    client: TestClient,
+    documents: list[tuple[bytes, str]],
+    *,
+    primary_index: int | None = None,
+):
+    data = {}
+    if primary_index is not None:
+        data["primary_index"] = str(primary_index)
+    return client.post(
+        "/api/v1/upload-document",
+        data=data,
+        files=[
+            ("file", (filename, content, "application/octet-stream"))
+            for content, filename in documents
+        ],
+    )
+
+
+def _paper_spec(filename: str = "paper.pdf", *, document_id: str = "DOC-001") -> PaperSpec:
     evidence = PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
-        document_id="DOC-001",
+        document_id=document_id,
         paper_section_id="S1",
         equation_id=None,
         figure_id=None,
@@ -340,10 +479,10 @@ def _paper_spec(filename: str = "paper.pdf") -> PaperSpec:
         paper_title="电机短路实验报告",
         paper_type="report",
         domain="motor_control",
-        documents=[PaperDocument(document_id="DOC-001", filename=filename)],
+        documents=[PaperDocument(document_id=document_id, filename=filename)],
         primary_document_id=None,
         abstract="报告描述同步电机短路实验参数。",
-        equations=[EquationEntry("EQ-01", "H = 3.5", "S1")],
+        equations=[EquationEntry("EQ-01", "H = 3.5", "S1", document_id)],
         parameter_table=[
             ParameterEntry(
                 name="惯性常数",
@@ -351,7 +490,7 @@ def _paper_spec(filename: str = "paper.pdf") -> PaperSpec:
                 value="3.5",
                 unit="s",
                 source=EvidenceSource.DOCUMENT_EXTRACTED,
-                document_id="DOC-001",
+                document_id=document_id,
             )
         ],
         figure_locations=[],
