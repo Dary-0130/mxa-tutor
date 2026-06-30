@@ -19,7 +19,7 @@ from core.domain.paper_spec import FigureRef, PaperDocument, PaperSpec
 from eval._paper_eval_csv import write_paper_eval_csv
 from features.paper.paper_plan_cache import InMemoryPaperPlanCache
 from features.paper.paper_plan_helpers import BuildStepsSemanticValidationError, MissingBindingModel
-from features.paper.paper_schemas import MissingParameterPromptModel
+from features.paper.paper_schemas import MissingParameterPromptModel, PaperSpecModel
 from features.paper.paper_user_input_schemas import (
     UserSuppliedResponseBatch,
     UserSuppliedResponseModel,
@@ -28,6 +28,7 @@ from features.paper.paper_user_input_schemas import (
 CASES_ROOT = Path("eval/cases/paper_to_model").resolve()
 MATERIAL_CASE = CASES_ROOT / "material_to_plan" / "case_01_motor_short_circuit"
 MISSING_CASE = CASES_ROOT / "missing_param" / "case_01_missing_image_param"
+MULTIDOC_FUSED_SPEC_GOLDEN = MATERIAL_CASE / "golden" / "expected_multidoc_fused_paper_spec.json"
 
 
 class FakeSpecService:
@@ -126,6 +127,23 @@ def test_compute_case_metrics_keeps_golden_independent_by_metric() -> None:
     assert {k: v for k, v in changed.items() if k != "A1"} == {
         k: v for k, v in base.items() if k != "A1"
     }
+
+
+def test_multidoc_fused_paper_spec_golden_keeps_locator_namespace_per_doc() -> None:
+    payload = json.loads(MULTIDOC_FUSED_SPEC_GOLDEN.read_bytes().decode("utf-8"))
+    spec = PaperSpecModel.model_validate(payload).to_domain()
+
+    assert [document.document_id for document in spec.documents] == ["DOC-001", "DOC-002"]
+    assert spec.primary_document_id == "DOC-002"
+    assert [(entry.document_id, entry.equation_id) for entry in spec.equations] == [
+        ("DOC-001", "EQ-01"),
+        ("DOC-002", "EQ-01"),
+    ]
+    assert [(entry.document_id, entry.figure_id) for entry in spec.figure_locations] == [
+        ("DOC-001", "FIG-01"),
+        ("DOC-002", "FIG-01"),
+    ]
+    assert [parameter.symbol for parameter in spec.parameter_table] == ["H", "H"]
 
 
 @pytest.mark.asyncio
@@ -504,16 +522,19 @@ def _spec(title: str = "Spec") -> PaperSpec:
                 figure_id="FIG-01",
                 caption="figure one",
                 paper_section_id="S5",
+                document_id="DOC-001",
             ),
             FigureRef(
                 figure_id="FIG-02",
                 caption="figure two",
                 paper_section_id="S5",
+                document_id="DOC-001",
             ),
             FigureRef(
                 figure_id="FIG-03",
                 caption="figure three",
                 paper_section_id="S5",
+                document_id="DOC-001",
             ),
         ],
         pseudocode_blocks=[],

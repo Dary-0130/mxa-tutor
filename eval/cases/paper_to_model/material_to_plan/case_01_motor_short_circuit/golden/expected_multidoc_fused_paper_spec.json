@@ -1,0 +1,86 @@
+{
+  "paper_title": "Multi-document short-circuit fusion fixture",
+  "paper_type": "report",
+  "domain": "motor_control",
+  "documents": [
+    {
+      "document_id": "DOC-001",
+      "filename": "main-short-circuit.pdf"
+    },
+    {
+      "document_id": "DOC-002",
+      "filename": "appendix-parameters.pdf"
+    }
+  ],
+  "primary_document_id": "DOC-002",
+  "abstract": "Auxiliary and main reports are fused into one PaperSpec while preserving each document identity and canonical locator.",
+  "equations": [
+    {
+      "equation_id": "EQ-01",
+      "latex_or_text": "i_a(t) = I_0 e^{-t / T_d}",
+      "paper_section_id": "S1",
+      "document_id": "DOC-001"
+    },
+    {
+      "equation_id": "EQ-01",
+      "latex_or_text": "i_a(t) = I_0 e^{-t / T_q}",
+      "paper_section_id": "S1",
+      "document_id": "DOC-002"
+    }
+  ],
+  "parameter_table": [
+    {
+      "name": "Inertia constant",
+      "symbol": "H",
+      "value": "3.5",
+      "unit": "s",
+      "source": "document_extracted",
+      "document_id": "DOC-001"
+    },
+    {
+      "name": "Inertia constant",
+      "symbol": "H",
+      "value": "4.0",
+      "unit": "s",
+      "source": "document_extracted",
+      "document_id": "DOC-002"
+    }
+  ],
+  "figure_locations": [
+    {
+      "figure_id": "FIG-01",
+      "caption": "Main report Simulink layout",
+      "paper_section_id": "S1",
+      "document_id": "DOC-001"
+    },
+    {
+      "figure_id": "FIG-01",
+      "caption": "Appendix parameter table screenshot",
+      "paper_section_id": "S1",
+      "document_id": "DOC-002"
+    }
+  ],
+  "pseudocode_blocks": [
+    "Use the main report waveform equation and the appendix parameter value as separate sourced inputs."
+  ],
+  "evidence": [
+    {
+      "source": "document_extracted",
+      "paper_section_id": "S1",
+      "equation_id": "EQ-01",
+      "figure_id": "FIG-01",
+      "excerpt": "The main report defines the transient current equation and the Simulink layout.",
+      "missing_param_prompt_id": null,
+      "document_id": "DOC-001"
+    },
+    {
+      "source": "document_extracted",
+      "paper_section_id": "S1",
+      "equation_id": "EQ-01",
+      "figure_id": "FIG-01",
+      "excerpt": "The appendix restates the locator labels while providing an alternate inertia value.",
+      "missing_param_prompt_id": null,
+      "document_id": "DOC-002"
+    }
+  ]
+}
