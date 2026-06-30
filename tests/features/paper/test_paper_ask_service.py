@@ -323,6 +323,7 @@ def _record(
                     equation_id="EQ-01",
                     latex_or_text=equation_text,
                     paper_section_id="S1",
+                    document_id="DOC-001",
                 )
             ],
             parameter_table=[],
@@ -369,7 +370,10 @@ def _many_equation_record(count: int) -> PaperPlanRecord:
     record = _record()
     equations = [
         EquationEntry(
-            equation_id=f"EQ-{index:03d}", latex_or_text=f"Equation {index}", paper_section_id="S1"
+            equation_id=f"EQ-{index:03d}",
+            latex_or_text=f"Equation {index}",
+            paper_section_id="S1",
+            document_id="DOC-001",
         )
         for index in range(count)
     ]
