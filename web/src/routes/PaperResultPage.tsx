@@ -4,6 +4,7 @@ import { ApiException } from "../lib/api";
 import { resolveErrorMessage } from "../lib/errorMessages";
 import { BuildSteps } from "./paper/BuildSteps";
 import { EquationList } from "./paper/EquationList";
+import { PaperAskPanel } from "./paper/PaperAskPanel";
 import { PaperHeader } from "./paper/PaperHeader";
 import { ParameterTable } from "./paper/ParameterTable";
 import { SectionNav } from "./paper/SectionNav";
@@ -69,39 +70,44 @@ export function PaperResultPage() {
       <SectionNav includeEquations={includeEquations} />
       <div className="paper-shell">
         <PaperHeader spec={data.spec} />
-        <section id="paper-summary" className="paper-section" aria-labelledby="paper-summary-title">
-          <h2 id="paper-summary-title">论文摘要</h2>
-          <div className="paper-readable-card paper-summary-card">
-            <p className="paper-copy">{data.spec.abstract}</p>
+        <div className="paper-body-grid">
+          <div className="paper-content-column">
+            <section id="paper-summary" className="paper-section" aria-labelledby="paper-summary-title">
+              <h2 id="paper-summary-title">论文摘要</h2>
+              <div className="paper-readable-card paper-summary-card">
+                <p className="paper-copy">{data.spec.abstract}</p>
+              </div>
+            </section>
+            {includeEquations ? (
+              <section id="paper-equations" className="paper-section" aria-labelledby="paper-equations-title">
+                <h2 id="paper-equations-title">公式</h2>
+                <EquationList items={renderableEquations} />
+              </section>
+            ) : null}
+            <section id="paper-subsystems" className="paper-section" aria-labelledby="paper-subsystems-title">
+              <h2 id="paper-subsystems-title">子系统划分</h2>
+              <SubsystemMap items={data.plan.subsystem_breakdown} />
+            </section>
+            <section id="paper-build-steps" className="paper-section" aria-labelledby="paper-build-steps-title">
+              <h2 id="paper-build-steps-title">建模步骤</h2>
+              <BuildSteps plan={data.plan} />
+            </section>
+            <section id="paper-parameters" className="paper-section" aria-labelledby="paper-parameters-title">
+              <h2 id="paper-parameters-title">参数对照</h2>
+              <ParameterTable
+                paperId={data.paperId}
+                plan={data.plan}
+                remainingMissingPrompts={data.remainingMissingPrompts}
+                onPlanUpdate={updatePlan}
+              />
+            </section>
+            <section id="paper-tuning" className="paper-section" aria-labelledby="paper-tuning-title">
+              <h2 id="paper-tuning-title">调参建议</h2>
+              <TuningPanel paperId={data.paperId} />
+            </section>
           </div>
-        </section>
-        {includeEquations ? (
-          <section id="paper-equations" className="paper-section" aria-labelledby="paper-equations-title">
-            <h2 id="paper-equations-title">公式</h2>
-            <EquationList items={renderableEquations} />
-          </section>
-        ) : null}
-        <section id="paper-subsystems" className="paper-section" aria-labelledby="paper-subsystems-title">
-          <h2 id="paper-subsystems-title">子系统划分</h2>
-          <SubsystemMap items={data.plan.subsystem_breakdown} />
-        </section>
-        <section id="paper-build-steps" className="paper-section" aria-labelledby="paper-build-steps-title">
-          <h2 id="paper-build-steps-title">建模步骤</h2>
-          <BuildSteps plan={data.plan} />
-        </section>
-        <section id="paper-parameters" className="paper-section" aria-labelledby="paper-parameters-title">
-          <h2 id="paper-parameters-title">参数对照</h2>
-          <ParameterTable
-            paperId={data.paperId}
-            plan={data.plan}
-            remainingMissingPrompts={data.remainingMissingPrompts}
-            onPlanUpdate={updatePlan}
-          />
-        </section>
-        <section id="paper-tuning" className="paper-section" aria-labelledby="paper-tuning-title">
-          <h2 id="paper-tuning-title">调参建议</h2>
-          <TuningPanel paperId={data.paperId} />
-        </section>
+          <PaperAskPanel key={data.paperId} paperId={data.paperId} />
+        </div>
       </div>
     </main>
   );
