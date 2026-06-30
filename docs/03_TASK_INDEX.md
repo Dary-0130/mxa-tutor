@@ -349,9 +349,9 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 19/20 (paper-to-model TASK-500~508 + TASK-520(🔍 追问子线);MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 20/21 (paper-to-model TASK-500~508 + TASK-520(🔍 追问子线) + TASK-521(🔍 多文件子线);MATLAB bridge/engine TASK-510~519)
 
-总计: 50/53
+总计: 51/54
 ```
 
 ---
@@ -386,6 +386,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-518 | run-state 持久化 + 跨轮状态机(b3-2b / 518-A + 518-B) | ✅ | Codex | 518-A substrate(PR #123)+ 518-B wiring(PR #124)均已合并 main:持久化写路径 + b4-only durable 回执 / 错误契约 / 24h 硬保证 / MATLAB 同意文案 |
 | TASK-519 | run-state 闭环陪调编排 + 解释(b3-2c / 519-A + 519-B) | ✅ | Codex | 519-A 单轮 + 519-B 跨轮均已合并 main、b3-2c 整体完工 |
 | TASK-520 | Paper 追问 · Citation / Anchor 契约 RFC | 🔍 | Codex | 追问子线;520-A 契约 / 锚点 RFC ✅ 合并(#140);520-B1 可见锚点 ✅ 合并(#141);520-B2 跳转/高亮 ✅ 合并(#142);520-C 后端 ask 端点 ✅ 合并(#144);520-D 前端问答 UI + citation ✅ 合并(#147);520-E 待起草 |
+| TASK-521 | Paper 多文件 · 多文档身份契约 substrate | 🔍 | Codex | 多文件子线;521-A 多文档身份契约 substrate ✅ 合并(#150);521-B/C/D 待起草 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
