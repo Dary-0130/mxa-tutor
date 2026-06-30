@@ -75,6 +75,11 @@ async def test_extract_generates_and_caches_spec(
     second = await service.extract(tmp_path / "paper.pdf", "paper-1")
 
     assert first.paper_title == "电机短路实验报告"
+    assert first.documents[0].document_id == "DOC-001"
+    assert first.documents[0].filename == "paper.pdf"
+    assert first.primary_document_id is None
+    assert first.parameter_table[0].document_id == "DOC-001"
+    assert first.evidence[0].document_id == "DOC-001"
     assert second is first
     assert provider.calls == 1
 
@@ -136,6 +141,20 @@ def test_schema_error_raises_generation_error() -> None:
 
     with pytest.raises(PaperSpecGenerationError):
         _service(FakeTextProvider())._parse_and_validate(_response(payload), _parsed_document())
+
+
+def test_parse_and_validate_enriches_single_document_identity_and_filename() -> None:
+    spec = _service(FakeTextProvider())._parse_and_validate(
+        _response(_valid_payload()),
+        _parsed_document(),
+        display_filename="C:\\unsafe\\paper\nname.pdf",
+    )
+
+    assert spec.documents[0].document_id == "DOC-001"
+    assert spec.documents[0].filename == "papername.pdf"
+    assert spec.primary_document_id is None
+    assert spec.parameter_table[0].document_id == "DOC-001"
+    assert spec.evidence[0].document_id == "DOC-001"
 
 
 def test_service_rejects_figure_when_parser_found_none() -> None:

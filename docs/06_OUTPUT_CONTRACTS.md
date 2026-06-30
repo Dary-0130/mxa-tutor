@@ -394,17 +394,20 @@ v0.1 - 2026-06-05 起 freeze,与 TASK-203 commit `871c8e2` 的 `ProjectOverview`
 | `figure_id` | string \| null | 见不变量 | 图表 ID |
 | `excerpt` | string \| null | 见不变量 | 文档原文摘录 |
 | `missing_param_prompt_id` | string \| null | 见不变量 | 用户补充流程关联 ID |
+| `document_id` | string \| null | 见不变量 | 该条证据来自哪篇文档 |
 
 两套不变量:
 
 - `source = document_extracted`: `paper_section_id` / `equation_id` / `figure_id` 至少一个非
-  null;`excerpt` 必须是 1-300 字非空字符串;`missing_param_prompt_id` 必须为 null。
+  null;`excerpt` 必须是 1-300 字非空字符串;`missing_param_prompt_id` 必须为 null;
+  `document_id` 必填且必须属于同一 `PaperSpec.documents`。
 - `source = user_supplied`: `paper_section_id` / `equation_id` / `figure_id` 全部为 null;
   `excerpt` 必须为 null;`missing_param_prompt_id` 必填,并关联到
-  `MissingParameterPrompt.prompt_id`。
+  `MissingParameterPrompt.prompt_id`;`document_id` 必须为 null。
 
-Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / contract,以及
-`features/paper/paper_schemas.py` Pydantic wrapper。TASK-500 不落地 Python 实现。
+Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
+`core/domain/paper_document_identity.py` 跨结构 helper,以及
+`features/paper/paper_schemas.py` Pydantic wrapper。
 
 ### 12.4 PaperSpec schema
 
@@ -417,6 +420,8 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 | `paper_title` | string | 1-200 字 | 资料标题 |
 | `paper_type` | `Literal["paper", "report", "thesis"]` | 必填 | 资料类型 |
 | `domain` | 资料入口领域枚举 | 不含 `general` | 工程领域 |
+| `documents` | array[`PaperDocument`] | 非空;`document_id` 唯一且匹配 `^DOC-\d{3}$` | 本份结果由哪几篇文档组成 |
+| `primary_document_id` | string \| null | required-but-nullable;非 null 时必须属于 `documents` | 主文献身份锚点;不参与值裁决;null 表示无主/平等 |
 | `abstract` | string | 1-1000 字 | 摘要或任务陈述 |
 | `equations` | array[`EquationEntry`] | 0-N | 公式列表 |
 | `parameter_table` | array[`ParameterEntry`] | 0-N | 参数表 |
@@ -428,9 +433,19 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 
 | 子项 | 字段 |
 |---|---|
+| `PaperDocument` | `document_id` / `filename` |
 | `EquationEntry` | `equation_id` / `latex_or_text` / `paper_section_id` |
-| `ParameterEntry` | `name` / `symbol` / `value` / `unit` / `source` |
+| `ParameterEntry` | `name` / `symbol` / `value` / `unit` / `source` / `document_id` |
 | `FigureRef` | `figure_id` / `caption` / `paper_section_id` |
+
+跨文档身份不变量:
+
+- `documents` 至少 1 项;每个 `document_id` 唯一且匹配 `^DOC-\d{3}$`;`filename` 是清洗后的展示名。
+- `primary_document_id` 为 null 表示无主文献,不得用 `primary_document_id or documents[0]` 折叠成首篇为主;非 null 时必须属于 `documents`。
+- `PaperEvidenceEntry` / `ParameterEntry` 中 `source = document_extracted` 的 `document_id` 必填且属于 `documents`;`source = user_supplied` 的 `document_id` 必须为 null。
+- 单文件上传和旧数据读回迁移固定写入 `DOC-001`,并把 `primary_document_id` 置为 null;LLM 不输出、不自创 `document_id`。
+- 多文件后的 locator 合法性必须按 `(document_id, locator_id)` 复合命名空间判断;单文件阶段只有 `DOC-001`,521-B 接入多文件融合前必须补齐该边界。
+- 禁止为综合推理或无单一出处结论伪造 `DOC-ALL`/虚拟出处;禁止给用户补充值写非 null `document_id`;同名参数多来源值不得因名称相同被静默去重。
 
 ### 12.5 ModelGenerationPlan schema
 
@@ -472,8 +487,9 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 - `ConnectionHint` 只表达人工连线提示,端口字段可空,不是可执行 Simulink 端口契约
 - `ConfigurationHint.instruction` 承载求解器 / powergui / 仿真设置等配置类步骤,不得写入模型参数值
 - `ModelBuildStep.depends_on` 只引用前序 `step_id`;`display_text` 在 TASK-507-B 由 assembler 派生,TASK-507-A 只声明字段
+- 嵌套的 `PaperEvidenceEntry` 同样携带 `document_id`;BuildStepPlanner/PlanComposer/MissingDetector/TuningSuggestion 的 LLM 原始输出不写该字段,由后端在 schema 校验前按单文件上下文注入。
 
-**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)
+**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)
 
 ### 12.6 TuningSuggestion schema
 
@@ -516,7 +532,7 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 | `source` | `Literal["user_supplied"]` | 恒定值 | 体现双源契约 |
 
 `paper_reference.source` 必须是 `document_extracted`,用于指出缺失线索来自哪里;用户回填后的参数证据
-另以 `source = user_supplied` 的 `PaperEvidenceEntry` 表示。
+另以 `source = user_supplied` 且 `document_id = null` 的 `PaperEvidenceEntry` 表示。
 
 ### 12.8 PaperAsk schema
 
@@ -567,6 +583,9 @@ Python 实现占位路径:`core/domain/paper_evidence.py` domain dataclass / con
 `document_extracted` citation 必须带 1..300 字 `excerpt`;该 excerpt 只能来自真实文档摘录结构
 (`PaperSpec.abstract`、`EquationEntry.latex_or_text`、`PaperEvidenceEntry.excerpt`)。用户补充和
 plan 生成文本不得伪装成文档 excerpt。`user_supplied` citation 的 `excerpt` 必须为 null。
+TASK-521-A 阶段仅内部 `SourceTableEntry` / `_SourceCandidate` 携带 `document_id` /
+`document_label`;`to_citation()` 暂不把文档维度带入对外 `PaperAskCitation`,该公开扩展留
+521-C,因此 `paper_ask_response.schema.json` 本阶段不应变化。
 
 `target` 是语义 target,不是 DOM id。四种形态:
 

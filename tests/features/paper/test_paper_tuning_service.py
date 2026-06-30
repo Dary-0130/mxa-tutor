@@ -24,7 +24,13 @@ from core.domain.paper_plan import (
     PaperPlanRecord,
     ParameterMapping,
 )
-from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
+from core.domain.paper_spec import (
+    EquationEntry,
+    FigureRef,
+    PaperDocument,
+    PaperSpec,
+    ParameterEntry,
+)
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL
 from features.paper.paper_tuning_service import TUNING_DISCLAIMER, TuningSuggestionService
@@ -255,6 +261,8 @@ def _spec() -> PaperSpec:
         paper_title="Short-circuit report",
         paper_type="report",
         domain="motor_control",
+        documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+        primary_document_id=None,
         abstract="A synchronous machine short-circuit report.",
         equations=[
             EquationEntry(
@@ -270,6 +278,7 @@ def _spec() -> PaperSpec:
                 value="3.5",
                 unit="s",
                 source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-001",
             )
         ],
         figure_locations=[
@@ -329,6 +338,7 @@ def _document_evidence(
 ) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id=paper_section_id,
         equation_id=equation_id,
         figure_id=figure_id,
@@ -340,6 +350,7 @@ def _document_evidence(
 def _user_evidence(prompt_id: str) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.USER_SUPPLIED,
+        document_id=None,
         paper_section_id=None,
         equation_id=None,
         figure_id=None,
@@ -351,6 +362,7 @@ def _user_evidence(prompt_id: str) -> PaperEvidenceEntry:
 def _document_evidence_payload() -> dict[str, Any]:
     return {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S1",
         "equation_id": None,
         "figure_id": None,
@@ -362,6 +374,7 @@ def _document_evidence_payload() -> dict[str, Any]:
 def _user_evidence_payload(prompt_id: str) -> dict[str, Any]:
     return {
         "source": "user_supplied",
+        "document_id": None,
         "paper_section_id": None,
         "equation_id": None,
         "figure_id": None,

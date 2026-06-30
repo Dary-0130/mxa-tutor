@@ -12,8 +12,15 @@ from core.domain.paper_plan import (
     PaperPlanRecord,
     ParameterMapping,
 )
-from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
+from core.domain.paper_spec import (
+    EquationEntry,
+    FigureRef,
+    PaperDocument,
+    PaperSpec,
+    ParameterEntry,
+)
 from features.paper._prompt_builder import (
+    _dedupe_evidence,
     _shared_paper_plan_constraints,
     build_messages_for_build_steps,
     build_messages_for_missing_detect,
@@ -95,6 +102,7 @@ def test_shared_snippet_contains_evidence_double_source_contract() -> None:
     snippet = _shared_paper_plan_constraints()
 
     assert "evidence 双源契约" in snippet
+    assert "document_id 是后端注入的第 7 个契约字段" in snippet
     assert 'source = "document_extracted"' in snippet
     assert 'source = "user_supplied"' in snippet
 
@@ -175,6 +183,14 @@ def test_build_messages_for_tuning_suggest_uses_allowlists_not_fixed_fields() ->
     assert '"MISS-2"' not in user
     assert "suggestion_id" not in user
     assert "disclaimer" not in user
+
+
+def test_evidence_dedupe_preserves_same_locator_from_different_documents() -> None:
+    first = _document_evidence()
+    second = _document_evidence(document_id="DOC-002")
+    duplicate = _document_evidence()
+
+    assert _dedupe_evidence([first, second, duplicate]) == [first, second]
 
 
 def test_build_messages_for_plan_compose_substitutes_plan_id() -> None:
@@ -262,6 +278,8 @@ def _spec() -> PaperSpec:
         paper_title="Short-circuit report",
         paper_type="report",
         domain="motor_control",
+        documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+        primary_document_id=None,
         abstract="A synchronous machine short-circuit report.",
         equations=[
             EquationEntry(
@@ -277,6 +295,7 @@ def _spec() -> PaperSpec:
                 value="3.5",
                 unit="s",
                 source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-001",
             )
         ],
         figure_locations=[
@@ -366,12 +385,14 @@ def _missing_prompt(prompt_id: str, parameter_name: str) -> MissingParameterProm
 
 def _document_evidence(
     *,
+    document_id: str | None = "DOC-001",
     paper_section_id: str | None = "S1",
     equation_id: str | None = None,
     figure_id: str | None = None,
 ) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id=document_id,
         paper_section_id=paper_section_id,
         equation_id=equation_id,
         figure_id=figure_id,
@@ -383,6 +404,7 @@ def _document_evidence(
 def _user_evidence(prompt_id: str) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.USER_SUPPLIED,
+        document_id=None,
         paper_section_id=None,
         equation_id=None,
         figure_id=None,

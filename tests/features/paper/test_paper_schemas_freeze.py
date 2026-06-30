@@ -26,7 +26,13 @@ from core.domain.paper_plan import (
     ParameterMappingRef,
     StepBlockRef,
 )
-from core.domain.paper_spec import EquationEntry, FigureRef, PaperSpec, ParameterEntry
+from core.domain.paper_spec import (
+    EquationEntry,
+    FigureRef,
+    PaperDocument,
+    PaperSpec,
+    ParameterEntry,
+)
 from core.domain.paper_tuning import ParameterDirection, TuningSuggestion
 from features.paper.paper_ask_schemas import (
     EquationTargetModel,
@@ -47,6 +53,7 @@ from features.paper.paper_schemas import (
     MissingParameterPromptModel,
     ModelBuildStepModel,
     ModelGenerationPlanModel,
+    PaperDocumentModel,
     PaperEvidenceEntryModel,
     PaperSpecModel,
     ParameterDirectionModel,
@@ -70,6 +77,7 @@ TOP_LEVEL_MODELS = (
 NESTED_MODELS = (
     EquationEntryModel,
     ParameterEntryModel,
+    PaperDocumentModel,
     FigureRefModel,
     BlockRecommendationModel,
     ParameterMappingModel,
@@ -90,6 +98,7 @@ NESTED_MODELS = (
 def _document_evidence_payload() -> dict[str, object]:
     return {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S1",
         "equation_id": None,
         "figure_id": None,
@@ -101,6 +110,7 @@ def _document_evidence_payload() -> dict[str, object]:
 def _user_evidence_payload() -> dict[str, object]:
     return {
         "source": "user_supplied",
+        "document_id": None,
         "paper_section_id": None,
         "equation_id": None,
         "figure_id": None,
@@ -152,6 +162,7 @@ def test_nested_model_count_and_names_are_frozen() -> None:
     assert [model.__name__ for model in NESTED_MODELS] == [
         "EquationEntryModel",
         "ParameterEntryModel",
+        "PaperDocumentModel",
         "FigureRefModel",
         "BlockRecommendationModel",
         "ParameterMappingModel",
@@ -207,6 +218,9 @@ def test_nested_field_order_matches_domain() -> None:
     assert tuple(ParameterEntryModel.model_fields) == tuple(
         field.name for field in fields(ParameterEntry)
     )
+    assert tuple(PaperDocumentModel.model_fields) == tuple(
+        field.name for field in fields(PaperDocument)
+    )
     assert tuple(FigureRefModel.model_fields) == tuple(field.name for field in fields(FigureRef))
     assert tuple(BlockRecommendationModel.model_fields) == tuple(
         field.name for field in fields(BlockRecommendation)
@@ -258,6 +272,58 @@ def test_model_generation_plan_micro_patch_constraints_are_frozen() -> None:
         list[ModelBuildStepModel] | None
     )
     assert fields(ModelGenerationPlan)[8].type == list[ModelBuildStep] | None
+
+
+def test_document_identity_fields_are_required_but_nullable_where_expected() -> None:
+    assert PaperSpecModel.model_fields["documents"].is_required()
+    assert PaperSpecModel.model_fields["primary_document_id"].is_required()
+    assert PaperEvidenceEntryModel.model_fields["document_id"].is_required()
+    assert ParameterEntryModel.model_fields["document_id"].is_required()
+
+    spec_payload = _paper_spec_payload(primary_document_id=None)
+    assert PaperSpecModel.model_validate(spec_payload).primary_document_id is None
+
+    with pytest.raises(ValidationError):
+        PaperSpecModel.model_validate(_without(spec_payload, "primary_document_id"))
+    with pytest.raises(ValidationError):
+        PaperSpecModel.model_validate(_without(spec_payload, "documents"))
+    with pytest.raises(ValidationError):
+        PaperEvidenceEntryModel.model_validate(
+            _without(_document_evidence_payload(), "document_id")
+        )
+    with pytest.raises(ValidationError):
+        ParameterEntryModel.model_validate(_without(_document_parameter_payload(), "document_id"))
+
+    assert PaperEvidenceEntryModel.model_validate(_user_evidence_payload()).document_id is None
+    assert ParameterEntryModel.model_validate(_user_parameter_payload()).document_id is None
+
+
+def test_paper_spec_document_identity_invariants_are_enforced() -> None:
+    assert PaperSpecModel.model_validate(_paper_spec_payload()).to_domain().documents[0].document_id
+
+    invalid_payloads = [
+        _paper_spec_payload(documents=[]),
+        _paper_spec_payload(
+            documents=[
+                {"document_id": "DOC-001", "filename": "paper-a.pdf"},
+                {"document_id": "DOC-001", "filename": "paper-b.pdf"},
+            ]
+        ),
+        _paper_spec_payload(documents=[{"document_id": "DOC-1", "filename": "paper.pdf"}]),
+        _paper_spec_payload(documents=[{"document_id": "DOC-001", "filename": "bad/name.pdf"}]),
+        _paper_spec_payload(documents=[{"document_id": "DOC-001", "filename": "bad\nname.pdf"}]),
+        _paper_spec_payload(primary_document_id="DOC-999"),
+        _paper_spec_payload(evidence=[{**_document_evidence_payload(), "document_id": "DOC-999"}]),
+        _paper_spec_payload(
+            parameter_table=[{**_document_parameter_payload(), "document_id": "DOC-999"}]
+        ),
+        _paper_spec_payload(
+            parameter_table=[{**_user_parameter_payload(), "document_id": "DOC-001"}]
+        ),
+    ]
+    for payload in invalid_payloads:
+        with pytest.raises(ValidationError):
+            PaperSpecModel.model_validate(payload)
 
 
 def test_build_steps_none_missing_and_non_empty_roundtrip() -> None:
@@ -407,6 +473,8 @@ def test_domain_literal_rejects_general() -> None:
         "paper_title": "Report",
         "paper_type": "report",
         "domain": "general",
+        "documents": [{"document_id": "DOC-001", "filename": "paper.pdf"}],
+        "primary_document_id": None,
         "abstract": "Abstract",
         "equations": [],
         "parameter_table": [],
@@ -496,6 +564,60 @@ def test_missing_parameter_prompt_requires_document_reference() -> None:
 
     with pytest.raises(ValidationError):
         MissingParameterPromptModel.model_validate(payload)
+
+
+def _paper_spec_payload(
+    *,
+    documents: list[dict[str, object]] | None = None,
+    primary_document_id: str | None = None,
+    parameter_table: list[dict[str, object]] | None = None,
+    evidence: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "paper_title": "Report",
+        "paper_type": "report",
+        "domain": "motor_control",
+        "documents": documents
+        if documents is not None
+        else [{"document_id": "DOC-001", "filename": "paper.pdf"}],
+        "primary_document_id": primary_document_id,
+        "abstract": "Abstract",
+        "equations": [],
+        "parameter_table": parameter_table
+        if parameter_table is not None
+        else [_document_parameter_payload()],
+        "figure_locations": [],
+        "pseudocode_blocks": [],
+        "evidence": evidence if evidence is not None else [_document_evidence_payload()],
+    }
+
+
+def _document_parameter_payload() -> dict[str, object]:
+    return {
+        "name": "Rated capacity",
+        "symbol": "PN",
+        "value": "200",
+        "unit": "MW",
+        "source": "document_extracted",
+        "document_id": "DOC-001",
+    }
+
+
+def _user_parameter_payload() -> dict[str, object]:
+    return {
+        "name": "Inertia",
+        "symbol": "H",
+        "value": "3.5",
+        "unit": "s",
+        "source": "user_supplied",
+        "document_id": None,
+    }
+
+
+def _without(payload: dict[str, object], field_name: str) -> dict[str, object]:
+    result = dict(payload)
+    result.pop(field_name)
+    return result
 
 
 def _plan_payload() -> dict[str, object]:
@@ -618,6 +740,7 @@ def _build_steps() -> list[ModelBuildStep]:
 def _document_evidence() -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id="S1",
         equation_id=None,
         figure_id=None,

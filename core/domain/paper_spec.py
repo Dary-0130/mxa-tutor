@@ -34,6 +34,15 @@ class ParameterEntry:
     value: str
     unit: str
     source: EvidenceSource
+    document_id: str | None
+
+
+@dataclass(frozen=True)
+class PaperDocument:
+    """Document identity for one source file in a PaperSpec."""
+
+    document_id: str
+    filename: str
 
 
 @dataclass(frozen=True)
@@ -52,6 +61,8 @@ class PaperSpec:
     paper_title: str
     paper_type: PaperType
     domain: PaperDomain
+    documents: list[PaperDocument]
+    primary_document_id: str | None
     abstract: str
     equations: list[EquationEntry]
     parameter_table: list[ParameterEntry]

@@ -46,9 +46,10 @@ def _shared_paper_plan_constraints() -> str:
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
 
 【evidence 双源契约】(每个 PaperEvidenceEntry 必守):
-- 字段(6 个,逐字匹配):source / paper_section_id / equation_id / figure_id / excerpt / missing_param_prompt_id
-- source = "document_extracted":三 locator 至少一个非 null;excerpt 1-300 字非空;missing_param_prompt_id = null
-- source = "user_supplied":三 locator 全 null;excerpt = null;missing_param_prompt_id 必填(关联 MissingParameterPrompt.prompt_id)
+- LLM 输出字段(6 个,逐字匹配):source / paper_section_id / equation_id / figure_id / excerpt / missing_param_prompt_id
+- document_id 是后端注入的第 7 个契约字段,LLM 不输出、不自创
+- source = "document_extracted":三 locator 至少一个非 null;excerpt 1-300 字非空;missing_param_prompt_id = null;document_id 由系统注入 DOC-001
+- source = "user_supplied":三 locator 全 null;excerpt = null;missing_param_prompt_id 必填(关联 MissingParameterPrompt.prompt_id);document_id 由系统注入 null
 
 【locator 白名单】(只能从 PaperSpec 给出的 ID 集中选,严禁自创):
 - paper_section_id 只能来自 PaperSpec.evidence[*].paper_section_id
@@ -307,6 +308,7 @@ def _dedupe_evidence(entries: list[PaperEvidenceEntry]) -> list[PaperEvidenceEnt
     for entry in entries:
         key = (
             entry.source,
+            entry.document_id,
             entry.paper_section_id,
             entry.equation_id,
             entry.figure_id,

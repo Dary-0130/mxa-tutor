@@ -20,6 +20,10 @@ from features.paper.paper_schemas import PaperSpecModel
 from ._paper_spec_cache import PaperSpecCache
 from ._prompt_builder import build_messages
 from ._prompt_loader import load_prompt_template
+from .paper_document_identity import (
+    enrich_single_document_spec_payload,
+    sanitize_paper_display_filename,
+)
 
 DEFAULT_PAPER_SPEC_TIMEOUT_SECONDS = 60.0
 # R6 后置调参,对齐 PaperPlanService 已升 8000 + DeepSeek V3 8192 上限
@@ -54,11 +58,20 @@ class PaperSpecService:
             logger.info("PaperSpec cache hit: paper_id={}", paper_id)
             return cached
 
-        spec = await self.extract_uncached(file_path, paper_id)
+        spec = await self.extract_uncached(
+            file_path,
+            paper_id,
+            display_filename=file_path.name,
+        )
         await self._cache.put(paper_id, spec)
         return spec
 
-    async def extract_uncached(self, file_path: Path, paper_id: str) -> PaperSpec:
+    async def extract_uncached(
+        self,
+        file_path: Path,
+        paper_id: str,
+        display_filename: str | None = None,
+    ) -> PaperSpec:
         """Extract a PaperSpec without reading or writing the cache."""
         parser = await asyncio.to_thread(self._document_parser_router.route, file_path)
         parsed = await asyncio.to_thread(run_in_sandbox, parser, file_path)
@@ -75,9 +88,19 @@ class PaperSpecService:
             timeout=self._timeout,
             max_tokens=self._max_tokens,
         )
-        return self._parse_and_validate(response, parsed)
+        return self._parse_and_validate(
+            response,
+            parsed,
+            display_filename=sanitize_paper_display_filename(display_filename or file_path.name),
+        )
 
-    def _parse_and_validate(self, response: LLMResponse, parsed: ParsedDocument) -> PaperSpec:
+    def _parse_and_validate(
+        self,
+        response: LLMResponse,
+        parsed: ParsedDocument,
+        *,
+        display_filename: str | None = None,
+    ) -> PaperSpec:
         try:
             payload = json.loads(response.text)
         except json.JSONDecodeError as exc:
@@ -88,6 +111,10 @@ class PaperSpecService:
             logger.error("PaperSpec schema validation failed: error_type=payload_not_mapping")
             raise PaperSpecGenerationError(_GENERATION_ERROR_MESSAGE) from None
 
+        payload = enrich_single_document_spec_payload(
+            payload,
+            display_filename=display_filename,
+        )
         try:
             spec = PaperSpecModel.model_validate(payload).to_domain()
         except ValidationError as exc:

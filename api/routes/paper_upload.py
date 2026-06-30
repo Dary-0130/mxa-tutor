@@ -23,6 +23,7 @@ from api.dependencies import (
 from app.config import AppSettings
 from core.domain.exceptions import DocumentParseError
 from core.interfaces.paper_cache import PaperBundleStore
+from features.paper.paper_document_identity import sanitize_paper_display_filename
 from features.paper.paper_plan_cache import PaperPlanRecord
 from features.paper.paper_plan_service import PaperPlanService
 from features.paper.paper_schemas import (
@@ -64,6 +65,7 @@ async def upload_document(
     try:
         header = await file.read(8192)
         extension = _validate_magic_and_extension(header, file.filename)
+        display_filename = sanitize_paper_display_filename(file.filename)
         await file.seek(0)
         saved_path = await asyncio.to_thread(
             _save_upload_sync,
@@ -81,7 +83,11 @@ async def upload_document(
             extension,
         )
         paper_id = str(uuid.uuid4())
-        spec = await service.extract_uncached(saved_path, paper_id)
+        spec = await service.extract_uncached(
+            saved_path,
+            paper_id,
+            display_filename=display_filename,
+        )
         plan, missing_prompts, missing_bindings = await plan_service.generate(spec, paper_id)
         record = PaperPlanRecord(
             paper_id=paper_id,

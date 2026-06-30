@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -19,7 +20,7 @@ from core.domain.paper_plan import (
     PaperPlanRecord,
     ParameterMapping,
 )
-from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterEntry
+from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec, ParameterEntry
 
 
 async def test_save_ready_bundle_round_trips_across_connections(
@@ -151,6 +152,81 @@ async def test_rollback_failure_does_not_cover_primary_error(
         await store.save_ready_bundle(_record())
 
 
+async def test_legacy_spec_json_migrates_single_document_identity(
+    initialized_db_path: str,
+) -> None:
+    await _insert_bundle(
+        initialized_db_path,
+        paper_spec_json=_old_spec_json(),
+        plan_json=None,
+        missing_prompts_json=None,
+    )
+
+    spec = await SqlitePaperBundleStore(initialized_db_path).get_spec("paper-1")
+
+    assert spec is not None
+    assert spec.documents == [PaperDocument(document_id="DOC-001", filename="legacy_document")]
+    assert spec.primary_document_id is None
+    assert spec.evidence[0].document_id == "DOC-001"
+    assert spec.parameter_table[0].document_id == "DOC-001"
+
+
+async def test_legacy_plan_and_missing_json_migrates_nested_evidence(
+    initialized_db_path: str,
+) -> None:
+    await _insert_bundle(
+        initialized_db_path,
+        paper_spec_json=_old_spec_json(),
+        plan_json=_old_plan_json(),
+        missing_prompts_json=_old_missing_prompts_json(),
+    )
+
+    record = await SqlitePaperBundleStore(initialized_db_path).get_plan_record("paper-1")
+
+    assert record is not None
+    assert record.plan.evidence[0].document_id == "DOC-001"
+    assert record.plan.block_recommendations[0].paper_reference.document_id == "DOC-001"
+    assert record.plan.build_steps is not None
+    assert record.plan.build_steps[0].evidence[0].document_id == "DOC-001"
+    assert record.plan.build_steps[0].block_refs[0].paper_reference is not None
+    assert record.plan.build_steps[0].block_refs[0].paper_reference.document_id == "DOC-001"
+    assert record.plan.build_steps[0].configuration_hints[0].evidence[0].document_id == "DOC-001"
+    assert record.missing_prompts[0].paper_reference.document_id == "DOC-001"
+
+
+async def test_new_bad_spec_json_without_nested_document_id_fails(
+    initialized_db_path: str,
+) -> None:
+    payload = _old_spec_payload()
+    payload["documents"] = [{"document_id": "DOC-001", "filename": "paper.pdf"}]
+    payload["primary_document_id"] = None
+    await _insert_bundle(
+        initialized_db_path,
+        paper_spec_json=_json(payload),
+        plan_json=None,
+        missing_prompts_json=None,
+    )
+
+    with pytest.raises(StoreError, match="paper_spec_deserialize_failed"):
+        await SqlitePaperBundleStore(initialized_db_path).get_spec("paper-1")
+
+
+async def test_new_bad_plan_json_without_nested_document_id_fails(
+    initialized_db_path: str,
+) -> None:
+    plan_payload = json.loads(_old_plan_json())
+    plan_payload["evidence"][0]["document_id"] = "DOC-001"
+    await _insert_bundle(
+        initialized_db_path,
+        paper_spec_json=_old_spec_json(),
+        plan_json=_json(plan_payload),
+        missing_prompts_json=_old_missing_prompts_json(),
+    )
+
+    with pytest.raises(StoreError, match="paper_plan_deserialize_failed"):
+        await SqlitePaperBundleStore(initialized_db_path).get_plan_record("paper-1")
+
+
 def _faulting_connection_factory(
     *,
     rollback_fails: bool = False,
@@ -187,6 +263,148 @@ async def _count(conn: aiosqlite.Connection, table: str) -> int:
     return int(row["count"])
 
 
+async def _insert_bundle(
+    db_path: str,
+    *,
+    paper_spec_json: str,
+    plan_json: str | None,
+    missing_prompts_json: str | None,
+) -> None:
+    async with open_connection(db_path) as conn:
+        await conn.execute(
+            """
+            INSERT INTO paper_spec_cache(paper_id, paper_spec_json, created_at, updated_at)
+            VALUES (?, ?, 'now', 'now')
+            """,
+            ("paper-1", paper_spec_json),
+        )
+        if plan_json is not None and missing_prompts_json is not None:
+            await conn.execute(
+                """
+                INSERT INTO paper_plan_cache(
+                    paper_id, plan_json, missing_prompts_json, missing_bindings_json,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, '[]', 'now', 'now')
+                """,
+                ("paper-1", plan_json, missing_prompts_json),
+            )
+        await conn.commit()
+
+
+def _old_spec_json() -> str:
+    return _json(_old_spec_payload())
+
+
+def _old_plan_json() -> str:
+    evidence = _old_document_evidence_payload()
+    return _json(
+        {
+            "plan_id": "PLAN-paper-1",
+            "paper_spec_id": "paper-1",
+            "library_choice": "SimPowerSystems",
+            "block_recommendations": [
+                {
+                    "block_type": "Synchronous Machine",
+                    "purpose": "Model the generator.",
+                    "paper_reference": evidence,
+                }
+            ],
+            "parameter_mapping": [],
+            "subsystem_breakdown": ["Place machine", "Apply fault", "Observe current"],
+            "m_script_skeleton": None,
+            "evidence": [evidence],
+            "build_steps": [
+                {
+                    "step_id": "STEP-001",
+                    "title": "Place machine",
+                    "intent": "Create the machine subsystem.",
+                    "block_refs": [
+                        {
+                            "block_ref_id": "B1",
+                            "block_type": "Synchronous Machine",
+                            "library_path": None,
+                            "purpose": "Model the generator.",
+                            "paper_reference": evidence,
+                        }
+                    ],
+                    "parameter_refs": [],
+                    "connection_hints": [],
+                    "configuration_hints": [
+                        {
+                            "target": "solver",
+                            "setting_name": None,
+                            "instruction": "Use the configured solver.",
+                            "evidence": [evidence],
+                        }
+                    ],
+                    "depends_on": [],
+                    "evidence": [evidence],
+                    "display_text": "Place machine.",
+                }
+            ],
+        }
+    )
+
+
+def _old_missing_prompts_json() -> str:
+    return _json(
+        [
+            {
+                "prompt_id": "MISS-1",
+                "parameter_name": "H",
+                "paper_reference": _old_document_evidence_payload(),
+                "suggested_unit": "s",
+                "user_supplied_value": None,
+                "user_supplied_unit": None,
+                "source": "user_supplied",
+            }
+        ]
+    )
+
+
+def _old_spec_payload() -> dict[str, object]:
+    return {
+        "paper_title": "Short-circuit report",
+        "paper_type": "report",
+        "domain": "motor_control",
+        "abstract": "A synchronous machine short-circuit report.",
+        "equations": [
+            {
+                "equation_id": "EQ-01",
+                "latex_or_text": "H = 3.5",
+                "paper_section_id": "S1",
+            }
+        ],
+        "parameter_table": [
+            {
+                "name": "Inertia constant",
+                "symbol": "H",
+                "value": "3.5",
+                "unit": "s",
+                "source": "document_extracted",
+            }
+        ],
+        "figure_locations": [],
+        "pseudocode_blocks": [],
+        "evidence": [_old_document_evidence_payload()],
+    }
+
+
+def _old_document_evidence_payload() -> dict[str, object]:
+    return {
+        "source": "document_extracted",
+        "paper_section_id": "S1",
+        "equation_id": None,
+        "figure_id": None,
+        "excerpt": "The report states the machine parameter.",
+        "missing_param_prompt_id": None,
+    }
+
+
+def _json(payload: object) -> str:
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _record() -> PaperPlanRecord:
     evidence = _document_evidence()
     return PaperPlanRecord(
@@ -195,6 +413,8 @@ def _record() -> PaperPlanRecord:
             paper_title="Short-circuit report",
             paper_type="report",
             domain="motor_control",
+            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            primary_document_id=None,
             abstract="A synchronous machine short-circuit report.",
             equations=[
                 EquationEntry(
@@ -210,6 +430,7 @@ def _record() -> PaperPlanRecord:
                     value="3.5",
                     unit="s",
                     source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-001",
                 )
             ],
             figure_locations=[],
@@ -263,6 +484,7 @@ def _record() -> PaperPlanRecord:
 def _document_evidence() -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id="S1",
         equation_id=None,
         figure_id=None,

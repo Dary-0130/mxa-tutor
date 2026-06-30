@@ -63,11 +63,47 @@
       "title": "FigureRefModel",
       "type": "object"
     },
+    "PaperDocumentModel": {
+      "additionalProperties": false,
+      "properties": {
+        "document_id": {
+          "minLength": 1,
+          "pattern": "^DOC-\\d{3}$",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "filename": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Filename",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "filename"
+      ],
+      "title": "PaperDocumentModel",
+      "type": "object"
+    },
     "PaperEvidenceEntryModel": {
       "additionalProperties": false,
       "properties": {
         "source": {
           "$ref": "#/$defs/EvidenceSource"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^DOC-\\d{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Document Id"
         },
         "paper_section_id": {
           "anyOf": [
@@ -137,7 +173,8 @@
         }
       },
       "required": [
-        "source"
+        "source",
+        "document_id"
       ],
       "title": "PaperEvidenceEntryModel",
       "type": "object"
@@ -167,6 +204,19 @@
         },
         "source": {
           "$ref": "#/$defs/EvidenceSource"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^DOC-\\d{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Document Id"
         }
       },
       "required": [
@@ -174,7 +224,8 @@
         "symbol",
         "value",
         "unit",
-        "source"
+        "source",
+        "document_id"
       ],
       "title": "ParameterEntryModel",
       "type": "object"
@@ -208,6 +259,27 @@
       ],
       "title": "Domain",
       "type": "string"
+    },
+    "documents": {
+      "items": {
+        "$ref": "#/$defs/PaperDocumentModel"
+      },
+      "minItems": 1,
+      "title": "Documents",
+      "type": "array"
+    },
+    "primary_document_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "pattern": "^DOC-\\d{3}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Primary Document Id"
     },
     "abstract": {
       "maxLength": 1000,
@@ -256,6 +328,8 @@
     "paper_title",
     "paper_type",
     "domain",
+    "documents",
+    "primary_document_id",
     "abstract",
     "evidence"
   ],

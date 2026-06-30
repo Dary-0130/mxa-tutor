@@ -15,7 +15,7 @@ from core.domain.exceptions import LLMRateLimitError, PaperPlanGenerationError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import BlockRecommendation, ModelGenerationPlan, ParameterMapping
-from core.domain.paper_spec import FigureRef, PaperSpec
+from core.domain.paper_spec import FigureRef, PaperDocument, PaperSpec
 from eval._paper_eval_csv import write_paper_eval_csv
 from features.paper.paper_plan_cache import InMemoryPaperPlanCache
 from features.paper.paper_plan_helpers import BuildStepsSemanticValidationError, MissingBindingModel
@@ -494,6 +494,8 @@ def _spec(title: str = "Spec") -> PaperSpec:
         paper_title=title,
         paper_type="report",
         domain="motor_control",
+        documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+        primary_document_id=None,
         abstract="abstract",
         equations=[],
         parameter_table=[],
@@ -557,6 +559,7 @@ def _updated_plan_for_prompts(
             *[
                 PaperEvidenceEntry(
                     source=EvidenceSource.USER_SUPPLIED,
+                    document_id=None,
                     paper_section_id=None,
                     equation_id=None,
                     figure_id=None,
@@ -595,6 +598,7 @@ def _doc_ref(
 ) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id=section_id,
         equation_id=equation_id,
         figure_id=figure_id,

@@ -24,7 +24,7 @@ from core.domain.paper_plan import (
     PaperPlanRecord,
     ParameterMapping,
 )
-from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterEntry
+from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec, ParameterEntry
 from core.interfaces.paper_cache import PaperBundleStore
 from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL, MissingBindingModel
 
@@ -34,17 +34,24 @@ class FakePaperSpecService:
         self.error = error
         self.paths: list[Path] = []
         self.bytes_seen: list[bytes] = []
+        self.display_filenames: list[str | None] = []
 
     async def extract(self, file_path: Path, paper_id: str) -> PaperSpec:
-        return await self.extract_uncached(file_path, paper_id)
+        return await self.extract_uncached(file_path, paper_id, display_filename=file_path.name)
 
-    async def extract_uncached(self, file_path: Path, paper_id: str) -> PaperSpec:
+    async def extract_uncached(
+        self,
+        file_path: Path,
+        paper_id: str,
+        display_filename: str | None = None,
+    ) -> PaperSpec:
         uuid.UUID(paper_id)
         self.paths.append(file_path)
+        self.display_filenames.append(display_filename)
         self.bytes_seen.append(file_path.read_bytes())
         if self.error is not None:
             raise self.error
-        return _paper_spec()
+        return _paper_spec(display_filename or "paper.pdf")
 
 
 class FakePaperPlanService:
@@ -98,6 +105,8 @@ def test_upload_document_returns_200_with_paper_id_and_spec(
     assert response.status_code == 200
     assert uuid.UUID(body["paper_id"]).version == 4
     assert body["spec"]["paper_title"] == "电机短路实验报告"
+    assert body["spec"]["documents"][0]["filename"] == "paper.docx"
+    assert service.display_filenames == ["paper.docx"]
 
 
 def test_upload_response_contains_plan_and_missing_prompts(
@@ -317,9 +326,10 @@ def _post_document(client: TestClient, content: bytes, filename: str):
     )
 
 
-def _paper_spec() -> PaperSpec:
+def _paper_spec(filename: str = "paper.pdf") -> PaperSpec:
     evidence = PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id="S1",
         equation_id=None,
         figure_id=None,
@@ -330,10 +340,19 @@ def _paper_spec() -> PaperSpec:
         paper_title="电机短路实验报告",
         paper_type="report",
         domain="motor_control",
+        documents=[PaperDocument(document_id="DOC-001", filename=filename)],
+        primary_document_id=None,
         abstract="报告描述同步电机短路实验参数。",
         equations=[EquationEntry("EQ-01", "H = 3.5", "S1")],
         parameter_table=[
-            ParameterEntry("惯性常数", "H", "3.5", "s", EvidenceSource.DOCUMENT_EXTRACTED)
+            ParameterEntry(
+                name="惯性常数",
+                symbol="H",
+                value="3.5",
+                unit="s",
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-001",
+            )
         ],
         figure_locations=[],
         pseudocode_blocks=[],
@@ -391,6 +410,7 @@ def _missing_binding() -> MissingBindingModel:
 def _document_evidence() -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
         paper_section_id="S1",
         equation_id=None,
         figure_id=None,

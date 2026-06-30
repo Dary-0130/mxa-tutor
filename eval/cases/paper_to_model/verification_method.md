@@ -71,8 +71,9 @@
 
 ## 3. EvidencePack 双源不变量(task-500 v0.2.1 § 接口契约要点)
 
-**`PaperEvidenceEntry` 字段**(6 字段):
+**`PaperEvidenceEntry` 字段**(7 字段):
 - `source: Literal["document_extracted", "user_supplied"]`
+- `document_id: str | None`
 - `paper_section_id: str | None`
 - `equation_id: str | None`
 - `figure_id: str | None`
@@ -86,12 +87,14 @@
 - ✅ `paper_section_id` / `equation_id` / `figure_id` **至少一个非 None**
 - ✅ `excerpt` **非 None 且非空**(1-300 字)
 - ✅ `missing_param_prompt_id` **必为 None**
+- ✅ `document_id` **必填且属于 PaperSpec.documents**
 
 ### 3.2 `source = user_supplied`
 
 - ✅ `paper_section_id` / `equation_id` / `figure_id` **全部为 None**
 - ✅ `excerpt` **必为 None**
 - ✅ `missing_param_prompt_id` **必填**(非 None,关联 `MissingParameterPrompt.prompt_id`)
+- ✅ `document_id` **必为 None**
 
 **校验脚本(留 TASK-501 实现)**:伪代码
 

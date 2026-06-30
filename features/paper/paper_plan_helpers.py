@@ -101,9 +101,10 @@ class EvidenceTagger:
         }
         allowed_equations = {entry.equation_id for entry in spec.equations}
         allowed_figures = {entry.figure_id for entry in spec.figure_locations}
+        allowed_document_ids = {document.document_id for document in spec.documents}
 
         for entry in evidence:
-            self._validate_source_invariants(entry)
+            self._validate_source_invariants(entry, allowed_document_ids)
             self._validate_locator_whitelist(
                 entry=entry,
                 allowed_sections=allowed_sections,
@@ -145,6 +146,7 @@ class EvidenceTagger:
             raise PaperUserSupplyError("prompt_id_mismatch")
         return PaperEvidenceEntry(
             source=EvidenceSource.USER_SUPPLIED,
+            document_id=None,
             paper_section_id=None,
             equation_id=None,
             figure_id=None,
@@ -152,8 +154,14 @@ class EvidenceTagger:
             missing_param_prompt_id=missing_prompt.prompt_id,
         )
 
-    def _validate_source_invariants(self, entry: PaperEvidenceEntry) -> None:
+    def _validate_source_invariants(
+        self,
+        entry: PaperEvidenceEntry,
+        allowed_document_ids: set[str],
+    ) -> None:
         if entry.source is EvidenceSource.DOCUMENT_EXTRACTED:
+            if entry.document_id not in allowed_document_ids:
+                raise PaperPlanGenerationError("document_evidence_document_id_invalid")
             if not any((entry.paper_section_id, entry.equation_id, entry.figure_id)):
                 raise PaperPlanGenerationError("document_evidence_missing_locator")
             if not entry.excerpt or len(entry.excerpt) > 300:
@@ -163,6 +171,8 @@ class EvidenceTagger:
             return
 
         if entry.source is EvidenceSource.USER_SUPPLIED:
+            if entry.document_id is not None:
+                raise PaperPlanGenerationError("user_evidence_document_id_not_null")
             if any((entry.paper_section_id, entry.equation_id, entry.figure_id)):
                 raise PaperPlanGenerationError("user_evidence_has_locator")
             if entry.excerpt is not None:

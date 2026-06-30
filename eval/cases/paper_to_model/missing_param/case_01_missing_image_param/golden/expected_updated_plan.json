@@ -8,6 +8,7 @@
       "purpose": "SimPowerSystems 仿真环境根 block,所有 SimPowerSystems 工程必备;选 Continuous 模式以匹配 ode15s 变步长求解器。",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": null,
@@ -20,6 +21,7 @@
       "purpose": "同步发电机本体;pu Standard 形式与论文给出的 12 项 pu 参数 + 用户补充的 H / F 参数对应。",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S2",
         "equation_id": null,
         "figure_id": null,
@@ -32,6 +34,7 @@
       "purpose": "电厂出口升压变压器;13.8/230 kV 变比 + 0.12 pu 漏抗 + Yn/d11 接线均由用户从论文图 FIG-02 补充。",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": "FIG-02",
@@ -44,6 +47,7 @@
       "purpose": "三相短路故障 block;故障时刻 0.2s 由论文文字直接明示。",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": null,
@@ -56,6 +60,7 @@
       "purpose": "测量定子端三相电压、电流,供 Scope 显示与 .m 计算结果对照。",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S3",
         "equation_id": null,
         "figure_id": null,
@@ -68,6 +73,7 @@
       "purpose": "端口并联 5 MW 有功负荷模块;数值由论文文字直接给出。",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S5",
         "equation_id": null,
         "figure_id": null,
@@ -80,6 +86,7 @@
       "purpose": "显示三相定子电流波形;论文要求 .m 数值计算结果与 Simulink 仿真对照,Scope 是 Simulink 侧输出端。",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S4",
         "equation_id": null,
         "figure_id": null,
@@ -92,6 +99,7 @@
       "purpose": "处理 Synchronous Machine 输出端口的多信号总线,拆出三相定子电流。",
       "paper_reference": {
         "source": "document_extracted",
+        "document_id": "DOC-001",
         "paper_section_id": "S3",
         "equation_id": null,
         "figure_id": null,
@@ -101,32 +109,188 @@
     }
   ],
   "parameter_mapping": [
-    {"paper_param_name": "PN", "model_param_name": "Synchronous Machine.Pn (VA)", "value": "200e6", "unit": "VA", "source": "document_extracted"},
-    {"paper_param_name": "UN", "model_param_name": "Synchronous Machine.Vn (Vrms,line-line)", "value": "13.8e3", "unit": "V", "source": "document_extracted"},
-    {"paper_param_name": "fN", "model_param_name": "Synchronous Machine.fn (Hz)", "value": "50", "unit": "Hz", "source": "document_extracted"},
-    {"paper_param_name": "xd", "model_param_name": "Synchronous Machine.Xd (pu)", "value": "1.0", "unit": "pu", "source": "document_extracted"},
-    {"paper_param_name": "xq", "model_param_name": "Synchronous Machine.Xq (pu)", "value": "0.6", "unit": "pu", "source": "document_extracted"},
-    {"paper_param_name": "xd'", "model_param_name": "Synchronous Machine.Xd' (pu)", "value": "0.3", "unit": "pu", "source": "document_extracted"},
-    {"paper_param_name": "xd''", "model_param_name": "Synchronous Machine.Xd'' (pu)", "value": "0.21", "unit": "pu", "source": "document_extracted"},
-    {"paper_param_name": "xq''", "model_param_name": "Synchronous Machine.Xq'' (pu)", "value": "0.31", "unit": "pu", "source": "document_extracted"},
-    {"paper_param_name": "r", "model_param_name": "Synchronous Machine.Rs (pu)", "value": "0.005", "unit": "pu", "source": "document_extracted"},
-    {"paper_param_name": "xσf", "model_param_name": "Synchronous Machine.Xl_fd (pu)", "value": "0.18", "unit": "pu", "source": "document_extracted"},
-    {"paper_param_name": "xaD", "model_param_name": "Synchronous Machine.Xa_d (pu,d 轴阻尼绕组互漏抗,具体参数槽位按本机型版本查参数表)", "value": "0.1", "unit": "pu", "source": "document_extracted"},
-    {"paper_param_name": "xσQ", "model_param_name": "Synchronous Machine.Xl_kq (pu,q 轴阻尼绕组漏抗)", "value": "0.25", "unit": "pu", "source": "document_extracted"},
-    {"paper_param_name": "Td0'", "model_param_name": "Synchronous Machine.Td0' (s)", "value": "5", "unit": "s", "source": "document_extracted"},
-    {"paper_param_name": "TD", "model_param_name": "Synchronous Machine.Tkd / Td'' 相关时间常数槽位", "value": "2", "unit": "s", "source": "document_extracted"},
-    {"paper_param_name": "Tq0''", "model_param_name": "Synchronous Machine.Tq0'' (s)", "value": "1.4", "unit": "s", "source": "document_extracted"},
-    {"paper_param_name": "同步发电机惯性时间常数 H", "model_param_name": "Synchronous Machine.H (s)", "value": "3.5", "unit": "s", "source": "user_supplied"},
-    {"paper_param_name": "同步发电机摩擦因数 F", "model_param_name": "Synchronous Machine.F (pu)", "value": "0", "unit": "pu", "source": "user_supplied"},
-    {"paper_param_name": "变压器变比(原边/副边电压比)", "model_param_name": "Three-Phase Transformer.Nominal (V1=13.8kV, V2=230kV)", "value": "13.8 / 230", "unit": "kV / kV", "source": "user_supplied"},
-    {"paper_param_name": "变压器漏阻抗 X_T", "model_param_name": "Three-Phase Transformer.Xleak (pu)", "value": "0.12", "unit": "pu", "source": "user_supplied"},
-    {"paper_param_name": "变压器接线方式(原边 / 副边连接组别)", "model_param_name": "Three-Phase Transformer.Winding 1 connection / Winding 2 connection", "value": "Yn / d11", "unit": null, "source": "user_supplied"},
-    {"paper_param_name": "电机初相角 α0", "model_param_name": ".m script initial phase angle (rad);初始化时填入 Synchronous Machine.Initial conditions 的 phase 项", "value": "1.5708", "unit": "rad", "source": "user_supplied"},
-    {"paper_param_name": "负荷有功功率", "model_param_name": "Three-Phase Series RLC Load.Active Power (W)", "value": "5e6", "unit": "W", "source": "document_extracted"},
-    {"paper_param_name": "同步机节点类型", "model_param_name": "Synchronous Machine.Mechanical input(Swing bus 平衡节点)", "value": "Swing bus(平衡节点)", "unit": "—", "source": "document_extracted"},
-    {"paper_param_name": "故障起始时刻", "model_param_name": "Three-Phase Fault.Switching times (s)", "value": "[0.2]", "unit": "s", "source": "document_extracted"},
-    {"paper_param_name": "求解器", "model_param_name": "Simulation > Configuration Parameters > Solver", "value": "ode15s", "unit": "—", "source": "document_extracted"},
-    {"paper_param_name": "仿真时长", "model_param_name": "Simulation > Configuration Parameters > Stop time (s)", "value": "1", "unit": "s", "source": "document_extracted"}
+    {
+      "paper_param_name": "PN",
+      "model_param_name": "Synchronous Machine.Pn (VA)",
+      "value": "200e6",
+      "unit": "VA",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "UN",
+      "model_param_name": "Synchronous Machine.Vn (Vrms,line-line)",
+      "value": "13.8e3",
+      "unit": "V",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "fN",
+      "model_param_name": "Synchronous Machine.fn (Hz)",
+      "value": "50",
+      "unit": "Hz",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "xd",
+      "model_param_name": "Synchronous Machine.Xd (pu)",
+      "value": "1.0",
+      "unit": "pu",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "xq",
+      "model_param_name": "Synchronous Machine.Xq (pu)",
+      "value": "0.6",
+      "unit": "pu",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "xd'",
+      "model_param_name": "Synchronous Machine.Xd' (pu)",
+      "value": "0.3",
+      "unit": "pu",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "xd''",
+      "model_param_name": "Synchronous Machine.Xd'' (pu)",
+      "value": "0.21",
+      "unit": "pu",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "xq''",
+      "model_param_name": "Synchronous Machine.Xq'' (pu)",
+      "value": "0.31",
+      "unit": "pu",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "r",
+      "model_param_name": "Synchronous Machine.Rs (pu)",
+      "value": "0.005",
+      "unit": "pu",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "xσf",
+      "model_param_name": "Synchronous Machine.Xl_fd (pu)",
+      "value": "0.18",
+      "unit": "pu",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "xaD",
+      "model_param_name": "Synchronous Machine.Xa_d (pu,d 轴阻尼绕组互漏抗,具体参数槽位按本机型版本查参数表)",
+      "value": "0.1",
+      "unit": "pu",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "xσQ",
+      "model_param_name": "Synchronous Machine.Xl_kq (pu,q 轴阻尼绕组漏抗)",
+      "value": "0.25",
+      "unit": "pu",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "Td0'",
+      "model_param_name": "Synchronous Machine.Td0' (s)",
+      "value": "5",
+      "unit": "s",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "TD",
+      "model_param_name": "Synchronous Machine.Tkd / Td'' 相关时间常数槽位",
+      "value": "2",
+      "unit": "s",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "Tq0''",
+      "model_param_name": "Synchronous Machine.Tq0'' (s)",
+      "value": "1.4",
+      "unit": "s",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "同步发电机惯性时间常数 H",
+      "model_param_name": "Synchronous Machine.H (s)",
+      "value": "3.5",
+      "unit": "s",
+      "source": "user_supplied"
+    },
+    {
+      "paper_param_name": "同步发电机摩擦因数 F",
+      "model_param_name": "Synchronous Machine.F (pu)",
+      "value": "0",
+      "unit": "pu",
+      "source": "user_supplied"
+    },
+    {
+      "paper_param_name": "变压器变比(原边/副边电压比)",
+      "model_param_name": "Three-Phase Transformer.Nominal (V1=13.8kV, V2=230kV)",
+      "value": "13.8 / 230",
+      "unit": "kV / kV",
+      "source": "user_supplied"
+    },
+    {
+      "paper_param_name": "变压器漏阻抗 X_T",
+      "model_param_name": "Three-Phase Transformer.Xleak (pu)",
+      "value": "0.12",
+      "unit": "pu",
+      "source": "user_supplied"
+    },
+    {
+      "paper_param_name": "变压器接线方式(原边 / 副边连接组别)",
+      "model_param_name": "Three-Phase Transformer.Winding 1 connection / Winding 2 connection",
+      "value": "Yn / d11",
+      "unit": null,
+      "source": "user_supplied"
+    },
+    {
+      "paper_param_name": "电机初相角 α0",
+      "model_param_name": ".m script initial phase angle (rad);初始化时填入 Synchronous Machine.Initial conditions 的 phase 项",
+      "value": "1.5708",
+      "unit": "rad",
+      "source": "user_supplied"
+    },
+    {
+      "paper_param_name": "负荷有功功率",
+      "model_param_name": "Three-Phase Series RLC Load.Active Power (W)",
+      "value": "5e6",
+      "unit": "W",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "同步机节点类型",
+      "model_param_name": "Synchronous Machine.Mechanical input(Swing bus 平衡节点)",
+      "value": "Swing bus(平衡节点)",
+      "unit": "—",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "故障起始时刻",
+      "model_param_name": "Three-Phase Fault.Switching times (s)",
+      "value": "[0.2]",
+      "unit": "s",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "求解器",
+      "model_param_name": "Simulation > Configuration Parameters > Solver",
+      "value": "ode15s",
+      "unit": "—",
+      "source": "document_extracted"
+    },
+    {
+      "paper_param_name": "仿真时长",
+      "model_param_name": "Simulation > Configuration Parameters > Stop time (s)",
+      "value": "1",
+      "unit": "s",
+      "source": "document_extracted"
+    }
   ],
   "subsystem_breakdown": [
     "第 1 步:放置 powergui(Continuous 模式)。",
@@ -143,6 +307,7 @@
   "evidence": [
     {
       "source": "document_extracted",
+      "document_id": "DOC-001",
       "paper_section_id": "S2",
       "equation_id": null,
       "figure_id": null,
@@ -151,6 +316,7 @@
     },
     {
       "source": "document_extracted",
+      "document_id": "DOC-001",
       "paper_section_id": "S3",
       "equation_id": "EQ-01",
       "figure_id": null,
@@ -159,6 +325,7 @@
     },
     {
       "source": "document_extracted",
+      "document_id": "DOC-001",
       "paper_section_id": "S5",
       "equation_id": null,
       "figure_id": null,
@@ -167,6 +334,7 @@
     },
     {
       "source": "user_supplied",
+      "document_id": null,
       "paper_section_id": null,
       "equation_id": null,
       "figure_id": null,
@@ -175,6 +343,7 @@
     },
     {
       "source": "user_supplied",
+      "document_id": null,
       "paper_section_id": null,
       "equation_id": null,
       "figure_id": null,
@@ -183,6 +352,7 @@
     },
     {
       "source": "user_supplied",
+      "document_id": null,
       "paper_section_id": null,
       "equation_id": null,
       "figure_id": null,
@@ -191,6 +361,7 @@
     },
     {
       "source": "user_supplied",
+      "document_id": null,
       "paper_section_id": null,
       "equation_id": null,
       "figure_id": null,
@@ -199,6 +370,7 @@
     },
     {
       "source": "user_supplied",
+      "document_id": null,
       "paper_section_id": null,
       "equation_id": null,
       "figure_id": null,
@@ -207,6 +379,7 @@
     },
     {
       "source": "user_supplied",
+      "document_id": null,
       "paper_section_id": null,
       "equation_id": null,
       "figure_id": null,
