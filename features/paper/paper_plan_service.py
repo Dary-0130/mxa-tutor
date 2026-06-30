@@ -28,7 +28,6 @@ from features.paper._prompt_builder import (
     build_messages_for_plan_compose,
     build_messages_for_subsystem_plan,
 )
-from features.paper.paper_document_identity import enrich_single_document_evidence_payloads
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     BuildStepsDtoValidationError,
@@ -38,6 +37,8 @@ from features.paper.paper_plan_helpers import (
     MissingBindingModel,
     ModelBuildStepDraft,
     PlanAssembler,
+    apply_plan_evidence_reference_bridge,
+    build_plan_evidence_source_refs,
     validate_build_step_evidence_for_spec,
 )
 from features.paper.paper_schemas import (
@@ -92,7 +93,7 @@ class PaperPlanService:
             self._llm_build_steps(
                 plan_composer_output.block_recommendations,
                 plan_composer_output.parameter_mapping,
-                spec.evidence,
+                spec,
             ),
             return_exceptions=True,
         )
@@ -195,7 +196,8 @@ class PaperPlanService:
         role_name = "missing_detector"
         messages = build_messages_for_missing_detect(spec, sentinel_mappings)
         data = await self._call_llm_json(messages, role_name)
-        data = enrich_single_document_evidence_payloads(data)
+        source_refs = build_plan_evidence_source_refs(spec)
+        data = apply_plan_evidence_reference_bridge(data, source_refs)
         prompts_payload = self._require_list_field(data, "missing_prompts", role_name)
         try:
             drafts = [_MissingPromptDraftModel.model_validate(item) for item in prompts_payload]
@@ -242,7 +244,8 @@ class PaperPlanService:
             build_messages_for_plan_compose(spec, plan_id, paper_spec_id),
             role_name,
         )
-        data = enrich_single_document_evidence_payloads(data)
+        source_refs = build_plan_evidence_source_refs(spec)
+        data = apply_plan_evidence_reference_bridge(data, source_refs)
         if data.get("subsystem_breakdown") != []:
             self._raise_generation_error(role_name, "subsystem_breakdown_must_be_empty")
         if "m_script_skeleton" not in data or data.get("m_script_skeleton") is not None:
@@ -288,13 +291,19 @@ class PaperPlanService:
         self,
         block_recommendations: list[BlockRecommendation],
         parameter_mapping: list[ParameterMapping],
-        evidence: list[PaperEvidenceEntry],
+        spec: PaperSpec,
     ) -> list[ModelBuildStepDraft]:
         data = await self._call_llm_json(
-            build_messages_for_build_steps(block_recommendations, parameter_mapping, evidence),
+            build_messages_for_build_steps(
+                block_recommendations,
+                parameter_mapping,
+                spec.evidence,
+                build_plan_evidence_source_refs(spec),
+            ),
             BUILD_STEP_ROLE_NAME,
         )
-        data = enrich_single_document_evidence_payloads(data)
+        source_refs = build_plan_evidence_source_refs(spec)
+        data = apply_plan_evidence_reference_bridge(data, source_refs)
         if data.get("build_steps") == []:
             raise BuildStepsDtoValidationError("empty_steps")
         try:

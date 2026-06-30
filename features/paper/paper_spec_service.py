@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from adapters.parser._sandbox import run_in_sandbox
 from core.domain.exceptions import DocumentParseError, PaperSpecGenerationError
+from core.domain.paper_document_identity import DEFAULT_DOCUMENT_ID
 from core.domain.paper_evidence import EvidenceSource
 from core.domain.paper_spec import PaperSpec
 from core.interfaces.document_parser import DocumentParserRouter, ParsedDocument
@@ -71,6 +72,7 @@ class PaperSpecService:
         file_path: Path,
         paper_id: str,
         display_filename: str | None = None,
+        document_id: str = DEFAULT_DOCUMENT_ID,
     ) -> PaperSpec:
         """Extract a PaperSpec without reading or writing the cache."""
         parser = await asyncio.to_thread(self._document_parser_router.route, file_path)
@@ -92,6 +94,7 @@ class PaperSpecService:
             response,
             parsed,
             display_filename=sanitize_paper_display_filename(display_filename or file_path.name),
+            document_id=document_id,
         )
 
     def _parse_and_validate(
@@ -100,6 +103,7 @@ class PaperSpecService:
         parsed: ParsedDocument,
         *,
         display_filename: str | None = None,
+        document_id: str = DEFAULT_DOCUMENT_ID,
     ) -> PaperSpec:
         try:
             payload = json.loads(response.text)
@@ -114,6 +118,7 @@ class PaperSpecService:
         payload = enrich_single_document_spec_payload(
             payload,
             display_filename=display_filename,
+            document_id=document_id,
         )
         try:
             spec = PaperSpecModel.model_validate(payload).to_domain()

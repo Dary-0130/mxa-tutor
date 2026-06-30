@@ -434,17 +434,19 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 | 子项 | 字段 |
 |---|---|
 | `PaperDocument` | `document_id` / `filename` |
-| `EquationEntry` | `equation_id` / `latex_or_text` / `paper_section_id` |
+| `EquationEntry` | `equation_id` / `latex_or_text` / `paper_section_id` / `document_id` |
 | `ParameterEntry` | `name` / `symbol` / `value` / `unit` / `source` / `document_id` |
-| `FigureRef` | `figure_id` / `caption` / `paper_section_id` |
+| `FigureRef` | `figure_id` / `caption` / `paper_section_id` / `document_id` |
 
 跨文档身份不变量:
 
 - `documents` 至少 1 项;每个 `document_id` 唯一且匹配 `^DOC-\d{3}$`;`filename` 是清洗后的展示名。
 - `primary_document_id` 为 null 表示无主文献,不得用 `primary_document_id or documents[0]` 折叠成首篇为主;非 null 时必须属于 `documents`。
-- `PaperEvidenceEntry` / `ParameterEntry` 中 `source = document_extracted` 的 `document_id` 必填且属于 `documents`;`source = user_supplied` 的 `document_id` 必须为 null。
-- 单文件上传和旧数据读回迁移固定写入 `DOC-001`,并把 `primary_document_id` 置为 null;LLM 不输出、不自创 `document_id`。
-- 多文件后的 locator 合法性必须按 `(document_id, locator_id)` 复合命名空间判断;单文件阶段只有 `DOC-001`,521-B 接入多文件融合前必须补齐该边界。
+- `PaperEvidenceEntry` / `ParameterEntry` / `EquationEntry` / `FigureRef` 中 `source = document_extracted` 或结构化抽取项的 `document_id` 必填且属于 `documents`;`source = user_supplied` 的 `document_id` 必须为 null。
+- 单文件上传和旧数据读回迁移固定写入 `DOC-001`,并把 `primary_document_id` 置为 null;LLM 不输出、不自创 `document_id`;老 blob 读回迁移会补齐参数、证据、公式和图表的 `document_id`。
+- 多文件上传按上传顺序预分配 `DOC-001`...;失败文档保留 gap,但不进入 `PaperSpec.documents`;`UploadDocumentResponse.document_statuses` 返回每篇 `document_id` / 清洗后文件名 / 成败 / 脱敏错误码。
+- 多文件融合只产出一份 `PaperSpec`:单值字段取主文档(传入 `primary_index` 且成功)或首篇成功文档;列表字段跨成功文档拼接;同名参数多来源值不去重;`primary_document_id` 只有显式主文档时非 null。
+- locator 合法性按 `(document_id, locator_id)` 复合命名空间判断,并保持 canonical locator 原文不改写;section 读回校验只承认已持久化证据里的 `(document_id, paper_section_id)`,公式和图表分别从 `spec.equations` / `spec.figure_locations` 派生。
 - 禁止为综合推理或无单一出处结论伪造 `DOC-ALL`/虚拟出处;禁止给用户补充值写非 null `document_id`;同名参数多来源值不得因名称相同被静默去重。
 
 ### 12.5 ModelGenerationPlan schema
@@ -487,9 +489,10 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - `ConnectionHint` 只表达人工连线提示,端口字段可空,不是可执行 Simulink 端口契约
 - `ConfigurationHint.instruction` 承载求解器 / powergui / 仿真设置等配置类步骤,不得写入模型参数值
 - `ModelBuildStep.depends_on` 只引用前序 `step_id`;`display_text` 在 TASK-507-B 由 assembler 派生,TASK-507-A 只声明字段
-- 嵌套的 `PaperEvidenceEntry` 同样携带 `document_id`;BuildStepPlanner/PlanComposer/MissingDetector/TuningSuggestion 的 LLM 原始输出不写该字段,由后端在 schema 校验前按单文件上下文注入。
+- 嵌套的 `PaperEvidenceEntry` 同样携带 `document_id`;PlanComposer/MissingDetector/BuildStepPlanner 的 LLM 原始输出只能引用后端提供的私有 `source_ref`,不得直接产出 `document_id` 或 locator。后端在 schema 校验前把 `source_ref` 解析为唯一 `(document_id, canonical locator)`,写入 `document_id` 和 locator 字段后剥离 `source_ref`;该私有字段不进入 domain / schema / 持久化。
+- 无法解析回单一 `(document_id, canonical locator)` 的 LLM evidence 必须丢弃。丢弃后重新运行 schema / provenance / per-doc locator 校验;若 plan evidence 为空、缺 required evidence 位或不满足最小证据数量,不得存 ready bundle,必须 fail-fast 并返回脱敏错误。
 
-**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)
+**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)
 
 ### 12.6 TuningSuggestion schema
 
@@ -583,7 +586,7 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 `document_extracted` citation 必须带 1..300 字 `excerpt`;该 excerpt 只能来自真实文档摘录结构
 (`PaperSpec.abstract`、`EquationEntry.latex_or_text`、`PaperEvidenceEntry.excerpt`)。用户补充和
 plan 生成文本不得伪装成文档 excerpt。`user_supplied` citation 的 `excerpt` 必须为 null。
-TASK-521-A 阶段仅内部 `SourceTableEntry` / `_SourceCandidate` 携带 `document_id` /
+TASK-521-B1 阶段仅内部 `SourceTableEntry` / `_SourceCandidate` 携带 `document_id` /
 `document_label`;`to_citation()` 暂不把文档维度带入对外 `PaperAskCitation`,该公开扩展留
 521-C,因此 `paper_ask_response.schema.json` 本阶段不应变化。
 

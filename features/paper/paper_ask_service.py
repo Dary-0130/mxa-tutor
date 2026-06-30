@@ -24,7 +24,6 @@ from core.domain.paper_ask import (
     PlanMappingParameterTarget,
     SectionTarget,
 )
-from core.domain.paper_document_identity import DEFAULT_DOCUMENT_ID
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_plan import ModelBuildStep, PaperPlanRecord
 from core.domain.paper_tuning import ConfidenceValue
@@ -166,14 +165,15 @@ class PaperAskService:
                 answer_kind=output.answer_kind,
             )
 
-        citations = [prompt_index[source_id].to_citation() for source_id in citation_ids]
-        if any(not _target_resolves(citation.target, record) for citation in citations):
+        selected_sources = [prompt_index[source_id] for source_id in citation_ids]
+        if any(not _source_entry_target_resolves(entry, record) for entry in selected_sources):
             return self._fallback_response(
                 record,
                 session_id=session_id,
                 reason="citation_target_unresolved",
                 answer_kind=output.answer_kind,
             )
+        citations = [entry.to_citation() for entry in selected_sources]
 
         response = PaperAskResponse(
             session_id=session_id,
@@ -261,11 +261,12 @@ def build_paper_ask_source_table(record: PaperPlanRecord) -> list[SourceTableEnt
 
 def _spec_candidates(record: PaperPlanRecord) -> list[_SourceCandidate]:
     candidates: list[_SourceCandidate] = []
+    representative_document_id = _representative_document_id(record)
     abstract = _document_candidate(
         label="Paper summary",
         excerpt=record.spec.abstract,
-        document_id=DEFAULT_DOCUMENT_ID,
-        document_label=_document_label(record, DEFAULT_DOCUMENT_ID),
+        document_id=representative_document_id,
+        document_label=_document_label(record, representative_document_id),
         target=SectionTarget(kind="section", result_section="paper-summary"),
     )
     if abstract is not None:
@@ -275,14 +276,18 @@ def _spec_candidates(record: PaperPlanRecord) -> list[_SourceCandidate]:
         candidate = _document_candidate(
             label=f"Equation {equation.equation_id}",
             excerpt=equation.latex_or_text,
-            document_id=DEFAULT_DOCUMENT_ID,
-            document_label=_document_label(record, DEFAULT_DOCUMENT_ID),
+            document_id=equation.document_id,
+            document_label=_document_label(record, equation.document_id),
             target=EquationTarget(kind="equation", equation_id=equation.equation_id),
         )
         if candidate is not None:
             candidates.append(candidate)
 
-    equation_ids = {entry.equation_id for entry in record.spec.equations}
+    equation_ids = {
+        (entry.document_id, entry.equation_id)
+        for entry in record.spec.equations
+        if entry.document_id is not None
+    }
     for evidence in record.spec.evidence:
         candidate = _candidate_from_document_evidence(
             evidence,
@@ -298,7 +303,11 @@ def _spec_candidates(record: PaperPlanRecord) -> list[_SourceCandidate]:
 
 def _plan_document_section_candidates(record: PaperPlanRecord) -> list[_SourceCandidate]:
     candidates: list[_SourceCandidate] = []
-    equation_ids = {entry.equation_id for entry in record.spec.equations}
+    equation_ids = {
+        (entry.document_id, entry.equation_id)
+        for entry in record.spec.equations
+        if entry.document_id is not None
+    }
 
     for recommendation in record.plan.block_recommendations:
         candidate = _candidate_from_document_evidence(
@@ -393,13 +402,16 @@ def _candidate_from_document_evidence(
     *,
     label: str,
     document_label: str | None,
-    equation_ids: set[str],
+    equation_ids: set[tuple[str, str]],
     section_target: PaperResultSection,
 ) -> _SourceCandidate | None:
     if evidence.source is not EvidenceSource.DOCUMENT_EXTRACTED:
         return None
     if evidence.equation_id is not None:
-        if evidence.equation_id not in equation_ids:
+        if (
+            evidence.document_id is None
+            or (evidence.document_id, evidence.equation_id) not in equation_ids
+        ):
             return None
         return _document_candidate(
             label=label,
@@ -447,6 +459,14 @@ def _document_label(record: PaperPlanRecord, document_id: str | None) -> str | N
         if document.document_id == document_id:
             return _clean_label(f"{document.document_id} - {document.filename}")
     return None
+
+
+def _representative_document_id(record: PaperPlanRecord) -> str | None:
+    if record.spec.primary_document_id is not None:
+        return record.spec.primary_document_id
+    if not record.spec.documents:
+        return None
+    return record.spec.documents[0].document_id
 
 
 def _clean_excerpt(value: str | None) -> str | None:
@@ -520,11 +540,16 @@ def _dedupe_preserving_order(values: list[str]) -> list[str]:
     return result
 
 
-def _target_resolves(target: PaperCitationTarget, record: PaperPlanRecord) -> bool:
+def _source_entry_target_resolves(entry: SourceTableEntry, record: PaperPlanRecord) -> bool:
+    target = entry.target
     if isinstance(target, SectionTarget):
         return target.result_section in _RESULT_SECTIONS
     if isinstance(target, EquationTarget):
-        return target.equation_id in {entry.equation_id for entry in record.spec.equations}
+        return (entry.document_id, target.equation_id) in {
+            (equation.document_id, equation.equation_id)
+            for equation in record.spec.equations
+            if equation.document_id is not None
+        }
     if isinstance(target, PlanMappingParameterTarget):
         return 0 <= target.row_index < len(record.plan.parameter_mapping)
     if isinstance(target, MissingPromptParameterTarget):

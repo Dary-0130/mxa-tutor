@@ -8,7 +8,7 @@ system: |
   LLM 严格输出 9 字段:
   paper_title, paper_type, domain, abstract, equations, parameter_table,
   figure_locations, pseudocode_blocks, evidence.
-  documents / primary_document_id / document_id 由后端按单文件上下文注入,LLM 不输出、不自创。
+  documents / primary_document_id / document_id 由后端按文档上下文注入,LLM 不输出、不自创。
 
   字段名硬约束(逐字匹配,禁止自创字段名):
   - parameter_table 每项 LLM 必须且只能使用 5 个字段:
@@ -16,8 +16,10 @@ system: |
     document_id 是后端注入的第 6 个契约字段,LLM 不输出
   - equations 每项必须且只能使用 3 个字段:
     equation_id, latex_or_text, paper_section_id
+    document_id 是后端注入的第 4 个契约字段,LLM 不输出
   - figure_locations 每项必须且只能使用 3 个字段:
     figure_id, caption, paper_section_id
+    document_id 是后端注入的第 4 个契约字段,LLM 不输出
   - evidence 每项 LLM 必须且只能使用 6 个字段:
     source, paper_section_id, equation_id, figure_id, excerpt, missing_param_prompt_id
     document_id 是后端注入的第 7 个契约字段,LLM 不输出
@@ -74,7 +76,7 @@ system: |
   双源契约:
   - 本阶段没有用户补充流程,不得输出 user_supplied
   - document_extracted evidence 必须至少有一个 locator,excerpt 1-300 字,missing_param_prompt_id 为 null
-  - document_id 由后端注入 DOC-001,不得由 LLM 输出
+  - document_id 由后端按当前上传文档注入,不得由 LLM 输出
 
   反幻觉:
   - 不编造资料没有给出的工程搭建决定,如 library_choice / subsystem_breakdown /

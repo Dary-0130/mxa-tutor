@@ -103,12 +103,14 @@ class EquationEntryModel(_StrictBaseModel):
     equation_id: str = Field(min_length=1)
     latex_or_text: str = Field(min_length=1)
     paper_section_id: str = Field(min_length=1)
+    document_id: str | None = Field(min_length=1, pattern=DOCUMENT_ID_PATTERN)
 
     def to_domain(self) -> EquationEntry:
         return EquationEntry(
             equation_id=self.equation_id,
             latex_or_text=self.latex_or_text,
             paper_section_id=self.paper_section_id,
+            document_id=self.document_id,
         )
 
 
@@ -163,12 +165,14 @@ class FigureRefModel(_StrictBaseModel):
     figure_id: str = Field(min_length=1)
     caption: str = Field(min_length=1)
     paper_section_id: str = Field(min_length=1)
+    document_id: str | None = Field(min_length=1, pattern=DOCUMENT_ID_PATTERN)
 
     def to_domain(self) -> FigureRef:
         return FigureRef(
             figure_id=self.figure_id,
             caption=self.caption,
             paper_section_id=self.paper_section_id,
+            document_id=self.document_id,
         )
 
 

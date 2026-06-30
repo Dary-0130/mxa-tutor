@@ -169,6 +169,36 @@ async def test_legacy_spec_json_migrates_single_document_identity(
     assert spec.primary_document_id is None
     assert spec.evidence[0].document_id == "DOC-001"
     assert spec.parameter_table[0].document_id == "DOC-001"
+    assert spec.equations[0].document_id == "DOC-001"
+
+
+async def test_legacy_521a_spec_migrates_equation_and_figure_document_ids(
+    initialized_db_path: str,
+) -> None:
+    payload = _old_spec_payload()
+    payload["documents"] = [{"document_id": "DOC-001", "filename": "paper.pdf"}]
+    payload["primary_document_id"] = None
+    payload["parameter_table"][0]["document_id"] = "DOC-001"  # type: ignore[index]
+    payload["evidence"][0]["document_id"] = "DOC-001"  # type: ignore[index]
+    payload["figure_locations"] = [
+        {
+            "figure_id": "FIG-01",
+            "caption": "Machine parameters",
+            "paper_section_id": "S1",
+        }
+    ]
+    await _insert_bundle(
+        initialized_db_path,
+        paper_spec_json=_json(payload),
+        plan_json=None,
+        missing_prompts_json=None,
+    )
+
+    spec = await SqlitePaperBundleStore(initialized_db_path).get_spec("paper-1")
+
+    assert spec is not None
+    assert spec.equations[0].document_id == "DOC-001"
+    assert spec.figure_locations[0].document_id == "DOC-001"
 
 
 async def test_legacy_plan_and_missing_json_migrates_nested_evidence(
@@ -421,6 +451,7 @@ def _record() -> PaperPlanRecord:
                     equation_id="EQ-01",
                     latex_or_text="H = 3.5",
                     paper_section_id="S1",
+                    document_id="DOC-001",
                 )
             ],
             parameter_table=[

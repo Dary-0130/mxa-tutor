@@ -8,6 +8,7 @@ system: |
   【输入 placeholder】:
   - {paper_spec_json}:完整 PaperSpec JSON
   - {sentinel_mappings_json}:PlanComposer 输出的 value="null" ParameterMapping 列表
+  - {plan_evidence_sources_json}:后端编号的 doc 限定证据标签列表,LLM 只引用 source_ref
 
   【输出 schema】(顶层 JSON dict):
   {
@@ -26,6 +27,8 @@ system: |
   - 禁止输出 prompt_id;prompt_id 由 Python 按 sentinel 顺序注入
   - 禁止输出 user_supplied_value / user_supplied_unit;Python 构造公共 MissingParameterPrompt 时填 null
   - paper_reference.document_id 由后端注入,LLM 不输出、不自创
+  - paper_reference.source_ref 必须来自 plan_evidence_sources_json;后端解析后会 strip source_ref
+  - paper_reference 的 paper_section_id / equation_id / figure_id 在原始输出中填 null,不要直接写 locator ID
   - source 恒定 "user_supplied"
 
   【匹配规则】(方向 A):
@@ -48,5 +51,8 @@ user: |
 
   sentinel_mappings_json:
   {sentinel_mappings_json}
+
+  plan_evidence_sources_json:
+  {plan_evidence_sources_json}
 
   请只返回 MissingDetector 输出 JSON。

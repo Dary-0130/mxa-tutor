@@ -113,6 +113,89 @@ def test_evidence_tagger_accepts_document_and_user_supplied_evidence() -> None:
     )
 
 
+def test_evidence_tagger_locator_whitelist_is_document_scoped() -> None:
+    spec = PaperSpec(
+        paper_title="Multi-doc report",
+        paper_type="report",
+        domain="motor_control",
+        documents=[
+            PaperDocument(document_id="DOC-001", filename="main.pdf"),
+            PaperDocument(document_id="DOC-002", filename="aux.pdf"),
+        ],
+        primary_document_id=None,
+        abstract="Two source documents.",
+        equations=[
+            EquationEntry("EQ-01", "x = 1", "S1", "DOC-001"),
+            EquationEntry("EQ-02", "x = 2", "S1", "DOC-002"),
+        ],
+        parameter_table=[],
+        figure_locations=[
+            FigureRef("FIG-01", "Main figure", "S1", "DOC-001"),
+            FigureRef("FIG-02", "Aux figure", "S1", "DOC-002"),
+        ],
+        pseudocode_blocks=[],
+        evidence=[
+            PaperEvidenceEntry(
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-001",
+                paper_section_id="S1",
+                equation_id=None,
+                figure_id=None,
+                excerpt="Main document section.",
+                missing_param_prompt_id=None,
+            ),
+            PaperEvidenceEntry(
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-002",
+                paper_section_id="S1",
+                equation_id=None,
+                figure_id=None,
+                excerpt="Aux document section.",
+                missing_param_prompt_id=None,
+            ),
+        ],
+    )
+
+    EvidenceTagger().validate_for_spec(
+        [
+            PaperEvidenceEntry(
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-002",
+                paper_section_id=None,
+                equation_id="EQ-02",
+                figure_id=None,
+                excerpt="x = 2",
+                missing_param_prompt_id=None,
+            ),
+            PaperEvidenceEntry(
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-002",
+                paper_section_id=None,
+                equation_id=None,
+                figure_id="FIG-02",
+                excerpt="Aux figure",
+                missing_param_prompt_id=None,
+            ),
+        ],
+        spec,
+    )
+    with pytest.raises(PaperPlanGenerationError, match="equation_id_outside_whitelist"):
+        EvidenceTagger().validate_for_spec(
+            [
+                PaperEvidenceEntry(
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                    document_id="DOC-002",
+                    paper_section_id=None,
+                    equation_id="EQ-01",
+                    figure_id=None,
+                    excerpt="Cross-doc equation.",
+                    missing_param_prompt_id=None,
+                )
+            ],
+            spec,
+        )
+
+
 @pytest.mark.parametrize(
     "entry",
     [
@@ -595,6 +678,7 @@ def _spec() -> PaperSpec:
                 equation_id="EQ-01",
                 latex_or_text="H = 3.5",
                 paper_section_id="S1",
+                document_id="DOC-001",
             )
         ],
         parameter_table=[
@@ -608,7 +692,12 @@ def _spec() -> PaperSpec:
             )
         ],
         figure_locations=[
-            FigureRef(figure_id="FIG-01", caption="Machine parameters", paper_section_id="S1")
+            FigureRef(
+                figure_id="FIG-01",
+                caption="Machine parameters",
+                paper_section_id="S1",
+                document_id="DOC-001",
+            )
         ],
         pseudocode_blocks=[],
         evidence=[evidence],

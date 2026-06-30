@@ -58,6 +58,7 @@ def _record() -> PaperPlanRecord:
                     equation_id="EQ-01",
                     latex_or_text="H = 3.5",
                     paper_section_id="S1",
+                    document_id="DOC-001",
                 )
             ],
             parameter_table=[
