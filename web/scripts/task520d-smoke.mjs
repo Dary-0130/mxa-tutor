@@ -40,7 +40,8 @@ assertIncludes(
 );
 assertIncludes(sources.paperResultPage, "paper-body-grid", "PaperResultPage must wrap the body in a grid");
 assertIncludes(sources.paperResultPage, "paper-content-column", "PaperResultPage must keep paper sections in the content column");
-assertIncludes(sources.paperResultPage, "<PaperAskPanel key={data.paperId} paperId={data.paperId} />", "PaperAskPanel must mount after the paper body content");
+assertIncludes(sources.paperResultPage, "<PaperAskPanel", "PaperAskPanel must mount after the paper body content");
+assertIncludes(sources.paperResultPage, "documents={data.spec.documents}", "PaperAskPanel must receive paper documents for document labels");
 assertNotRegex(sources.paperResultPage, /id=["']paper-ask/, "PaperAskPanel mount must not add a section id");
 
 assertIncludes(sources.paperAskPanel, "postPaperAsk", "PaperAskPanel must consume postPaperAsk");

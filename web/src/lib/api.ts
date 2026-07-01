@@ -127,6 +127,44 @@ export function apiUploadTask<T = UploadResponse>(
   };
 }
 
+export function apiUploadFormTask<T = UploadResponse>(
+  path: string,
+  formData: FormData,
+  onProgress?: (percent: number) => void,
+): UploadTask<T> {
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise<T>((resolve, reject) => {
+    xhr.open("POST", buildUrl(path));
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.response as T);
+        return;
+      }
+      const body = xhr.response as Partial<ApiError> | null;
+      reject(
+        new ApiException(
+          xhr.status,
+          body?.error ?? "upload_failed",
+          body?.message ?? "上传失败，请稍后重试",
+        ),
+      );
+    };
+    xhr.onerror = () => reject(networkError());
+    xhr.onabort = () => reject(new DOMException("Upload aborted", "AbortError"));
+    xhr.send(formData);
+  });
+  return {
+    promise,
+    abort: () => xhr.abort(),
+  };
+}
+
 export async function apiUpload<T = UploadResponse>(
   path: string,
   file: File,

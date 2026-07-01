@@ -9,7 +9,11 @@ export const GLOBAL_ERROR_MESSAGES: Record<string, string> = {
   document_too_large: "论文解析失败,请检查文件格式或稍后重试。",
   document_too_long_for_v0_1: "论文解析失败,请检查文件格式或稍后重试。",
   unsupported_document_format: "论文解析失败,请检查文件格式或稍后重试。",
+  document_required: "请选择 PDF 或 DOCX 文件。",
+  too_many_documents: "最多一次上传 5 篇资料。",
   document_parse_failed: "论文解析失败,请检查文件格式或稍后重试。",
+  paper_spec_generation_failed: "资料理解失败,请稍后重试。",
+  document_processing_failed: "资料处理失败,请重新上传后再试。",
   paper_not_found: "论文结果不存在或已过期,请重新上传。",
   internal_error: "出了点问题,我们已经记录,稍后再试",
   llm_auth: "服务暂时不可用,请稍后重试",
@@ -35,9 +39,22 @@ export const GLOBAL_ERROR_MESSAGES: Record<string, string> = {
   network_error: "网络连接失败,请检查网络后重试",
 };
 
+export const DOCUMENT_STATUS_ERROR_MESSAGES: Record<string, string> = {
+  document_parse_failed: "文件内容未能读取(可能格式不支持、体量过大或文件损坏)。",
+  paper_spec_generation_failed: "文件已读取,但未能从中提取出结构化内容。",
+  document_processing_failed: "该文件未能处理成功。",
+};
+
 export function resolveErrorMessage(code: string | undefined): string {
   if (!code) {
     return "出了点问题,请稍后再试";
   }
-  return GLOBAL_ERROR_MESSAGES[code] ?? `出了点问题(${code}),请稍后再试`;
+  return GLOBAL_ERROR_MESSAGES[code] ?? "出了点问题,请稍后再试";
+}
+
+export function resolveDocumentStatusErrorMessage(code: string | null | undefined): string {
+  if (!code) {
+    return "该文件未能读取成功。";
+  }
+  return DOCUMENT_STATUS_ERROR_MESSAGES[code] ?? "该文件未能读取成功。";
 }

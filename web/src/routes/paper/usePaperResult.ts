@@ -8,6 +8,7 @@ import type {
   PaperPlanResponse,
   PaperSpec,
   UploadDocumentResponse,
+  UploadDocumentStatus,
 } from "../../lib/paperTypes";
 
 export interface PaperResultData {
@@ -16,6 +17,7 @@ export interface PaperResultData {
   plan: ModelGenerationPlan;
   missingPrompts: MissingParameterPrompt[];
   remainingMissingPrompts: MissingParameterPrompt[];
+  documentStatuses?: UploadDocumentStatus[];
 }
 
 export type PaperPlanUpdate = {
@@ -80,6 +82,7 @@ export function usePaperResult(paperId: string | undefined) {
       plan: location.state.plan,
       missingPrompts: location.state.missing_prompts,
       remainingMissingPrompts: location.state.missing_prompts,
+      documentStatuses: location.state.document_statuses,
     };
   }, [location.state, paperId]);
 

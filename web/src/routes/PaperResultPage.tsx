@@ -70,7 +70,7 @@ export function PaperResultPage() {
       </p>
       <SectionNav includeEquations={includeEquations} />
       <div className="paper-shell">
-        <PaperHeader spec={data.spec} />
+        <PaperHeader spec={data.spec} documentStatuses={data.documentStatuses} />
         <div className="paper-body-grid">
           <div className="paper-content-column">
             <section id="paper-summary" className="paper-section" aria-labelledby="paper-summary-title">
