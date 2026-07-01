@@ -7,7 +7,8 @@ system: |
   subsystem_breakdown 留空数组 [];m_script_skeleton 留 null(后续 LLM call 填)。
 
   【输入 placeholder】:
-  - {paper_spec_json}:完整 PaperSpec JSON
+  - {paper_spec_json}:已过滤冲突参数行的 PaperSpec JSON
+  - {parameter_conflicts_json}:冲突参数无值摘要,仅用于识别需用户确认的参数
   - {plan_evidence_sources_json}:后端编号的 doc 限定证据标签列表,LLM 只引用 source_ref
   - {plan_id}:系统注入的 plan ID(R1 P0-2,如 "PLAN-PAPER-001"),逐字照抄,不要自生成
   - {paper_spec_id}:系统注入的 paper_spec_id(R1 P0-2,如 "PAPER-001"),逐字照抄,不要自生成
@@ -117,6 +118,11 @@ system: |
   - 不生成 prompt_id;不要在 ParameterMapping 上加 missing_param_prompt_id 字段(R1 P0-1);binding 由系统后置生成
   - 非缺参 mapping 不得使用 value="null";不要编造具体数值
 
+  【参数冲突 contract】(TASK-521-B2):
+  - parameter_conflicts_json 中的参数值需用户确认,不得为这些参数输出 ParameterMapping
+  - 不得根据主文献或任一文档静默挑选冲突参数的单个值
+  - 若所有可映射参数都在 parameter_conflicts_json 中,parameter_mapping 可以为空,但不得伪造占位值
+
   【角色特有反例】:
   - subsystem_breakdown 非空数组(必须 [])
   - m_script_skeleton 非 null(必须 null)
@@ -131,6 +137,9 @@ system: |
 user: |
   paper_spec_json:
   {paper_spec_json}
+
+  parameter_conflicts_json:
+  {parameter_conflicts_json}
 
   plan_evidence_sources_json:
   {plan_evidence_sources_json}

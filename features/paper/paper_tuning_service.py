@@ -20,6 +20,7 @@ from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     EvidenceTagger,
 )
+from features.paper.paper_plan_integrity import validate_tuning_does_not_resolve_conflicts
 from features.paper.paper_schemas import (
     PaperEvidenceEntryModel,
     ParameterDirectionModel,
@@ -71,6 +72,13 @@ class TuningSuggestionService:
         )
 
         self._validate_parameter_directions(suggestion, record)
+        try:
+            validate_tuning_does_not_resolve_conflicts(
+                suggestion,
+                record.spec.parameter_conflicts,
+            )
+        except PaperPlanGenerationError as exc:
+            self._raise_tuning_error("parameter_conflict_tuning_stale", exc)
         try:
             self._evidence_tagger.validate_for_record(suggestion.evidence, record)
         except PaperPlanGenerationError as exc:

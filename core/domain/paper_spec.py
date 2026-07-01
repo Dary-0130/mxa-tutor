@@ -1,6 +1,6 @@
 """Pure Python PaperSpec domain contract."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
@@ -39,6 +39,33 @@ class ParameterEntry:
 
 
 @dataclass(frozen=True)
+class ParameterConflictObservation:
+    """One document observation contributing to a parameter value conflict."""
+
+    document_id: str
+    locator: str | None
+    excerpt: str | None
+
+
+@dataclass(frozen=True)
+class ParameterConflictValueOption:
+    """One conflicting value option observed for a parameter."""
+
+    value: str
+    unit: str
+    observations: list[ParameterConflictObservation]
+
+
+@dataclass(frozen=True)
+class ParameterConflict:
+    """A cross-document parameter value conflict."""
+
+    parameter_name: str
+    parameter_symbol: str
+    value_options: list[ParameterConflictValueOption]
+
+
+@dataclass(frozen=True)
 class PaperDocument:
     """Document identity for one source file in a PaperSpec."""
 
@@ -71,3 +98,4 @@ class PaperSpec:
     figure_locations: list[FigureRef]
     pseudocode_blocks: list[str]
     evidence: list[PaperEvidenceEntry]
+    parameter_conflicts: list[ParameterConflict] = field(default_factory=list)

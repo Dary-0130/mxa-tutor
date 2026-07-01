@@ -6,6 +6,7 @@ import { BuildSteps } from "./paper/BuildSteps";
 import { EquationList } from "./paper/EquationList";
 import { PaperAskPanel } from "./paper/PaperAskPanel";
 import { PaperHeader } from "./paper/PaperHeader";
+import { ParameterConflicts } from "./paper/ParameterConflicts";
 import { ParameterTable } from "./paper/ParameterTable";
 import { SectionNav } from "./paper/SectionNav";
 import { SubsystemMap } from "./paper/SubsystemMap";
@@ -94,6 +95,10 @@ export function PaperResultPage() {
             </section>
             <section id="paper-parameters" className="paper-section" aria-labelledby="paper-parameters-title">
               <h2 id="paper-parameters-title">参数对照</h2>
+              <ParameterConflicts
+                conflicts={data.spec.parameter_conflicts}
+                documents={data.spec.documents}
+              />
               <ParameterTable
                 paperId={data.paperId}
                 plan={data.plan}

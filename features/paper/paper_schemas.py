@@ -19,6 +19,7 @@ from core.domain.paper_document_identity import (
 )
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
+from core.domain.paper_parameter_conflicts import validate_parameter_conflicts_materialized
 from core.domain.paper_plan import (
     BlockRecommendation,
     ConfigurationHint,
@@ -36,6 +37,9 @@ from core.domain.paper_spec import (
     PaperDomain,
     PaperSpec,
     PaperType,
+    ParameterConflict,
+    ParameterConflictObservation,
+    ParameterConflictValueOption,
     ParameterEntry,
 )
 from core.domain.paper_tuning import (
@@ -138,6 +142,45 @@ class ParameterEntryModel(_StrictBaseModel):
             unit=self.unit,
             source=self.source,
             document_id=self.document_id,
+        )
+
+
+class ParameterConflictObservationModel(_StrictBaseModel):
+    document_id: str = Field(min_length=1, pattern=DOCUMENT_ID_PATTERN)
+    locator: str | None = Field(min_length=1)
+    excerpt: str | None = Field(min_length=1)
+
+    def to_domain(self) -> ParameterConflictObservation:
+        return ParameterConflictObservation(
+            document_id=self.document_id,
+            locator=self.locator,
+            excerpt=self.excerpt,
+        )
+
+
+class ParameterConflictValueOptionModel(_StrictBaseModel):
+    value: str = Field(min_length=1)
+    unit: str = Field(min_length=1)
+    observations: list[ParameterConflictObservationModel] = Field(min_length=1)
+
+    def to_domain(self) -> ParameterConflictValueOption:
+        return ParameterConflictValueOption(
+            value=self.value,
+            unit=self.unit,
+            observations=[entry.to_domain() for entry in self.observations],
+        )
+
+
+class ParameterConflictModel(_StrictBaseModel):
+    parameter_name: str = Field(min_length=1)
+    parameter_symbol: str = Field(min_length=1)
+    value_options: list[ParameterConflictValueOptionModel] = Field(min_length=2)
+
+    def to_domain(self) -> ParameterConflict:
+        return ParameterConflict(
+            parameter_name=self.parameter_name,
+            parameter_symbol=self.parameter_symbol,
+            value_options=[entry.to_domain() for entry in self.value_options],
         )
 
 
@@ -320,10 +363,13 @@ class PaperSpecModel(_StrictBaseModel):
     figure_locations: list[FigureRefModel] = Field(default_factory=list)
     pseudocode_blocks: list[str] = Field(default_factory=list)
     evidence: list[PaperEvidenceEntryModel] = Field(min_length=1)
+    parameter_conflicts: list[ParameterConflictModel] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_document_identity(self) -> Self:
-        validate_paper_spec_document_identity(self._to_domain_unchecked())
+        spec = self._to_domain_unchecked()
+        validate_paper_spec_document_identity(spec)
+        validate_parameter_conflicts_materialized(spec)
         return self
 
     def _to_domain_unchecked(self) -> PaperSpec:
@@ -339,6 +385,7 @@ class PaperSpecModel(_StrictBaseModel):
             figure_locations=[entry.to_domain() for entry in self.figure_locations],
             pseudocode_blocks=self.pseudocode_blocks,
             evidence=[entry.to_domain() for entry in self.evidence],
+            parameter_conflicts=[entry.to_domain() for entry in self.parameter_conflicts],
         )
 
     def to_domain(self) -> PaperSpec:

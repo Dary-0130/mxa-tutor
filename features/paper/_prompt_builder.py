@@ -5,8 +5,13 @@ from __future__ import annotations
 import json
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_parameter_conflicts import (
+    conflict_prompt_summary,
+    parameter_entry_hits_conflict,
+    without_conflicted_parameter_entries,
+)
 from core.domain.paper_plan import BlockRecommendation, PaperPlanRecord, ParameterMapping
-from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterEntry
+from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterConflict, ParameterEntry
 from core.interfaces.document_parser import FigurePlaceholder, ParsedDocument
 from core.interfaces.llm_provider import LLMMessage
 from features.paper.paper_plan_helpers import (
@@ -20,6 +25,7 @@ from features.paper.paper_schemas import (
     EquationEntryModel,
     PaperEvidenceEntryModel,
     PaperSpecModel,
+    ParameterConflictModel,
     ParameterEntryModel,
     ParameterMappingModel,
 )
@@ -131,7 +137,8 @@ def build_messages_for_plan_compose(
     user = _render_user(
         template.user,
         {
-            "paper_spec_json": _paper_spec_json(spec),
+            "paper_spec_json": _paper_spec_json_for_generation(spec),
+            "parameter_conflicts_json": _parameter_conflicts_prompt_json(spec.parameter_conflicts),
             "plan_evidence_sources_json": _plan_evidence_sources_json(
                 build_plan_evidence_source_refs(spec)
             ),
@@ -208,10 +215,15 @@ def build_messages_for_build_steps(
 def build_messages_for_mscript_draft(
     equations: list[EquationEntry],
     parameter_table: list[ParameterEntry],
+    parameter_conflicts: list[ParameterConflict] | None = None,
 ) -> list[LLMMessage]:
     """Build MScriptDrafter messages."""
 
     template = load_prompt_template("paper_plan_mscript.yaml")
+    conflicts = parameter_conflicts or []
+    filtered_parameter_table = [
+        entry for entry in parameter_table if not parameter_entry_hits_conflict(entry, conflicts)
+    ]
     user = _render_user(
         template.user,
         {
@@ -224,9 +236,10 @@ def build_messages_for_mscript_draft(
             "parameter_table_json": _json_dumps(
                 [
                     ParameterEntryModel.from_domain(entry).model_dump(mode="json")
-                    for entry in parameter_table
+                    for entry in filtered_parameter_table
                 ]
             ),
+            "parameter_conflicts_json": _parameter_conflicts_prompt_json(conflicts),
         },
     )
     return _role_messages(template.system, user)
@@ -313,6 +326,27 @@ def _render_user(template: str, values: dict[str, str]) -> str:
 
 def _paper_spec_json(spec: PaperSpec) -> str:
     return _json_dumps(PaperSpecModel.from_domain(spec).model_dump(mode="json"))
+
+
+def _paper_spec_json_for_generation(spec: PaperSpec) -> str:
+    payload = PaperSpecModel.from_domain(without_conflicted_parameter_entries(spec)).model_dump(
+        mode="json"
+    )
+    payload["parameter_conflicts"] = []
+    return _json_dumps(payload)
+
+
+def _parameter_conflicts_prompt_json(conflicts: list[ParameterConflict]) -> str:
+    return _json_dumps(conflict_prompt_summary(conflicts))
+
+
+def _parameter_conflicts_json(conflicts: list[ParameterConflict]) -> str:
+    return _json_dumps(
+        [
+            ParameterConflictModel.from_domain(conflict).model_dump(mode="json")
+            for conflict in conflicts
+        ]
+    )
 
 
 def _plan_evidence_sources_json(source_refs: list[PlanEvidenceSourceRef]) -> str:

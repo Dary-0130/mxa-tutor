@@ -42,6 +42,7 @@ def test_paper_spec_fields_match_contract_order() -> None:
         "figure_locations",
         "pseudocode_blocks",
         "evidence",
+        "parameter_conflicts",
     ]
 
 

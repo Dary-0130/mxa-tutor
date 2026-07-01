@@ -428,6 +428,7 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 | `figure_locations` | array[`FigureRef`] | 0-N | 图表位置 |
 | `pseudocode_blocks` | array[string] | 0-N | 伪代码 / 算法段 |
 | `evidence` | array[`PaperEvidenceEntry`] | 至少 1 个 | 结构化抽取证据 |
+| `parameter_conflicts` | array[`ParameterConflict`] | 默认 `[]`;必须等于 `parameter_table` 的确定性重算结果 | 跨文档同名同符号参数值冲突 |
 
 子项草稿:
 
@@ -436,6 +437,9 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 | `PaperDocument` | `document_id` / `filename` |
 | `EquationEntry` | `equation_id` / `latex_or_text` / `paper_section_id` / `document_id` |
 | `ParameterEntry` | `name` / `symbol` / `value` / `unit` / `source` / `document_id` |
+| `ParameterConflict` | `parameter_name` / `parameter_symbol` / `value_options` |
+| `ParameterConflictValueOption` | `value` / `unit` / `observations` |
+| `ParameterConflictObservation` | `document_id` / `locator` / `excerpt` |
 | `FigureRef` | `figure_id` / `caption` / `paper_section_id` / `document_id` |
 
 跨文档身份不变量:
@@ -446,6 +450,9 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - 单文件上传和旧数据读回迁移固定写入 `DOC-001`,并把 `primary_document_id` 置为 null;LLM 不输出、不自创 `document_id`;老 blob 读回迁移会补齐参数、证据、公式和图表的 `document_id`。
 - 多文件上传按上传顺序预分配 `DOC-001`...;失败文档保留 gap,但不进入 `PaperSpec.documents`;`UploadDocumentResponse.document_statuses` 返回每篇 `document_id` / 清洗后文件名 / 成败 / 脱敏错误码。
 - 多文件融合只产出一份 `PaperSpec`:单值字段取主文档(传入 `primary_index` 且成功)或首篇成功文档;列表字段跨成功文档拼接;同名参数多来源值不去重;`primary_document_id` 只有显式主文档时非 null。
+- `parameter_conflicts` 是 `parameter_table` 的 materialized view:仅纳入 `source=document_extracted` 且 `document_id` 非 null 的参数;key 为 `(name.strip(), symbol.strip())`,value signature 为 `(value.strip(), unit.strip())`;同 key 下至少两个不同 `document_id` 且至少两个不同 value signature 才形成冲突。比较不做容差、单位换算或同义词归并;value option 顺序按文档/参数表出现顺序稳定,不得用 `primary_document_id` 挑值。
+- `ParameterConflictObservation.locator` / `excerpt` 只有能从 `ParameterEntry` 确定性追到原始证据时才填;当前 `ParameterEntry` 无可追字段,因此持久化为 null,禁止伪造。
+- 老 blob 缺 `parameter_conflicts` 时读回必须用同一 helper 重算;新 blob 若 stored conflicts 与重算结果不一致,不得静默覆盖。
 - locator 合法性按 `(document_id, locator_id)` 复合命名空间判断,并保持 canonical locator 原文不改写;section 读回校验只承认已持久化证据里的 `(document_id, paper_section_id)`,公式和图表分别从 `spec.equations` / `spec.figure_locations` 派生。
 - 禁止为综合推理或无单一出处结论伪造 `DOC-ALL`/虚拟出处;禁止给用户补充值写非 null `document_id`;同名参数多来源值不得因名称相同被静默去重。
 
@@ -491,8 +498,9 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - `ModelBuildStep.depends_on` 只引用前序 `step_id`;`display_text` 在 TASK-507-B 由 assembler 派生,TASK-507-A 只声明字段
 - 嵌套的 `PaperEvidenceEntry` 同样携带 `document_id`;PlanComposer/MissingDetector/BuildStepPlanner 的 LLM 原始输出只能引用后端提供的私有 `source_ref`,不得直接产出 `document_id` 或 locator。后端在 schema 校验前把 `source_ref` 解析为唯一 `(document_id, canonical locator)`,写入 `document_id` 和 locator 字段后剥离 `source_ref`;该私有字段不进入 domain / schema / 持久化。
 - 无法解析回单一 `(document_id, canonical locator)` 的 LLM evidence 必须丢弃。丢弃后重新运行 schema / provenance / per-doc locator 校验;若 plan evidence 为空、缺 required evidence 位或不满足最小证据数量,不得存 ready bundle,必须 fail-fast 并返回脱敏错误。
+- 若 `PaperSpec.parameter_conflicts` 非空,冲突参数不得进入 `parameter_mapping`,不得在 `m_script_skeleton` 中被赋具体候选值,也不得在 `build_steps.display_text` / `configuration_hints.instruction` / tuning `parameter_directions` 中作为已定值出现。读回旧 ready bundle 时同样执行该守门;命中则视为 stale plan,不得当合法 ready bundle 返回。
 
-**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)
+**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)
 
 ### 12.6 TuningSuggestion schema
 

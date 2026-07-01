@@ -31,6 +31,9 @@ from core.domain.paper_spec import (
     FigureRef,
     PaperDocument,
     PaperSpec,
+    ParameterConflict,
+    ParameterConflictObservation,
+    ParameterConflictValueOption,
     ParameterEntry,
 )
 from core.domain.paper_tuning import ParameterDirection, TuningSuggestion
@@ -56,6 +59,9 @@ from features.paper.paper_schemas import (
     PaperDocumentModel,
     PaperEvidenceEntryModel,
     PaperSpecModel,
+    ParameterConflictModel,
+    ParameterConflictObservationModel,
+    ParameterConflictValueOptionModel,
     ParameterDirectionModel,
     ParameterEntryModel,
     ParameterMappingModel,
@@ -77,6 +83,9 @@ TOP_LEVEL_MODELS = (
 NESTED_MODELS = (
     EquationEntryModel,
     ParameterEntryModel,
+    ParameterConflictObservationModel,
+    ParameterConflictValueOptionModel,
+    ParameterConflictModel,
     PaperDocumentModel,
     FigureRefModel,
     BlockRecommendationModel,
@@ -162,6 +171,9 @@ def test_nested_model_count_and_names_are_frozen() -> None:
     assert [model.__name__ for model in NESTED_MODELS] == [
         "EquationEntryModel",
         "ParameterEntryModel",
+        "ParameterConflictObservationModel",
+        "ParameterConflictValueOptionModel",
+        "ParameterConflictModel",
         "PaperDocumentModel",
         "FigureRefModel",
         "BlockRecommendationModel",
@@ -217,6 +229,15 @@ def test_nested_field_order_matches_domain() -> None:
     )
     assert tuple(ParameterEntryModel.model_fields) == tuple(
         field.name for field in fields(ParameterEntry)
+    )
+    assert tuple(ParameterConflictObservationModel.model_fields) == tuple(
+        field.name for field in fields(ParameterConflictObservation)
+    )
+    assert tuple(ParameterConflictValueOptionModel.model_fields) == tuple(
+        field.name for field in fields(ParameterConflictValueOption)
+    )
+    assert tuple(ParameterConflictModel.model_fields) == tuple(
+        field.name for field in fields(ParameterConflict)
     )
     assert tuple(PaperDocumentModel.model_fields) == tuple(
         field.name for field in fields(PaperDocument)
@@ -277,6 +298,7 @@ def test_model_generation_plan_micro_patch_constraints_are_frozen() -> None:
 def test_document_identity_fields_are_required_but_nullable_where_expected() -> None:
     assert PaperSpecModel.model_fields["documents"].is_required()
     assert PaperSpecModel.model_fields["primary_document_id"].is_required()
+    assert PaperSpecModel.model_fields["parameter_conflicts"].default_factory is list
     assert PaperEvidenceEntryModel.model_fields["document_id"].is_required()
     assert ParameterEntryModel.model_fields["document_id"].is_required()
     assert EquationEntryModel.model_fields["document_id"].is_required()
@@ -329,6 +351,38 @@ def test_paper_spec_document_identity_invariants_are_enforced() -> None:
         ),
         _paper_spec_payload(equations=[{**_equation_payload(), "document_id": "DOC-999"}]),
         _paper_spec_payload(figure_locations=[{**_figure_payload(), "document_id": "DOC-999"}]),
+        _paper_spec_payload(
+            parameter_conflicts=[
+                {
+                    "parameter_name": "Inertia",
+                    "parameter_symbol": "H",
+                    "value_options": [
+                        {
+                            "value": "3.5",
+                            "unit": "s",
+                            "observations": [
+                                {
+                                    "document_id": "DOC-999",
+                                    "locator": None,
+                                    "excerpt": None,
+                                }
+                            ],
+                        },
+                        {
+                            "value": "4.0",
+                            "unit": "s",
+                            "observations": [
+                                {
+                                    "document_id": "DOC-001",
+                                    "locator": None,
+                                    "excerpt": None,
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ]
+        ),
         _paper_spec_payload(
             parameter_table=[{**_user_parameter_payload(), "document_id": "DOC-001"}]
         ),
@@ -478,6 +532,43 @@ def test_parameter_mapping_unit_accepts_null() -> None:
     assert ParameterMappingModel.from_domain(model.to_domain()).model_dump(mode="json") == payload
 
 
+def test_parameter_conflicts_must_match_parameter_table_materialized_view() -> None:
+    parameter_table = [
+        {**_document_parameter_payload(), "document_id": "DOC-001", "value": "3.5"},
+        {**_document_parameter_payload(), "document_id": "DOC-002", "value": "4.0"},
+    ]
+    valid_conflict = {
+        "parameter_name": "Rated capacity",
+        "parameter_symbol": "PN",
+        "value_options": [
+            {
+                "value": "3.5",
+                "unit": "MW",
+                "observations": [{"document_id": "DOC-001", "locator": None, "excerpt": None}],
+            },
+            {
+                "value": "4.0",
+                "unit": "MW",
+                "observations": [{"document_id": "DOC-002", "locator": None, "excerpt": None}],
+            },
+        ],
+    }
+    payload = _paper_spec_payload(
+        documents=[
+            {"document_id": "DOC-001", "filename": "paper-a.pdf"},
+            {"document_id": "DOC-002", "filename": "paper-b.pdf"},
+        ],
+        parameter_table=parameter_table,
+        parameter_conflicts=[valid_conflict],
+    )
+
+    model = PaperSpecModel.model_validate(payload)
+
+    assert model.parameter_conflicts[0].value_options[0].observations[0].locator is None
+    with pytest.raises(ValidationError):
+        PaperSpecModel.model_validate({**payload, "parameter_conflicts": []})
+
+
 def test_domain_literal_rejects_general() -> None:
     annotation = PaperSpecModel.model_fields["domain"].annotation
     assert "general" not in get_args(annotation)
@@ -583,6 +674,7 @@ def _paper_spec_payload(
     documents: list[dict[str, object]] | None = None,
     primary_document_id: str | None = None,
     parameter_table: list[dict[str, object]] | None = None,
+    parameter_conflicts: list[dict[str, object]] | None = None,
     equations: list[dict[str, object]] | None = None,
     figure_locations: list[dict[str, object]] | None = None,
     evidence: list[dict[str, object]] | None = None,
@@ -605,6 +697,7 @@ def _paper_spec_payload(
         else [_figure_payload()],
         "pseudocode_blocks": [],
         "evidence": evidence if evidence is not None else [_document_evidence_payload()],
+        "parameter_conflicts": parameter_conflicts if parameter_conflicts is not None else [],
     }
 
 

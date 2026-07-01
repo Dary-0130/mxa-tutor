@@ -46,6 +46,11 @@ def validate_paper_spec_document_identity(spec: PaperSpec) -> None:
             document_id_set=document_id_set,
             item_name="parameter",
         )
+    for conflict in spec.parameter_conflicts:
+        for option in conflict.value_options:
+            for observation in option.observations:
+                if observation.document_id not in document_id_set:
+                    raise ValueError("parameter_conflict document_id must reference documents")
     for equation in spec.equations:
         _validate_extracted_document_ref(
             document_id=equation.document_id,

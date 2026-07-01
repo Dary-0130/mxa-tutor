@@ -11,6 +11,7 @@ from api.dependencies import get_paper_bundle_store
 from core.domain.exceptions import PaperNotFoundError
 from core.interfaces.paper_cache import PaperBundleStore
 from features.paper.paper_plan_helpers import resolved_prompt_ids
+from features.paper.paper_plan_integrity import validate_record_parameter_conflict_integrity
 from features.paper.paper_schemas import (
     MissingParameterPromptModel,
     ModelGenerationPlanModel,
@@ -59,6 +60,7 @@ async def get_paper_plan(
     record = await store.get_plan_record(paper_id)
     if record is None:
         raise PaperNotFoundError("paper_not_found") from None
+    validate_record_parameter_conflict_integrity(record)
 
     resolved_ids = resolved_prompt_ids(record)
     remaining_prompts = [

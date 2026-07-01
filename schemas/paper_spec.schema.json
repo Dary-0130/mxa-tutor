@@ -207,6 +207,108 @@
       "title": "PaperEvidenceEntryModel",
       "type": "object"
     },
+    "ParameterConflictModel": {
+      "additionalProperties": false,
+      "properties": {
+        "parameter_name": {
+          "minLength": 1,
+          "title": "Parameter Name",
+          "type": "string"
+        },
+        "parameter_symbol": {
+          "minLength": 1,
+          "title": "Parameter Symbol",
+          "type": "string"
+        },
+        "value_options": {
+          "items": {
+            "$ref": "#/$defs/ParameterConflictValueOptionModel"
+          },
+          "minItems": 2,
+          "title": "Value Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "parameter_name",
+        "parameter_symbol",
+        "value_options"
+      ],
+      "title": "ParameterConflictModel",
+      "type": "object"
+    },
+    "ParameterConflictObservationModel": {
+      "additionalProperties": false,
+      "properties": {
+        "document_id": {
+          "minLength": 1,
+          "pattern": "^DOC-\\d{3}$",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "locator": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Locator"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Excerpt"
+        }
+      },
+      "required": [
+        "document_id",
+        "locator",
+        "excerpt"
+      ],
+      "title": "ParameterConflictObservationModel",
+      "type": "object"
+    },
+    "ParameterConflictValueOptionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "unit": {
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        },
+        "observations": {
+          "items": {
+            "$ref": "#/$defs/ParameterConflictObservationModel"
+          },
+          "minItems": 1,
+          "title": "Observations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "value",
+        "unit",
+        "observations"
+      ],
+      "title": "ParameterConflictValueOptionModel",
+      "type": "object"
+    },
     "ParameterEntryModel": {
       "additionalProperties": false,
       "properties": {
@@ -349,6 +451,13 @@
       },
       "minItems": 1,
       "title": "Evidence",
+      "type": "array"
+    },
+    "parameter_conflicts": {
+      "items": {
+        "$ref": "#/$defs/ParameterConflictModel"
+      },
+      "title": "Parameter Conflicts",
       "type": "array"
     }
   },

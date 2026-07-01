@@ -82,5 +82,35 @@
       "missing_param_prompt_id": null,
       "document_id": "DOC-002"
     }
+  ],
+  "parameter_conflicts": [
+    {
+      "parameter_name": "Inertia constant",
+      "parameter_symbol": "H",
+      "value_options": [
+        {
+          "value": "3.5",
+          "unit": "s",
+          "observations": [
+            {
+              "document_id": "DOC-001",
+              "locator": null,
+              "excerpt": null
+            }
+          ]
+        },
+        {
+          "value": "4.0",
+          "unit": "s",
+          "observations": [
+            {
+              "document_id": "DOC-002",
+              "locator": null,
+              "excerpt": null
+            }
+          ]
+        }
+      ]
+    }
   ]
 }

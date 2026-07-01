@@ -13,6 +13,7 @@ from adapters.parser._sandbox import run_in_sandbox
 from core.domain.exceptions import DocumentParseError, PaperSpecGenerationError
 from core.domain.paper_document_identity import DEFAULT_DOCUMENT_ID
 from core.domain.paper_evidence import EvidenceSource
+from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_spec import PaperSpec
 from core.interfaces.document_parser import DocumentParserRouter, ParsedDocument
 from core.interfaces.llm_provider import LLMResponse, TextProvider
@@ -134,7 +135,7 @@ class PaperSpecService:
             logger.error("PaperSpec post validation failed: error_type=post_validation")
             raise PaperSpecGenerationError(_GENERATION_ERROR_MESSAGE) from None
 
-        return spec
+        return with_parameter_conflicts(spec)
 
 
 def _validate_figure_references(spec: PaperSpec, parsed: ParsedDocument) -> None:
