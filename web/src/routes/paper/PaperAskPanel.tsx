@@ -2,7 +2,12 @@ import { useMemo, useRef, useState } from "react";
 import { GlassCard } from "../../components/ui/GlassCard";
 import { ApiException } from "../../lib/api";
 import { postPaperAsk } from "../../lib/paperApi";
-import type { Confidence, PaperAskFallbackReason, PaperAskResponse } from "../../lib/paperTypes";
+import type {
+  Confidence,
+  PaperAskFallbackReason,
+  PaperAskResponse,
+  PaperDocument,
+} from "../../lib/paperTypes";
 import { CitationChip } from "./CitationChip";
 
 const MAX_QUESTION_LENGTH = 1000;
@@ -25,6 +30,7 @@ const FALLBACK_HINT = "可以试着围绕论文的公式、参数、建模步骤
 
 interface PaperAskPanelProps {
   paperId: string;
+  documents: PaperDocument[];
 }
 
 function validationMessageFor(question: string): string {
@@ -49,7 +55,19 @@ function responseKey(response: PaperAskResponse): string {
   return `${response.session_id}-${response.message_id}`;
 }
 
-export function PaperAskPanel({ paperId }: PaperAskPanelProps) {
+function duplicateDocumentLabelsFor(documents: PaperDocument[]): ReadonlySet<string> {
+  const counts = new Map<string, number>();
+  documents.forEach((document) => {
+    counts.set(document.filename, (counts.get(document.filename) ?? 0) + 1);
+  });
+  return new Set(
+    [...counts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([filename]) => filename),
+  );
+}
+
+export function PaperAskPanel({ paperId, documents }: PaperAskPanelProps) {
   const [question, setQuestion] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [answer, setAnswer] = useState<PaperAskResponse | null>(null);
@@ -59,6 +77,8 @@ export function PaperAskPanel({ paperId }: PaperAskPanelProps) {
   const requestIdRef = useRef(0);
 
   const validationMessage = useMemo(() => validationMessageFor(question), [question]);
+  const duplicateDocumentLabels = useMemo(() => duplicateDocumentLabelsFor(documents), [documents]);
+  const showDocumentLabel = documents.length > 1;
   const canSubmit = !loading && validationMessage === "";
 
   function updateQuestion(value: string) {
@@ -154,6 +174,8 @@ export function PaperAskPanel({ paperId }: PaperAskPanelProps) {
           <AskAnswer
             key={responseKey(answer)}
             response={answer}
+            showDocumentLabel={showDocumentLabel}
+            duplicateDocumentLabels={duplicateDocumentLabels}
             onSuggestionSelect={(suggestion) => updateQuestion(suggestion)}
           />
         ) : null}
@@ -164,10 +186,17 @@ export function PaperAskPanel({ paperId }: PaperAskPanelProps) {
 
 interface AskAnswerProps {
   response: PaperAskResponse;
+  showDocumentLabel: boolean;
+  duplicateDocumentLabels: ReadonlySet<string>;
   onSuggestionSelect: (suggestion: string) => void;
 }
 
-function AskAnswer({ response, onSuggestionSelect }: AskAnswerProps) {
+function AskAnswer({
+  response,
+  showDocumentLabel,
+  duplicateDocumentLabels,
+  onSuggestionSelect,
+}: AskAnswerProps) {
   if (response.is_fallback && response.fallback_reason) {
     return (
       <article className="paper-ask-answer paper-ask-answer--fallback">
@@ -192,7 +221,12 @@ function AskAnswer({ response, onSuggestionSelect }: AskAnswerProps) {
       {response.citations.length > 0 ? (
         <div className="paper-ask-citations" aria-label="回答出处">
           {response.citations.map((citation) => (
-            <CitationChip citation={citation} key={`${response.message_id}-${citation.source_id}`} />
+            <CitationChip
+              citation={citation}
+              duplicateDocumentLabels={duplicateDocumentLabels}
+              key={`${response.message_id}-${citation.source_id}`}
+              showDocumentLabel={showDocumentLabel}
+            />
           ))}
         </div>
       ) : null}

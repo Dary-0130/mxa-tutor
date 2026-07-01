@@ -24,6 +24,7 @@ from core.domain.paper_ask import (
     PlanMappingParameterTarget,
     SectionTarget,
 )
+from core.domain.paper_document_identity import DOCUMENT_ID_PATTERN
 from core.domain.paper_evidence import EvidenceSource
 from core.domain.paper_tuning import ConfidenceValue
 
@@ -115,6 +116,8 @@ class PaperAskCitationModel(_StrictBaseModel):
     excerpt: str | None = Field(default=None, min_length=1, max_length=300)
     source_kind: EvidenceSource
     target: PaperCitationTargetModel
+    document_id: str | None = Field(default=None, min_length=1, pattern=DOCUMENT_ID_PATTERN)
+    document_label: str | None = Field(default=None, min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def validate_source_excerpt_invariant(self) -> Self:
@@ -124,6 +127,8 @@ class PaperAskCitationModel(_StrictBaseModel):
             return self
         if self.excerpt is not None:
             raise ValueError("user_supplied citation cannot have excerpt")
+        if self.document_id is not None or self.document_label is not None:
+            raise ValueError("user_supplied citation document fields must be null")
         return self
 
     def to_domain(self) -> PaperAskCitation:
@@ -133,6 +138,8 @@ class PaperAskCitationModel(_StrictBaseModel):
             excerpt=self.excerpt,
             source_kind=self.source_kind,
             target=self.target.to_domain(),
+            document_id=self.document_id,
+            document_label=self.document_label,
         )
 
 

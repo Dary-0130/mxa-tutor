@@ -80,6 +80,8 @@ class PaperAskCitation:
     excerpt: str | None
     source_kind: EvidenceSource
     target: PaperCitationTarget
+    document_id: str | None = None
+    document_label: str | None = None
 
 
 @dataclass(frozen=True)

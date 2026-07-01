@@ -29,7 +29,7 @@ from core.domain.paper_plan import ModelBuildStep, PaperPlanRecord
 from core.domain.paper_tuning import ConfidenceValue
 from core.interfaces.llm_provider import LLMMessage, TextProvider
 from features.paper._prompt_loader import load_prompt_template
-from features.paper.paper_ask_schemas import PaperAskCitationModel, PaperAskResponseModel
+from features.paper.paper_ask_schemas import PaperAskResponseModel
 from features.paper.paper_plan_helpers import resolved_prompt_ids
 
 DEFAULT_ASK_TIMEOUT_SECONDS = 60.0
@@ -67,7 +67,7 @@ class SourceTableEntry:
     target: PaperCitationTarget
 
     def to_citation(self) -> PaperAskCitation:
-        """Return the public citation shape; document fields stay internal until 521-C."""
+        """Return the public citation shape expanded from backend-owned source metadata."""
 
         return PaperAskCitation(
             source_id=self.source_id,
@@ -75,6 +75,8 @@ class SourceTableEntry:
             excerpt=self.excerpt,
             source_kind=self.source_kind,
             target=self.target,
+            document_id=self.document_id,
+            document_label=self.document_label,
         )
 
 
@@ -457,7 +459,7 @@ def _document_label(record: PaperPlanRecord, document_id: str | None) -> str | N
         return None
     for document in record.spec.documents:
         if document.document_id == document_id:
-            return _clean_label(f"{document.document_id} - {document.filename}")
+            return _clean_label(document.filename)
     return None
 
 
@@ -504,8 +506,36 @@ def _build_messages_for_paper_ask(
 
 
 def _source_table_entry_payload(entry: SourceTableEntry) -> dict[str, Any]:
-    citation = PaperAskCitationModel.from_domain(entry.to_citation())
-    return citation.model_dump(mode="json")
+    return {
+        "source_id": entry.source_id,
+        "label": entry.label,
+        "excerpt": entry.excerpt,
+        "source_kind": entry.source_kind.value,
+        "target": _citation_target_payload(entry.target),
+    }
+
+
+def _citation_target_payload(target: PaperCitationTarget) -> dict[str, Any]:
+    if isinstance(target, SectionTarget):
+        return {"kind": target.kind, "result_section": target.result_section}
+    if isinstance(target, EquationTarget):
+        return {"kind": target.kind, "equation_id": target.equation_id}
+    if isinstance(target, PlanMappingParameterTarget):
+        return {
+            "kind": target.kind,
+            "origin": target.origin,
+            "row_index": target.row_index,
+            "paper_param_name": target.paper_param_name,
+            "model_param_name": target.model_param_name,
+        }
+    if isinstance(target, MissingPromptParameterTarget):
+        return {
+            "kind": target.kind,
+            "origin": target.origin,
+            "prompt_id": target.prompt_id,
+            "parameter_name": target.parameter_name,
+        }
+    raise TypeError(f"unsupported paper citation target: {type(target).__name__}")
 
 
 def _payload_contains_forbidden_output(payload: Any) -> bool:

@@ -111,7 +111,7 @@ export function PaperResultPage() {
               <TuningPanel paperId={data.paperId} />
             </section>
           </div>
-          <PaperAskPanel key={data.paperId} paperId={data.paperId} />
+          <PaperAskPanel key={data.paperId} paperId={data.paperId} documents={data.spec.documents} />
         </div>
       </div>
     </main>

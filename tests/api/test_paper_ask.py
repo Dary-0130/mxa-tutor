@@ -80,6 +80,12 @@ def test_post_paper_ask_returns_multi_citation_response_and_preserves_question()
     assert body["session_id"] == "s1"
     assert body["is_fallback"] is False
     assert [citation["source_id"] for citation in body["citations"]] == ["S1", "S2"]
+    assert [
+        (citation["document_id"], citation["document_label"]) for citation in body["citations"]
+    ] == [
+        ("DOC-001", "paper.pdf"),
+        ("DOC-001", "paper.pdf"),
+    ]
     assert service.calls[0][0].paper_id == "paper-1"
     assert service.calls[0][1].question == "  How does the model map the paper?  "
 
@@ -165,6 +171,8 @@ def _success_response() -> PaperAskResponse:
                 excerpt="The report describes the model structure.",
                 source_kind=EvidenceSource.DOCUMENT_EXTRACTED,
                 target=SectionTarget(kind="section", result_section="paper-summary"),
+                document_id="DOC-001",
+                document_label="paper.pdf",
             ),
             PaperAskCitation(
                 source_id="S2",
@@ -172,6 +180,8 @@ def _success_response() -> PaperAskResponse:
                 excerpt="The equation links the machine state and response.",
                 source_kind=EvidenceSource.DOCUMENT_EXTRACTED,
                 target=EquationTarget(kind="equation", equation_id="EQ-01"),
+                document_id="DOC-001",
+                document_label="paper.pdf",
             ),
         ],
         follow_up_suggestions=["Which section should I inspect next?"],

@@ -68,10 +68,32 @@ async def test_ask_success_dedupes_citation_ids_and_preserves_first_order() -> N
 
     assert response.is_fallback is False
     assert [citation.source_id for citation in response.citations] == ["S2", "S1"]
+    assert [(citation.document_id, citation.document_label) for citation in response.citations] == [
+        ("DOC-001", "paper.pdf"),
+        ("DOC-001", "paper.pdf"),
+    ]
     assert response.session_id == "session-1"
     assert provider.calls[0][1] is True
     prompt_text = provider.calls[0][0][1].content
     assert "  Explain the relation  " in prompt_text
+
+
+@pytest.mark.asyncio
+async def test_prompt_source_table_omits_document_fields_and_filenames() -> None:
+    provider = QueueTextProvider([json.dumps(_llm_payload(citation_ids=["S1"]))])
+    service = PaperAskService(provider)
+
+    response = await service.ask(
+        _record(document_filename="secret-source-filename.pdf"),
+        _request(),
+    )
+
+    assert response.is_fallback is False
+    prompt_text = provider.calls[0][0][1].content
+    assert '"document_id"' not in prompt_text
+    assert '"document_label"' not in prompt_text
+    assert "filename" not in prompt_text
+    assert "secret-source-filename.pdf" not in prompt_text
 
 
 @pytest.mark.asyncio
@@ -140,6 +162,7 @@ async def test_out_of_scope_falls_back_and_drops_follow_ups() -> None:
     [
         "bad_citation_id",
         "forbidden_field",
+        "document_field",
         "dom_marker_in_answer",
     ],
 )
@@ -148,6 +171,7 @@ async def test_raw_anchor_output_falls_back(case_name: str) -> None:
     payloads = {
         "bad_citation_id": _llm_payload(citation_ids=["EQ-01"]),
         "forbidden_field": {**_llm_payload(), "dom_id": "front-end-owned"},
+        "document_field": {**_llm_payload(), "document_id": "DOC-999"},
         "dom_marker_in_answer": _llm_payload(answer="-".join(["paper", "eq"]) + "-EQ-01"),
     }
     response = await PaperAskService(QueueTextProvider([json.dumps(payloads[case_name])])).ask(
@@ -169,7 +193,7 @@ async def test_target_drift_falls_back_to_unresolved(
         excerpt="A stale equation excerpt.",
         source_kind=EvidenceSource.DOCUMENT_EXTRACTED,
         document_id="DOC-001",
-        document_label="DOC-001 - paper.pdf",
+        document_label="paper.pdf",
         target=EquationTarget(kind="equation", equation_id="EQ-stale"),
     )
     monkeypatch.setattr(
@@ -245,6 +269,8 @@ def test_missing_prompts_use_remaining_set_and_user_supplied_maps_to_plan_row() 
     assert plan_targets
     assert plan_targets[0].source_kind is EvidenceSource.USER_SUPPLIED
     assert plan_targets[0].excerpt is None
+    assert plan_targets[0].document_id is None
+    assert plan_targets[0].document_label is None
     assert plan_targets[0].target.row_index == 0
 
 
@@ -258,6 +284,8 @@ async def test_user_supplied_plan_mapping_can_be_returned_as_citation() -> None:
     citation = response.citations[0]
     assert citation.source_kind is EvidenceSource.USER_SUPPLIED
     assert citation.excerpt is None
+    assert citation.document_id is None
+    assert citation.document_label is None
     assert citation.target.origin == "plan_mapping"
 
 
@@ -303,6 +331,7 @@ def _request(question: str = "What does the source support?"):
 def _record(
     *,
     abstract: str = "A synchronous machine short-circuit report.",
+    document_filename: str = "paper.pdf",
     equation_text: str = "State relation",
     evidence_excerpt: str = "The report states the machine modelling basis.",
     mapping_value: str = "user supplied",
@@ -315,7 +344,7 @@ def _record(
             paper_title="Short-circuit report",
             paper_type="report",
             domain="motor_control",
-            documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
+            documents=[PaperDocument(document_id="DOC-001", filename=document_filename)],
             primary_document_id=None,
             abstract=abstract,
             equations=[
