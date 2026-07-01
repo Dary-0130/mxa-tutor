@@ -121,6 +121,34 @@
             }
           ],
           "title": "Target"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^DOC-\\d{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document Id"
+        },
+        "document_label": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Document Label"
         }
       },
       "required": [

@@ -226,6 +226,8 @@ export interface PaperAskCitation {
   excerpt: string | null;
   source_kind: EvidenceSource;
   target: PaperCitationTarget;
+  document_id?: string | null;
+  document_label?: string | null;
 }
 
 export interface PaperAskResponse {

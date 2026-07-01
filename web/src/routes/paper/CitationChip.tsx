@@ -10,20 +10,51 @@ const SOURCE_KIND_TO_BADGE_KIND: Record<EvidenceSource, CitationBadgeKind> = {
 
 interface CitationChipProps {
   citation: PaperAskCitation;
+  showDocumentLabel: boolean;
+  duplicateDocumentLabels: ReadonlySet<string>;
 }
 
-function CitationChipContent({ citation }: CitationChipProps) {
+interface CitationChipContentProps {
+  citation: PaperAskCitation;
+  documentDisplayLabel: string | null;
+}
+
+function documentDisplayLabelFor({
+  citation,
+  duplicateDocumentLabels,
+  showDocumentLabel,
+}: CitationChipProps): string | null {
+  if (!showDocumentLabel || citation.source_kind !== "document_extracted") {
+    return null;
+  }
+  const label = citation.document_label?.trim();
+  const documentId = citation.document_id?.trim();
+  if (!label || !documentId) {
+    return null;
+  }
+  if (duplicateDocumentLabels.has(label)) {
+    return `${label} · ${documentId}`;
+  }
+  return label;
+}
+
+function CitationChipContent({ citation, documentDisplayLabel }: CitationChipContentProps) {
   return (
     <>
       <span className="paper-citation-chip__label">{citation.label}</span>
+      {documentDisplayLabel ? (
+        <span className="paper-citation-chip__document">{documentDisplayLabel}</span>
+      ) : null}
       {citation.excerpt ? <span className="paper-citation-chip__excerpt">{citation.excerpt}</span> : null}
     </>
   );
 }
 
-export function CitationChip({ citation }: CitationChipProps) {
+export function CitationChip(props: CitationChipProps) {
+  const { citation } = props;
   const badgeKind = SOURCE_KIND_TO_BADGE_KIND[citation.source_kind];
   const isResolved = resolveCitationTargetElement(citation.target) !== null;
+  const documentDisplayLabel = documentDisplayLabelFor(props);
 
   if (!isResolved) {
     return (
@@ -33,7 +64,7 @@ export function CitationChip({ citation }: CitationChipProps) {
         data-clickable="false"
         data-kind={badgeKind}
       >
-        <CitationChipContent citation={citation} />
+        <CitationChipContent citation={citation} documentDisplayLabel={documentDisplayLabel} />
       </span>
     );
   }
@@ -46,7 +77,7 @@ export function CitationChip({ citation }: CitationChipProps) {
       type="button"
       onClick={() => scrollToCitationTarget(citation.target)}
     >
-      <CitationChipContent citation={citation} />
+      <CitationChipContent citation={citation} documentDisplayLabel={documentDisplayLabel} />
     </button>
   );
 }

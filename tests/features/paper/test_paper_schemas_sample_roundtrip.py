@@ -92,6 +92,8 @@ def test_paper_ask_success_multi_citation_roundtrip_matches_sample_json() -> Non
                 "excerpt": "The document describes the machine and the reproduction goal.",
                 "source_kind": "document_extracted",
                 "target": {"kind": "section", "result_section": "paper-summary"},
+                "document_id": "DOC-001",
+                "document_label": "paper-a.pdf",
             },
             {
                 "source_id": "S2",
@@ -99,6 +101,8 @@ def test_paper_ask_success_multi_citation_roundtrip_matches_sample_json() -> Non
                 "excerpt": "The governing relation links the machine state to the response.",
                 "source_kind": "document_extracted",
                 "target": {"kind": "equation", "equation_id": "EQ-main"},
+                "document_id": "DOC-002",
+                "document_label": "paper-b.pdf",
             },
         ],
         "follow_up_suggestions": ["Which subsystem should I inspect first?"],
@@ -129,6 +133,8 @@ def test_paper_ask_user_supplied_citation_roundtrip_matches_sample_json() -> Non
                     "paper_param_name": "inertia",
                     "model_param_name": "machine inertia",
                 },
+                "document_id": None,
+                "document_label": None,
             }
         ],
         "follow_up_suggestions": [],
@@ -138,6 +144,32 @@ def test_paper_ask_user_supplied_citation_roundtrip_matches_sample_json() -> Non
     model = PaperAskResponseModel.model_validate(data)
 
     assert _json_dump(PaperAskResponseModel.from_domain(model.to_domain())) == data
+
+
+def test_paper_ask_legacy_citation_without_document_fields_reads_as_null() -> None:
+    data = {
+        "session_id": "session-legacy",
+        "message_id": "message-legacy",
+        "answer": "The source supports this answer.",
+        "confidence": "medium",
+        "citations": [
+            {
+                "source_id": "S1",
+                "label": "Paper summary",
+                "excerpt": "The document describes the machine.",
+                "source_kind": "document_extracted",
+                "target": {"kind": "section", "result_section": "paper-summary"},
+            }
+        ],
+        "follow_up_suggestions": [],
+        "is_fallback": False,
+        "fallback_reason": None,
+    }
+
+    model = PaperAskResponseModel.model_validate(data)
+
+    assert model.citations[0].document_id is None
+    assert model.citations[0].document_label is None
 
 
 def test_paper_ask_fallback_reasons_roundtrip_match_sample_json() -> None:

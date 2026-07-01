@@ -417,8 +417,15 @@ def test_build_steps_empty_rejected_and_json_schema_has_min_items() -> None:
 
 def test_paper_ask_defaults_and_literals_are_frozen() -> None:
     assert PaperAskRequestModel.model_fields["session_id"].default is None
+    assert PaperAskCitationModel.model_fields["document_id"].default is None
+    assert PaperAskCitationModel.model_fields["document_label"].default is None
+    assert not PaperAskCitationModel.model_fields["document_id"].is_required()
+    assert not PaperAskCitationModel.model_fields["document_label"].is_required()
     assert PaperAskResponseModel.model_fields["is_fallback"].default is False
     assert PaperAskResponseModel.model_fields["fallback_reason"].default is None
+    citation_schema = PaperAskCitationModel.model_json_schema()
+    assert "document_id" not in citation_schema["required"]
+    assert "document_label" not in citation_schema["required"]
     assert get_args(PaperAskFallbackReason) == (
         "insufficient_evidence",
         "invalid_or_missing_citations",
@@ -480,6 +487,33 @@ def test_paper_ask_response_invariants_are_enforced() -> None:
         PaperAskResponseModel.model_validate({**fallback_payload, "confidence": "medium"})
 
 
+def test_paper_ask_citation_document_fields_are_optional_nullable_and_roundtrip() -> None:
+    missing_model = PaperAskCitationModel.model_validate(_paper_ask_citation_payload())
+    assert missing_model.document_id is None
+    assert missing_model.document_label is None
+
+    null_payload = {
+        **_paper_ask_citation_payload(),
+        "document_id": None,
+        "document_label": None,
+    }
+    null_model = PaperAskCitationModel.model_validate(null_payload)
+    assert null_model.document_id is None
+    assert null_model.document_label is None
+
+    valued_payload = {
+        **_paper_ask_citation_payload(),
+        "document_id": "DOC-002",
+        "document_label": "paper-b.pdf",
+    }
+    valued_model = PaperAskCitationModel.model_validate(valued_payload)
+
+    assert (
+        PaperAskCitationModel.from_domain(valued_model.to_domain()).model_dump(mode="json")
+        == valued_payload
+    )
+
+
 def test_paper_ask_source_kind_excerpt_invariant_is_enforced() -> None:
     assert PaperAskCitationModel.model_validate(_paper_ask_citation_payload()).excerpt
     assert (
@@ -494,6 +528,14 @@ def test_paper_ask_source_kind_excerpt_invariant_is_enforced() -> None:
     with pytest.raises(ValidationError):
         PaperAskCitationModel.model_validate(
             _paper_ask_citation_payload(source_kind="user_supplied", excerpt="bad")
+        )
+    with pytest.raises(ValidationError):
+        PaperAskCitationModel.model_validate(
+            {
+                **_paper_ask_citation_payload(source_kind="user_supplied", excerpt=None),
+                "document_id": "DOC-001",
+                "document_label": "paper.pdf",
+            }
         )
 
 

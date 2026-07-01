@@ -500,7 +500,7 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - 无法解析回单一 `(document_id, canonical locator)` 的 LLM evidence 必须丢弃。丢弃后重新运行 schema / provenance / per-doc locator 校验;若 plan evidence 为空、缺 required evidence 位或不满足最小证据数量,不得存 ready bundle,必须 fail-fast 并返回脱敏错误。
 - 若 `PaperSpec.parameter_conflicts` 非空,冲突参数不得进入 `parameter_mapping`,不得在 `m_script_skeleton` 中被赋具体候选值,也不得在 `build_steps.display_text` / `configuration_hints.instruction` / tuning `parameter_directions` 中作为已定值出现。读回旧 ready bundle 时同样执行该守门;命中则视为 stale plan,不得当合法 ready bundle 返回。
 
-**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)
+**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)→ v0.8(2026-07-01;TASK-521-C 对外 PaperAskCitation 追加可空 document_id/document_label,LLM ask prompt payload 仍不含 document 维度)
 
 ### 12.6 TuningSuggestion schema
 
@@ -590,13 +590,25 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 | `citation_target_unresolved` | source_id 对应语义 target 已无法在当前 spec/plan 中解析 |
 | `out_of_scope` | 问题超出资料复现范围 |
 
-`PaperAskCitation` 字段为 `source_id` / `label` / `excerpt` / `source_kind` / `target`。
+`PaperAskCitation` 字段:
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `source_id` | string | `S?` 临时 ID;单次响应内有效 | LLM 只能引用后端 source table 中的 ID |
+| `label` | string | 1..200 | 出处类型展示名,例如摘要/公式/用户补参 |
+| `excerpt` | string/null | 文档出处 1..300;用户补参为 null | 可展示的真实文档摘录 |
+| `source_kind` | `document_extracted` / `user_supplied` | 必填 | 出处来源 |
+| `target` | `PaperCitationTarget` | 必填 | 前端可解析的语义跳转目标 |
+| `document_id` | string/null | 可选;非 null 匹配 `^DOC-\d{3}$` | 该 citation 来自哪篇文档;无文档来源/用户补参/剩余缺参为 null |
+| `document_label` | string/null | 可选;1..200 | 展示用纯文件名,不作 key、不落日志 |
+
 `document_extracted` citation 必须带 1..300 字 `excerpt`;该 excerpt 只能来自真实文档摘录结构
 (`PaperSpec.abstract`、`EquationEntry.latex_or_text`、`PaperEvidenceEntry.excerpt`)。用户补充和
 plan 生成文本不得伪装成文档 excerpt。`user_supplied` citation 的 `excerpt` 必须为 null。
-TASK-521-B1 阶段仅内部 `SourceTableEntry` / `_SourceCandidate` 携带 `document_id` /
-`document_label`;`to_citation()` 暂不把文档维度带入对外 `PaperAskCitation`,该公开扩展留
-521-C,因此 `paper_ask_response.schema.json` 本阶段不应变化。
+后端从 `SourceTableEntry` 注入 `document_id` / `document_label`,LLM 不产也不能改该维度;
+单篇项目后端仍如实填文档字段,前端按 `PaperSpec.documents.length > 1` 控制是否显示篇标。
+`PaperAsk` prompt source table 只允许 `source_id` / `label` / `excerpt` / `source_kind` /
+`target`,不得包含 `document_id` / `document_label` / filename。
 
 `target` 是语义 target,不是 DOM id。四种形态:
 
