@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiUploadTask, type UploadTask } from "./api";
+import { apiGet, apiPost, apiUploadFormTask, type UploadTask } from "./api";
 import type {
   PaperAskRequest,
   PaperAskResponse,
@@ -16,10 +16,18 @@ function paperPath(paperId: string, suffix: string): string {
 }
 
 export function uploadDocument(
-  file: File,
+  files: File[],
+  primaryIndex: number | null,
   onProgress?: (percent: number) => void,
 ): UploadTask<UploadDocumentResponse> {
-  return apiUploadTask<UploadDocumentResponse>("/api/v1/upload-document", file, onProgress);
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("file", file);
+  }
+  if (primaryIndex !== null) {
+    formData.append("primary_index", String(primaryIndex));
+  }
+  return apiUploadFormTask<UploadDocumentResponse>("/api/v1/upload-document", formData, onProgress);
 }
 
 export function getPaperSpec(paperId: string): Promise<PaperSpecResponse> {
