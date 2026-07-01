@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { ApiException } from "../../lib/api";
-import { getPaperPlan, getPaperSpec } from "../../lib/paperApi";
+import { getPaperPlan, getPaperSpec, postPaperReparse } from "../../lib/paperApi";
 import type {
   MissingParameterPrompt,
   ModelGenerationPlan,
@@ -18,6 +18,7 @@ export interface PaperResultData {
   missingPrompts: MissingParameterPrompt[];
   remainingMissingPrompts: MissingParameterPrompt[];
   documentStatuses?: UploadDocumentStatus[];
+  version: number;
 }
 
 export type PaperPlanUpdate = {
@@ -30,6 +31,9 @@ type LoadState = {
   data: PaperResultData | null;
   loading: boolean;
   error: ApiException | null;
+  reparsing: boolean;
+  reparseError: ApiException | null;
+  reparseSourceUnavailable: boolean;
 };
 
 function toApiException(error: unknown): ApiException {
@@ -67,6 +71,7 @@ async function fetchPaperResult(paperId: string): Promise<PaperResultData> {
     plan: planResponse.plan,
     missingPrompts: planResponse.missing_prompts,
     remainingMissingPrompts: planResponse.remaining_missing_prompts,
+    version: 0,
   };
 }
 
@@ -83,16 +88,27 @@ export function usePaperResult(paperId: string | undefined) {
       missingPrompts: location.state.missing_prompts,
       remainingMissingPrompts: location.state.missing_prompts,
       documentStatuses: location.state.document_statuses,
+      version: 0,
     };
   }, [location.state, paperId]);
 
   const [state, setState] = useState<LoadState>(() =>
     paperId
-      ? { data: routeData, loading: !routeData, error: null }
+      ? {
+          data: routeData,
+          loading: !routeData,
+          error: null,
+          reparsing: false,
+          reparseError: null,
+          reparseSourceUnavailable: false,
+        }
       : {
           data: null,
           loading: false,
           error: new ApiException(404, "paper_not_found", "论文结果不存在或已过期,请重新上传。"),
+          reparsing: false,
+          reparseError: null,
+          reparseSourceUnavailable: false,
         },
   );
 
@@ -102,14 +118,31 @@ export function usePaperResult(paperId: string | undefined) {
         data: null,
         loading: false,
         error: new ApiException(404, "paper_not_found", "论文结果不存在或已过期,请重新上传。"),
+        reparsing: false,
+        reparseError: null,
+        reparseSourceUnavailable: false,
       });
       return;
     }
     setState((current) => ({ ...current, loading: true, error: null }));
     try {
-      setState({ data: await fetchPaperResult(paperId), loading: false, error: null });
+      setState({
+        data: await fetchPaperResult(paperId),
+        loading: false,
+        error: null,
+        reparsing: false,
+        reparseError: null,
+        reparseSourceUnavailable: false,
+      });
     } catch (error) {
-      setState({ data: null, loading: false, error: toApiException(error) });
+      setState({
+        data: null,
+        loading: false,
+        error: toApiException(error),
+        reparsing: false,
+        reparseError: null,
+        reparseSourceUnavailable: false,
+      });
     }
   }, [paperId]);
 
@@ -127,12 +160,26 @@ export function usePaperResult(paperId: string | undefined) {
       fetchPaperResult(paperId)
         .then((data) => {
           if (!cancelled) {
-            setState({ data, loading: false, error: null });
+            setState({
+              data,
+              loading: false,
+              error: null,
+              reparsing: false,
+              reparseError: null,
+              reparseSourceUnavailable: false,
+            });
           }
         })
         .catch((error: unknown) => {
           if (!cancelled) {
-            setState({ data: null, loading: false, error: toApiException(error) });
+            setState({
+              data: null,
+              loading: false,
+              error: toApiException(error),
+              reparsing: false,
+              reparseError: null,
+              reparseSourceUnavailable: false,
+            });
           }
         });
       return () => {
@@ -141,15 +188,27 @@ export function usePaperResult(paperId: string | undefined) {
     }
     queueMicrotask(() => {
       if (!cancelled) {
-        setState({ data: routeData, loading: false, error: null });
-      }
-    });
+          setState({
+            data: routeData,
+            loading: false,
+            error: null,
+            reparsing: false,
+            reparseError: null,
+            reparseSourceUnavailable: false,
+          });
+        }
+      });
     getPaperPlan(paperId)
       .then((response) => {
         if (!cancelled) {
           setState((current) =>
             current.data
-              ? { data: applyPlanResponse(current.data, response), loading: false, error: null }
+              ? {
+                  ...current,
+                  data: applyPlanResponse(current.data, response),
+                  loading: false,
+                  error: null,
+                }
               : current,
           );
         }
@@ -175,9 +234,59 @@ export function usePaperResult(paperId: string | undefined) {
         },
         loading: false,
         error: null,
+        reparsing: current.reparsing,
+        reparseError: current.reparseError,
+        reparseSourceUnavailable: current.reparseSourceUnavailable,
       };
     });
   }, []);
 
-  return { ...state, retry: loadFromServer, updatePlan };
+  const reparse = useCallback(async () => {
+    if (!paperId || state.reparsing || !state.data) {
+      return;
+    }
+    setState((current) => {
+      if (current.reparsing || !current.data) {
+        return current;
+      }
+      return { ...current, reparsing: true, reparseError: null };
+    });
+    try {
+      const response = await postPaperReparse(paperId);
+      setState((current) => {
+        const previousVersion = current.data?.version ?? 0;
+        return {
+          data: {
+            paperId: response.paper_id,
+            spec: response.spec,
+            plan: response.plan,
+            missingPrompts: response.missing_prompts,
+            remainingMissingPrompts: response.remaining_missing_prompts,
+            documentStatuses: undefined,
+            version: previousVersion + 1,
+          },
+          loading: false,
+          error: null,
+          reparsing: false,
+          reparseError: null,
+          reparseSourceUnavailable: false,
+        };
+      });
+    } catch (error) {
+      const apiError = toApiException(error);
+      setState((current) => ({
+        ...current,
+        reparsing: false,
+        reparseError: apiError,
+        reparseSourceUnavailable:
+          current.reparseSourceUnavailable || apiError.code === "reparse_source_unavailable",
+      }));
+    }
+  }, [paperId, state.data, state.reparsing]);
+
+  const dismissReparseError = useCallback(() => {
+    setState((current) => ({ ...current, reparseError: null }));
+  }, []);
+
+  return { ...state, retry: loadFromServer, updatePlan, reparse, dismissReparseError };
 }

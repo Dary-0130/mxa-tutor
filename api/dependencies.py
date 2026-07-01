@@ -38,6 +38,7 @@ from core.interfaces.embedder import EmbeddingProvider
 from core.interfaces.llm_provider import TextProvider
 from core.interfaces.matlab_engine_provider import MatlabEngineProvider
 from core.interfaces.paper_cache import PaperBundleStore
+from core.interfaces.paper_reparse_store import PaperReparseStore
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
 from core.interfaces.teaching_unit_store import TeachingUnitStore
@@ -72,6 +73,7 @@ from features.paper import (
 )
 from features.paper.paper_ask_service import PaperAskService
 from features.paper.paper_plan_service import PaperPlanService
+from features.paper.paper_reparse_service import PaperReparseLockRegistry, PaperReparseService
 from features.paper.paper_tuning_service import TuningSuggestionService
 
 
@@ -247,6 +249,23 @@ def get_paper_bundle_store(request: Request) -> PaperBundleStore:
     return cast(PaperBundleStore, store)
 
 
+def get_paper_reparse_store(request: Request) -> PaperReparseStore:
+    """从 app.state.paper_bundle_store 取 PaperReparseStore。"""
+    store = getattr(request.app.state, "paper_bundle_store", None)
+    if store is None:
+        raise RuntimeError("PaperReparseStore not initialized; lifespan misconfigured")
+    return cast(PaperReparseStore, store)
+
+
+def get_paper_reparse_lock_registry(request: Request) -> PaperReparseLockRegistry:
+    """Return the process-local paper reparse lock registry."""
+    registry = getattr(request.app.state, "paper_reparse_lock_registry", None)
+    if registry is None:
+        registry = PaperReparseLockRegistry()
+        request.app.state.paper_reparse_lock_registry = registry
+    return cast(PaperReparseLockRegistry, registry)
+
+
 def get_document_parser_router() -> DocumentParserRouter:
     """装配 PDF / docx 文档 parser router。"""
     return DocumentParserRouter([PdfParser(), DocxParser()])
@@ -320,6 +339,26 @@ def get_paper_plan_service(
 ) -> PaperPlanService:
     """装配 PaperPlanService。"""
     return PaperPlanService(text_provider=text_provider)
+
+
+def get_paper_reparse_service(
+    bundle_store: Annotated[PaperBundleStore, Depends(get_paper_bundle_store)],
+    reparse_store: Annotated[PaperReparseStore, Depends(get_paper_reparse_store)],
+    spec_service: Annotated[PaperSpecService, Depends(get_paper_spec_service)],
+    plan_service: Annotated[PaperPlanService, Depends(get_paper_plan_service)],
+    lock_registry: Annotated[
+        PaperReparseLockRegistry,
+        Depends(get_paper_reparse_lock_registry),
+    ],
+) -> PaperReparseService:
+    """装配 PaperReparseService。"""
+    return PaperReparseService(
+        bundle_store=bundle_store,
+        reparse_store=reparse_store,
+        spec_service=spec_service,
+        plan_service=plan_service,
+        lock_registry=lock_registry,
+    )
 
 
 def get_paper_user_supply_service(

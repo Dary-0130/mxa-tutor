@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ import api.routes.paper_upload as paper_upload_module
 from api.dependencies import (
     get_paper_bundle_store,
     get_paper_plan_service,
+    get_paper_reparse_store,
     get_paper_spec_service,
     get_settings,
 )
@@ -24,8 +26,11 @@ from core.domain.paper_plan import (
     PaperPlanRecord,
     ParameterMapping,
 )
+from core.domain.paper_reparse_source import PaperReparseSource
 from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec, ParameterEntry
+from core.interfaces.document_parser import ParsedDocument, ParsedLocatorIndex
 from core.interfaces.paper_cache import PaperBundleStore
+from core.interfaces.paper_reparse_store import PaperReparseStore
 from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL, MissingBindingModel
 
 
@@ -45,6 +50,27 @@ class FakePaperSpecService:
     async def extract(self, file_path: Path, paper_id: str) -> PaperSpec:
         return await self.extract_uncached(file_path, paper_id, display_filename=file_path.name)
 
+    async def parse_uncached(self, file_path: Path) -> ParsedDocument:
+        self.paths.append(file_path)
+        self.bytes_seen.append(file_path.read_bytes())
+        return _parsed_document(file_path)
+
+    async def extract_parsed_uncached(
+        self,
+        parsed: ParsedDocument,
+        paper_id: str,
+        display_filename: str | None = None,
+        document_id: str = "DOC-001",
+    ) -> PaperSpec:
+        _ = parsed
+        uuid.UUID(paper_id)
+        self.display_filenames.append(display_filename)
+        self.document_ids.append(document_id)
+        error = self.errors_by_document_id.get(document_id) or self.error
+        if error is not None:
+            raise error
+        return _paper_spec(display_filename or "paper.pdf", document_id=document_id)
+
     async def extract_uncached(
         self,
         file_path: Path,
@@ -52,15 +78,13 @@ class FakePaperSpecService:
         display_filename: str | None = None,
         document_id: str = "DOC-001",
     ) -> PaperSpec:
-        uuid.UUID(paper_id)
-        self.paths.append(file_path)
-        self.display_filenames.append(display_filename)
-        self.document_ids.append(document_id)
-        self.bytes_seen.append(file_path.read_bytes())
-        error = self.errors_by_document_id.get(document_id) or self.error
-        if error is not None:
-            raise error
-        return _paper_spec(display_filename or "paper.pdf", document_id=document_id)
+        parsed = await self.parse_uncached(file_path)
+        return await self.extract_parsed_uncached(
+            parsed,
+            paper_id,
+            display_filename=display_filename,
+            document_id=document_id,
+        )
 
 
 class FakePaperPlanService:
@@ -77,16 +101,46 @@ class FakePaperPlanService:
         return _plan(paper_id), [_missing_prompt()], [_missing_binding()]
 
 
-class FakePaperBundleStore(PaperBundleStore):
+class FakePaperBundleStore(PaperBundleStore, PaperReparseStore):
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
         self.records: dict[str, PaperPlanRecord] = {}
+        self.sources: dict[str, PaperReparseSource] = {}
         self.deleted_ids: list[str] = []
 
     async def save_ready_bundle(self, record: PaperPlanRecord) -> None:
         if self.error is not None:
             raise self.error
         self.records[record.paper_id] = record
+
+    async def save_ready_bundle_with_source(
+        self,
+        record: PaperPlanRecord,
+        source: PaperReparseSource,
+    ) -> None:
+        if self.error is not None:
+            raise self.error
+        self.records[record.paper_id] = record
+        self.sources[record.paper_id] = source
+
+    async def replace_ready_bundle_with_source(
+        self,
+        record: PaperPlanRecord,
+        source: PaperReparseSource,
+    ) -> None:
+        await self.save_ready_bundle_with_source(record, source)
+
+    async def get_reparse_source(self, paper_id: str) -> PaperReparseSource | None:
+        return self.sources.get(paper_id)
+
+    async def delete_expired_paper_bundles(
+        self,
+        *,
+        now: datetime | None = None,
+        ttl_hours: int = 24,
+    ) -> int:
+        _ = now, ttl_hours
+        return 0
 
     async def get_spec(self, paper_id: str) -> PaperSpec | None:
         record = self.records.get(paper_id)
@@ -98,6 +152,7 @@ class FakePaperBundleStore(PaperBundleStore):
     async def delete_bundle(self, paper_id: str) -> None:
         self.deleted_ids.append(paper_id)
         self.records.pop(paper_id, None)
+        self.sources.pop(paper_id, None)
 
 
 def test_upload_document_returns_200_with_paper_id_and_spec(
@@ -155,6 +210,11 @@ def test_upload_writes_record_to_paper_bundle_store(
     assert record.paper_id == paper_id
     assert record.plan.plan_id == f"PLAN-{paper_id}"
     assert record.missing_bindings == [_missing_binding()]
+    source = bundle_store.sources[paper_id]
+    assert [document.document_id for document in source.documents] == ["DOC-001"]
+    assert source.documents[0].raw_text.startswith("%PDF-")
+    assert source.documents[0].filename == "paper.pdf"
+    assert not hasattr(source.documents[0], "file_path")
 
 
 def test_upload_multiple_documents_fuses_one_spec_with_primary_index(
@@ -226,6 +286,34 @@ def test_upload_auxiliary_failure_keeps_doc_gap_and_reports_status(
         ("DOC-003", "succeeded"),
     ]
     assert body["document_statuses"][1]["error_code"] == "document_parse_failed"
+
+
+def test_upload_auxiliary_failure_does_not_store_failed_document_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakePaperSpecService(
+        errors_by_document_id={"DOC-002": PaperSpecGenerationError("bad_json")}
+    )
+    bundle_store = FakePaperBundleStore()
+    app = _create_app(tmp_path, monkeypatch, service, bundle_store=bundle_store)
+
+    with TestClient(app) as client:
+        response = _post_documents(
+            client,
+            [
+                (b"%PDF-1.7\none", "one.pdf"),
+                (b"%PDF-1.7\ntwo", "two.pdf"),
+                (b"%PDF-1.7\nthree", "three.pdf"),
+            ],
+        )
+
+    paper_id = response.json()["paper_id"]
+    assert response.status_code == 200
+    assert [document.document_id for document in bundle_store.sources[paper_id].documents] == [
+        "DOC-001",
+        "DOC-003",
+    ]
 
 
 def test_upload_primary_document_failure_fails_whole_request(
@@ -436,6 +524,9 @@ def _create_app(
     app.dependency_overrides[get_paper_bundle_store] = (
         lambda: bundle_store or FakePaperBundleStore()
     )
+    app.dependency_overrides[get_paper_reparse_store] = (
+        lambda: bundle_store or FakePaperBundleStore()
+    )
     return app
 
 
@@ -496,6 +587,22 @@ def _paper_spec(filename: str = "paper.pdf", *, document_id: str = "DOC-001") ->
         figure_locations=[],
         pseudocode_blocks=[],
         evidence=[evidence],
+    )
+
+
+def _parsed_document(file_path: Path) -> ParsedDocument:
+    return ParsedDocument(
+        raw_text=file_path.read_text(encoding="utf-8", errors="ignore"),
+        page_count=1,
+        figure_placeholders=[],
+        table_placeholders=[],
+        locator_index=ParsedLocatorIndex(
+            section_ids=["S1"],
+            equation_ids=["EQ-01"],
+            figure_ids=[],
+        ),
+        file_hash="hash",
+        extracted_at=datetime.utcnow(),
     )
 
 

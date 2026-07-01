@@ -3,6 +3,7 @@ import type {
   PaperAskRequest,
   PaperAskResponse,
   PaperPlanResponse,
+  PaperReparseResponse,
   PaperSpecResponse,
   TuningSuggestRequest,
   TuningSuggestResponse,
@@ -36,6 +37,10 @@ export function getPaperSpec(paperId: string): Promise<PaperSpecResponse> {
 
 export function getPaperPlan(paperId: string): Promise<PaperPlanResponse> {
   return apiGet<PaperPlanResponse>(paperPath(paperId, "/plan"));
+}
+
+export function postPaperReparse(paperId: string): Promise<PaperReparseResponse> {
+  return apiPost<PaperReparseResponse>(paperPath(paperId, "/reparse"));
 }
 
 export function postTuningSuggest(

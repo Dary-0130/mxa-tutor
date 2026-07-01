@@ -110,6 +110,22 @@ class PaperUserSupplyError(MxaError):
     """用户补充 paper plan 参数失败。"""
 
 
+class PaperReparseSourceUnavailableError(MxaError):
+    """Paper reparse source package is missing or expired."""
+
+
+class PaperReparseInProgressError(MxaError):
+    """A paper reparse is already running for the same paper."""
+
+
+class PaperReparseFailedError(MxaError):
+    """Paper reparse failed before the replacement transaction."""
+
+
+class PaperReparseStoreError(MxaError):
+    """Paper reparse replacement failed in persistent storage."""
+
+
 class MatlabEngineError(MxaError):
     """MATLAB Engine substrate 相关异常的基类。"""
 

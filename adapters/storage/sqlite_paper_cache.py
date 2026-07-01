@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, TypeVar, cast
 
 import aiosqlite
@@ -25,20 +25,26 @@ from core.domain.paper_parameter_conflicts import (
     validate_parameter_conflicts_materialized,
 )
 from core.domain.paper_plan import ModelGenerationPlan, PaperPlanRecord
+from core.domain.paper_reparse_source import (
+    PAPER_REPARSE_TTL_HOURS,
+    PaperReparseSource,
+)
 from core.domain.paper_spec import PaperSpec, ParameterConflict, ParameterEntry
 from core.interfaces.paper_cache import PaperBundleStore, PaperPlanCache, PaperSpecCache
+from core.interfaces.paper_reparse_store import PaperReparseStore
 
 T = TypeVar("T")
 ConnectionFactory = Callable[[str], AbstractAsyncContextManager[aiosqlite.Connection]]
 
 
-class SqlitePaperBundleStore(PaperBundleStore):
+class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
     """SQLite implementation for persisted paper spec and plan bundles."""
 
     _SPEC_ADAPTER = TypeAdapter(PaperSpec)
     _PLAN_ADAPTER = TypeAdapter(ModelGenerationPlan)
     _PROMPTS_ADAPTER = TypeAdapter(list[MissingParameterPrompt])
     _BINDINGS_ADAPTER = TypeAdapter(list[MissingParameterBinding])
+    _SOURCE_ADAPTER = TypeAdapter(PaperReparseSource)
 
     def __init__(
         self,
@@ -49,6 +55,22 @@ class SqlitePaperBundleStore(PaperBundleStore):
         self._connection_factory = connection_factory
 
     async def save_ready_bundle(self, record: PaperPlanRecord) -> None:
+        await self._save_ready_bundle(record, source=None)
+
+    async def save_ready_bundle_with_source(
+        self,
+        record: PaperPlanRecord,
+        source: PaperReparseSource,
+    ) -> None:
+        await self._save_ready_bundle(record, source=source)
+
+    async def replace_ready_bundle_with_source(
+        self,
+        record: PaperPlanRecord,
+        source: PaperReparseSource,
+    ) -> None:
+        if record.paper_id != source.paper_id:
+            raise StoreError("paper_reparse_source_mismatch")
         spec_json = self._dump(self._SPEC_ADAPTER, record.spec, "paper_spec_serialize_failed")
         plan_json = self._dump(self._PLAN_ADAPTER, record.plan, "paper_plan_serialize_failed")
         prompts_json = self._dump(
@@ -61,6 +83,93 @@ class SqlitePaperBundleStore(PaperBundleStore):
             record.missing_bindings,
             "missing_bindings_serialize_failed",
         )
+        source_json = self._dump(
+            self._SOURCE_ADAPTER,
+            source,
+            "paper_reparse_source_serialize_failed",
+        )
+        now = datetime.utcnow().isoformat()
+        expires_at = source.expires_at.isoformat()
+
+        async with self._connect() as conn:
+            try:
+                await conn.execute("BEGIN")
+                spec_cur = await conn.execute(
+                    """
+                    UPDATE paper_spec_cache
+                    SET paper_spec_json=?, updated_at=?
+                    WHERE paper_id=?
+                    """,
+                    (spec_json, now, record.paper_id),
+                )
+                plan_cur = await conn.execute(
+                    """
+                    UPDATE paper_plan_cache
+                    SET plan_json=?,
+                        missing_prompts_json=?,
+                        missing_bindings_json=?,
+                        updated_at=?
+                    WHERE paper_id=?
+                    """,
+                    (plan_json, prompts_json, bindings_json, now, record.paper_id),
+                )
+                source_cur = await conn.execute(
+                    """
+                    UPDATE paper_reparse_source_cache
+                    SET source_json=?, expires_at=?
+                    WHERE paper_id=?
+                    """,
+                    (source_json, expires_at, record.paper_id),
+                )
+                if spec_cur.rowcount == 0 or plan_cur.rowcount == 0 or source_cur.rowcount == 0:
+                    raise StoreError("paper_reparse_bundle_incomplete")
+                await conn.commit()
+            except StoreError:
+                await self._rollback_preserving_error(conn, record.paper_id)
+                raise
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, record.paper_id)
+                logger.error(
+                    "SqlitePaperBundleStore.replace_ready_bundle_with_source failed: "
+                    "paper_id={} exception={}",
+                    record.paper_id,
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, record.paper_id)
+                raise
+
+    async def _save_ready_bundle(
+        self,
+        record: PaperPlanRecord,
+        *,
+        source: PaperReparseSource | None,
+    ) -> None:
+        spec_json = self._dump(self._SPEC_ADAPTER, record.spec, "paper_spec_serialize_failed")
+        plan_json = self._dump(self._PLAN_ADAPTER, record.plan, "paper_plan_serialize_failed")
+        prompts_json = self._dump(
+            self._PROMPTS_ADAPTER,
+            record.missing_prompts,
+            "missing_prompts_serialize_failed",
+        )
+        bindings_json = self._dump(
+            self._BINDINGS_ADAPTER,
+            record.missing_bindings,
+            "missing_bindings_serialize_failed",
+        )
+        if source is not None and source.paper_id != record.paper_id:
+            raise StoreError("paper_reparse_source_mismatch")
+        source_json = (
+            self._dump(
+                self._SOURCE_ADAPTER,
+                source,
+                "paper_reparse_source_serialize_failed",
+            )
+            if source is not None
+            else None
+        )
+        expires_at = source.expires_at.isoformat() if source is not None else None
         now = datetime.utcnow().isoformat()
 
         async with self._connect() as conn:
@@ -91,6 +200,18 @@ class SqlitePaperBundleStore(PaperBundleStore):
                     """,
                     (record.paper_id, plan_json, prompts_json, bindings_json, now, now),
                 )
+                if source_json is not None and expires_at is not None:
+                    await conn.execute(
+                        """
+                        INSERT INTO paper_reparse_source_cache(
+                            paper_id, source_json, created_at, expires_at
+                        ) VALUES (?, ?, ?, ?)
+                        ON CONFLICT(paper_id) DO UPDATE SET
+                            source_json=excluded.source_json,
+                            expires_at=excluded.expires_at
+                        """,
+                        (record.paper_id, source_json, now, expires_at),
+                    )
                 await conn.commit()
             except aiosqlite.Error as exc:
                 await self._rollback_preserving_error(conn, record.paper_id)
@@ -179,12 +300,50 @@ class SqlitePaperBundleStore(PaperBundleStore):
             ),
         )
 
+    async def get_reparse_source(self, paper_id: str) -> PaperReparseSource | None:
+        async with self._connect() as conn:
+            try:
+                cur = await conn.execute(
+                    """
+                    SELECT source_json, expires_at
+                    FROM paper_reparse_source_cache
+                    WHERE paper_id=?
+                    """,
+                    (paper_id,),
+                )
+                row = await cur.fetchone()
+            except aiosqlite.Error as exc:
+                logger.error(
+                    "SqlitePaperBundleStore.get_reparse_source failed: " "paper_id={} exception={}",
+                    paper_id,
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+
+        if row is None:
+            return None
+        try:
+            expires_at = datetime.fromisoformat(row["expires_at"])
+        except ValueError:
+            raise StoreError("paper_reparse_source_deserialize_failed") from None
+        if expires_at <= datetime.utcnow():
+            return None
+        return self._load(
+            self._SOURCE_ADAPTER,
+            row["source_json"],
+            "paper_reparse_source_deserialize_failed",
+        )
+
     async def delete_bundle(self, paper_id: str) -> None:
         async with self._connect() as conn:
             try:
                 await conn.execute("BEGIN")
                 await conn.execute("DELETE FROM paper_plan_cache WHERE paper_id=?", (paper_id,))
                 await conn.execute("DELETE FROM paper_spec_cache WHERE paper_id=?", (paper_id,))
+                await conn.execute(
+                    "DELETE FROM paper_reparse_source_cache WHERE paper_id=?",
+                    (paper_id,),
+                )
                 await conn.commit()
             except aiosqlite.Error as exc:
                 await self._rollback_preserving_error(conn, paper_id)
@@ -240,6 +399,10 @@ class SqlitePaperBundleStore(PaperBundleStore):
                 await conn.execute("BEGIN")
                 await conn.execute("DELETE FROM paper_plan_cache WHERE paper_id=?", (paper_id,))
                 await conn.execute("DELETE FROM paper_spec_cache WHERE paper_id=?", (paper_id,))
+                await conn.execute(
+                    "DELETE FROM paper_reparse_source_cache WHERE paper_id=?",
+                    (paper_id,),
+                )
                 await conn.commit()
             except aiosqlite.Error as exc:
                 await self._rollback_preserving_error(conn, paper_id)
@@ -318,6 +481,79 @@ class SqlitePaperBundleStore(PaperBundleStore):
                 raise StoreError("sqlite_operation_failed") from None
             except Exception:
                 await self._rollback_preserving_error(conn, paper_id)
+                raise
+
+    async def delete_expired_paper_bundles(
+        self,
+        *,
+        now: datetime | None = None,
+        ttl_hours: int = PAPER_REPARSE_TTL_HOURS,
+    ) -> int:
+        current = now or datetime.utcnow()
+        cutoff = (current - timedelta(hours=ttl_hours)).isoformat()
+        current_iso = current.isoformat()
+        async with self._connect() as conn:
+            try:
+                cur = await conn.execute(
+                    """
+                    SELECT DISTINCT s.paper_id
+                    FROM paper_spec_cache AS s
+                    LEFT JOIN paper_reparse_source_cache AS r
+                        ON r.paper_id = s.paper_id
+                    WHERE s.created_at <= ?
+                        OR (r.expires_at IS NOT NULL AND r.expires_at <= ?)
+                    ORDER BY s.paper_id
+                    """,
+                    (cutoff, current_iso),
+                )
+                paper_ids = [row["paper_id"] for row in await cur.fetchall()]
+                if not paper_ids:
+                    await conn.execute(
+                        """
+                        DELETE FROM paper_reparse_source_cache
+                        WHERE expires_at <= ?
+                            AND paper_id NOT IN (
+                                SELECT paper_id FROM paper_spec_cache
+                            )
+                        """,
+                        (current_iso,),
+                    )
+                    await conn.commit()
+                    return 0
+
+                await conn.execute("BEGIN")
+                for paper_id in paper_ids:
+                    await conn.execute(
+                        "DELETE FROM paper_plan_cache WHERE paper_id=?",
+                        (paper_id,),
+                    )
+                    await conn.execute(
+                        "DELETE FROM paper_spec_cache WHERE paper_id=?",
+                        (paper_id,),
+                    )
+                    await conn.execute(
+                        "DELETE FROM paper_reparse_source_cache WHERE paper_id=?",
+                        (paper_id,),
+                    )
+                await conn.execute(
+                    """
+                    DELETE FROM paper_reparse_source_cache
+                    WHERE paper_id NOT IN (
+                        SELECT paper_id FROM paper_spec_cache
+                    )
+                    """,
+                )
+                await conn.commit()
+                return len(paper_ids)
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, "paper_cleanup")
+                logger.error(
+                    "SqlitePaperBundleStore.delete_expired_paper_bundles failed: " "exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, "paper_cleanup")
                 raise
 
     def _connect(self) -> AbstractAsyncContextManager[aiosqlite.Connection]:

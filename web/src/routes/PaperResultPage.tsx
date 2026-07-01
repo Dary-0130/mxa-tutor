@@ -46,7 +46,18 @@ function PaperError({ error, retry }: { error: ApiException; retry: () => void }
 
 export function PaperResultPage() {
   const { paperId } = useParams();
-  const { data, loading, error, retry, updatePlan } = usePaperResult(paperId);
+  const {
+    data,
+    loading,
+    error,
+    retry,
+    updatePlan,
+    reparse,
+    reparsing,
+    reparseError,
+    reparseSourceUnavailable,
+    dismissReparseError,
+  } = usePaperResult(paperId);
 
   if (loading && !data) {
     return <PaperLoading />;
@@ -70,7 +81,15 @@ export function PaperResultPage() {
       </p>
       <SectionNav includeEquations={includeEquations} />
       <div className="paper-shell">
-        <PaperHeader spec={data.spec} documentStatuses={data.documentStatuses} />
+        <PaperHeader
+          spec={data.spec}
+          documentStatuses={data.documentStatuses}
+          onReparse={reparse}
+          onDismissReparseError={dismissReparseError}
+          reparsing={reparsing}
+          reparseError={reparseError}
+          reparseSourceUnavailable={reparseSourceUnavailable}
+        />
         <div className="paper-body-grid">
           <div className="paper-content-column">
             <section id="paper-summary" className="paper-section" aria-labelledby="paper-summary-title">
@@ -108,10 +127,14 @@ export function PaperResultPage() {
             </section>
             <section id="paper-tuning" className="paper-section" aria-labelledby="paper-tuning-title">
               <h2 id="paper-tuning-title">调参建议</h2>
-              <TuningPanel paperId={data.paperId} />
+              <TuningPanel key={`${data.paperId}-${data.version}`} paperId={data.paperId} />
             </section>
           </div>
-          <PaperAskPanel key={data.paperId} paperId={data.paperId} documents={data.spec.documents} />
+          <PaperAskPanel
+            key={`${data.paperId}-${data.version}`}
+            paperId={data.paperId}
+            documents={data.spec.documents}
+          />
         </div>
       </div>
     </main>

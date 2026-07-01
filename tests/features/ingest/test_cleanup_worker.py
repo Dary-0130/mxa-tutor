@@ -30,6 +30,20 @@ class FakeStore:
         self.deleted.append(project_id)
 
 
+class FakePaperStore:
+    def __init__(self, deleted: int = 0, error: Exception | None = None) -> None:
+        self.deleted = deleted
+        self.error = error
+        self.calls: list[int] = []
+
+    async def delete_expired_paper_bundles(self, *, now=None, ttl_hours: int = 24) -> int:
+        _ = now
+        self.calls.append(ttl_hours)
+        if self.error is not None:
+            raise self.error
+        return self.deleted
+
+
 async def test_run_once_deletes_expired_projects(tmp_path: Path) -> None:
     (tmp_path / "old").mkdir()
     store = FakeStore(["old"])
@@ -40,6 +54,16 @@ async def test_run_once_deletes_expired_projects(tmp_path: Path) -> None:
     assert deleted == 1
     assert store.deleted == ["old"]
     assert not (tmp_path / "old").exists()
+
+
+async def test_run_once_sweeps_expired_paper_bundles(tmp_path: Path) -> None:
+    paper_store = FakePaperStore(deleted=2)
+    worker = CleanupWorker(FakeStore([]), tmp_path, ttl_hours=24, paper_store=paper_store)
+
+    deleted = await worker.run_once()
+
+    assert deleted == 2
+    assert paper_store.calls == [24]
 
 
 async def test_run_once_returns_zero_when_none_expired(tmp_path: Path) -> None:

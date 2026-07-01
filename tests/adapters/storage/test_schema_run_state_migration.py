@@ -16,7 +16,7 @@ async def test_new_database_latest_schema_includes_run_state_tables_and_constrai
         version = await _schema_version(conn)
         unique_sets = await _run_unique_column_sets(conn)
 
-    assert version == 5
+    assert version == schema.CURRENT_SCHEMA_VERSION
     assert {"bridge_run_state_session", "bridge_run_state_run"}.issubset(tables)
     assert {"session_id", "run_id"} in unique_sets
     assert {"session_id", "run_sequence"} in unique_sets
@@ -42,25 +42,28 @@ async def test_migrates_v4_to_v5_and_preserves_existing_data(db_path: str) -> No
             await conn.execute("SELECT paper_id FROM paper_spec_cache WHERE paper_id='paper1'")
         ).fetchone()
 
-    assert version == 5
+    assert version == schema.CURRENT_SCHEMA_VERSION
     assert {"bridge_run_state_session", "bridge_run_state_run"}.issubset(tables)
     assert project["project_id"] == "p1"
     assert chat["session_id"] == "c1"
     assert paper["paper_id"] == "paper1"
 
 
-async def test_v5_schema_reentry_is_idempotent(db_path: str) -> None:
+async def test_latest_schema_reentry_is_idempotent(db_path: str) -> None:
     async with open_connection(db_path) as conn:
         await schema.init_schema(conn)
     async with open_connection(db_path) as conn:
         await schema.init_schema(conn)
-        assert await _schema_version(conn) == 5
+        assert await _schema_version(conn) == schema.CURRENT_SCHEMA_VERSION
 
 
 async def test_run_state_future_schema_version_fails_closed(db_path: str) -> None:
     async with open_connection(db_path) as conn:
         await schema.init_schema(conn)
-        await conn.execute("UPDATE schema_version SET version=6 WHERE id=1")
+        await conn.execute(
+            "UPDATE schema_version SET version=? WHERE id=1",
+            (schema.CURRENT_SCHEMA_VERSION + 1,),
+        )
         await conn.commit()
 
     async with open_connection(db_path) as conn:

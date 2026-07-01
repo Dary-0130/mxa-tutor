@@ -268,6 +268,14 @@ export interface PaperPlanResponse {
   remaining_missing_prompts: MissingParameterPrompt[];
 }
 
+export interface PaperReparseResponse {
+  paper_id: string;
+  spec: PaperSpec;
+  plan: ModelGenerationPlan;
+  missing_prompts: MissingParameterPrompt[];
+  remaining_missing_prompts: MissingParameterPrompt[];
+}
+
 export interface TuningSuggestRequest {
   user_scenario: string;
 }

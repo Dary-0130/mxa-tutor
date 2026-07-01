@@ -10,7 +10,7 @@ from loguru import logger
 
 from core.domain.exceptions import StoreError
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 _SCHEMA_VERSION_DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -151,9 +151,25 @@ _PAPER_CACHE_STATEMENTS = (
     """,
 )
 
+_PAPER_REPARSE_SOURCE_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS paper_reparse_source_cache (
+        paper_id    TEXT PRIMARY KEY,
+        source_json TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        expires_at  TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_paper_reparse_source_expires
+        ON paper_reparse_source_cache(expires_at)
+    """,
+)
+
 _CHUNKS_DDL = ";\n".join(_CHUNKS_STATEMENTS) + ";"
 _TEACHING_UNITS_DDL = ";\n".join(_TEACHING_UNITS_STATEMENTS) + ";"
 _PAPER_CACHE_DDL = ";\n".join(_PAPER_CACHE_STATEMENTS) + ";"
+_PAPER_REPARSE_SOURCE_DDL = ";\n".join(_PAPER_REPARSE_SOURCE_STATEMENTS) + ";"
 
 _RUN_STATE_STATEMENTS = (
     """
@@ -255,6 +271,7 @@ _DDL = "\n".join(
         _CHUNKS_DDL,
         _TEACHING_UNITS_DDL,
         _PAPER_CACHE_DDL,
+        _PAPER_REPARSE_SOURCE_DDL,
         _RUN_STATE_DDL,
     )
 )
@@ -291,11 +308,18 @@ async def _migrate_v4_to_v5(conn: aiosqlite.Connection) -> None:
     await _execute_all(conn, _RUN_STATE_STATEMENTS)
 
 
+async def _migrate_v5_to_v6(conn: aiosqlite.Connection) -> None:
+    """Add temporary paper reparse source table."""
+
+    await _execute_all(conn, _PAPER_REPARSE_SOURCE_STATEMENTS)
+
+
 _MIGRATIONS: dict[int, Migration] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
     3: _migrate_v3_to_v4,
     4: _migrate_v4_to_v5,
+    5: _migrate_v5_to_v6,
 }
 
 

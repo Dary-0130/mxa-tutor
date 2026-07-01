@@ -307,7 +307,7 @@ def test_valid_coaching_request_returns_evidence_bound_result_and_does_not_persi
     assert provider.calls == 1
     assert _bridge_run_row_count(tmp_path) == 1
     assert _coaching_table_names(tmp_path) == []
-    assert CURRENT_SCHEMA_VERSION == 5
+    assert CURRENT_SCHEMA_VERSION >= 5
 
 
 @pytest.mark.parametrize("previous_run_count", [1, 2, 3, 4])
