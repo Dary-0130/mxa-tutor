@@ -10,7 +10,7 @@ from loguru import logger
 
 from core.domain.exceptions import StoreError
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 _SCHEMA_VERSION_DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -166,10 +166,34 @@ _PAPER_REPARSE_SOURCE_STATEMENTS = (
     """,
 )
 
+_PAPER_PARAMETER_CORRECTION_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS paper_parameter_correction (
+        correction_id        TEXT PRIMARY KEY,
+        paper_id             TEXT NOT NULL,
+        param_key            TEXT NOT NULL,
+        plan_target_json     TEXT NOT NULL,
+        original_value       TEXT NOT NULL,
+        original_unit        TEXT,
+        original_source      TEXT NOT NULL,
+        original_document_id TEXT,
+        corrected_value      TEXT NOT NULL,
+        corrected_unit       TEXT,
+        created_at           TEXT NOT NULL,
+        updated_at           TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_paper_parameter_correction_paper
+        ON paper_parameter_correction(paper_id)
+    """,
+)
+
 _CHUNKS_DDL = ";\n".join(_CHUNKS_STATEMENTS) + ";"
 _TEACHING_UNITS_DDL = ";\n".join(_TEACHING_UNITS_STATEMENTS) + ";"
 _PAPER_CACHE_DDL = ";\n".join(_PAPER_CACHE_STATEMENTS) + ";"
 _PAPER_REPARSE_SOURCE_DDL = ";\n".join(_PAPER_REPARSE_SOURCE_STATEMENTS) + ";"
+_PAPER_PARAMETER_CORRECTION_DDL = ";\n".join(_PAPER_PARAMETER_CORRECTION_STATEMENTS) + ";"
 
 _RUN_STATE_STATEMENTS = (
     """
@@ -272,6 +296,7 @@ _DDL = "\n".join(
         _TEACHING_UNITS_DDL,
         _PAPER_CACHE_DDL,
         _PAPER_REPARSE_SOURCE_DDL,
+        _PAPER_PARAMETER_CORRECTION_DDL,
         _RUN_STATE_DDL,
     )
 )
@@ -314,12 +339,19 @@ async def _migrate_v5_to_v6(conn: aiosqlite.Connection) -> None:
     await _execute_all(conn, _PAPER_REPARSE_SOURCE_STATEMENTS)
 
 
+async def _migrate_v6_to_v7(conn: aiosqlite.Connection) -> None:
+    """Add user parameter correction overlay table."""
+
+    await _execute_all(conn, _PAPER_PARAMETER_CORRECTION_STATEMENTS)
+
+
 _MIGRATIONS: dict[int, Migration] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
     3: _migrate_v3_to_v4,
     4: _migrate_v4_to_v5,
     5: _migrate_v5_to_v6,
+    6: _migrate_v6_to_v7,
 }
 
 

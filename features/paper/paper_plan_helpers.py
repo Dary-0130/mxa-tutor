@@ -9,8 +9,9 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal, NoReturn, Protocol
 
 from core.domain.exceptions import MxaError, PaperPlanGenerationError, PaperUserSupplyError
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
+from core.domain.paper_parameter_correction import PaperParameterCorrection
 from core.domain.paper_plan import (
     BlockRecommendation,
     ConfigurationHint,
@@ -100,6 +101,14 @@ class PlanEvidenceSourceRef:
     excerpt: str
 
 
+@dataclass(frozen=True)
+class UserEvidenceRef:
+    """Resolved user evidence key used by downstream provenance consumers."""
+
+    kind: UserEvidenceAction
+    key: str
+
+
 class EvidenceTagger:
     """Validate and create evidence entries without inventing locators."""
 
@@ -149,6 +158,7 @@ class EvidenceTagger:
             entry.missing_param_prompt_id
             for entry in record.plan.evidence
             if entry.source is EvidenceSource.USER_SUPPLIED
+            and entry.user_action is UserEvidenceAction.FILL_MISSING
             and entry.missing_param_prompt_id is not None
         }
         for entry in evidence:
@@ -176,6 +186,7 @@ class EvidenceTagger:
             figure_id=None,
             excerpt=None,
             missing_param_prompt_id=missing_prompt.prompt_id,
+            user_action=UserEvidenceAction.FILL_MISSING,
         )
 
     def _validate_source_invariants(
@@ -192,6 +203,12 @@ class EvidenceTagger:
                 raise PaperPlanGenerationError("document_evidence_invalid_excerpt")
             if entry.missing_param_prompt_id is not None:
                 raise PaperPlanGenerationError("document_evidence_has_missing_prompt")
+            if entry.user_action is not None:
+                raise PaperPlanGenerationError("document_evidence_has_user_action")
+            if entry.parameter_correction_id is not None:
+                raise PaperPlanGenerationError("document_evidence_has_correction_id")
+            if entry.correction_param_key is not None:
+                raise PaperPlanGenerationError("document_evidence_has_correction_field")
             return
 
         if entry.source is EvidenceSource.USER_SUPPLIED:
@@ -201,8 +218,22 @@ class EvidenceTagger:
                 raise PaperPlanGenerationError("user_evidence_has_locator")
             if entry.excerpt is not None:
                 raise PaperPlanGenerationError("user_evidence_has_excerpt")
-            if entry.missing_param_prompt_id is None:
-                raise PaperPlanGenerationError("user_evidence_missing_prompt_id")
+            if entry.user_action is None:
+                raise PaperPlanGenerationError("user_evidence_missing_action")
+            if entry.user_action is UserEvidenceAction.FILL_MISSING:
+                if entry.missing_param_prompt_id is None:
+                    raise PaperPlanGenerationError("user_evidence_missing_prompt_id")
+                if entry.parameter_correction_id is not None:
+                    raise PaperPlanGenerationError("user_evidence_has_correction_id")
+                if entry.correction_param_key is not None:
+                    raise PaperPlanGenerationError("user_evidence_has_correction_field")
+                return
+            if entry.user_action is UserEvidenceAction.CORRECT_EXTRACTED:
+                if entry.missing_param_prompt_id is not None:
+                    raise PaperPlanGenerationError("user_evidence_has_missing_prompt_id")
+                if entry.parameter_correction_id is None:
+                    raise PaperPlanGenerationError("user_evidence_missing_correction_id")
+                return
             return
 
         raise PaperPlanGenerationError("unknown_evidence_source")
@@ -355,6 +386,7 @@ def _bridge_plan_evidence_payload(
         result = dict(payload)
         result.pop(PLAN_EVIDENCE_SOURCE_REF_FIELD, None)
         result["document_id"] = None
+        result.setdefault("user_action", UserEvidenceAction.FILL_MISSING.value)
         return result
     if source not in (EvidenceSource.DOCUMENT_EXTRACTED, EvidenceSource.DOCUMENT_EXTRACTED.value):
         return payload
@@ -385,6 +417,9 @@ _PLAN_EVIDENCE_KEYS = frozenset(
         "figure_id",
         "excerpt",
         "missing_param_prompt_id",
+        "user_action",
+        "parameter_correction_id",
+        "correction_param_key",
         PLAN_EVIDENCE_SOURCE_REF_FIELD,
     }
 )
@@ -777,12 +812,68 @@ def resolved_prompt_ids(record: PaperPlanRecord) -> frozenset[str]:
             continue
         if not any(
             entry.source is EvidenceSource.USER_SUPPLIED
+            and entry.user_action is UserEvidenceAction.FILL_MISSING
             and entry.missing_param_prompt_id == binding.prompt_id
             for entry in record.plan.evidence
         ):
             continue
         resolved.append(binding.prompt_id)
     return frozenset(resolved)
+
+
+def resolved_user_evidence_refs(
+    record: PaperPlanRecord,
+    corrections: list[PaperParameterCorrection],
+) -> set[UserEvidenceRef]:
+    """Return user-supplied evidence refs that still resolve in the current record."""
+
+    refs = {
+        UserEvidenceRef(kind=UserEvidenceAction.FILL_MISSING, key=prompt_id)
+        for prompt_id in resolved_prompt_ids(record)
+    }
+    corrections_by_id = {
+        correction.correction_id: correction
+        for correction in corrections
+        if correction.paper_id == record.paper_id
+    }
+    for entry in record.plan.evidence:
+        if entry.source is not EvidenceSource.USER_SUPPLIED:
+            continue
+        if entry.user_action is not UserEvidenceAction.CORRECT_EXTRACTED:
+            continue
+        if entry.parameter_correction_id is None:
+            continue
+        correction = corrections_by_id.get(entry.parameter_correction_id)
+        if correction is None:
+            continue
+        if not _correction_target_matches_plan(record, correction):
+            continue
+        refs.add(
+            UserEvidenceRef(
+                kind=UserEvidenceAction.CORRECT_EXTRACTED,
+                key=correction.correction_id,
+            )
+        )
+    return refs
+
+
+def _correction_target_matches_plan(
+    record: PaperPlanRecord,
+    correction: PaperParameterCorrection,
+) -> bool:
+    target = correction.plan_target
+    if target.plan_mapping_index < 0:
+        return False
+    if target.plan_mapping_index >= len(record.plan.parameter_mapping):
+        return False
+    mapping = record.plan.parameter_mapping[target.plan_mapping_index]
+    expected_key = f"{target.paper_param_name}::{target.model_param_name}"
+    return (
+        correction.param_key == expected_key
+        and mapping.paper_param_name == target.paper_param_name
+        and mapping.model_param_name == target.model_param_name
+        and mapping.source is EvidenceSource.USER_SUPPLIED
+    )
 
 
 def validate_build_step_evidence_for_spec(

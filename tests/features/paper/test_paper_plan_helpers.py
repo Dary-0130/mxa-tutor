@@ -3,8 +3,12 @@ from dataclasses import FrozenInstanceError, fields, replace
 import pytest
 
 from core.domain.exceptions import PaperPlanGenerationError, PaperUserSupplyError
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterPrompt
+from core.domain.paper_parameter_correction import (
+    PaperParameterCorrection,
+    PlanCorrectionTarget,
+)
 from core.domain.paper_plan import (
     BlockRecommendation,
     ConfigurationHint,
@@ -31,7 +35,9 @@ from features.paper.paper_plan_helpers import (
     MissingBindingModel,
     ModelBuildStepDraft,
     PlanAssembler,
+    UserEvidenceRef,
     resolved_prompt_ids,
+    resolved_user_evidence_refs,
     validate_build_step_evidence_for_spec,
 )
 
@@ -67,6 +73,7 @@ def _user_evidence(
     figure_id: str | None = None,
     excerpt: str | None = None,
     missing_param_prompt_id: str | None = "MISS-1",
+    user_action: UserEvidenceAction | None = UserEvidenceAction.FILL_MISSING,
 ) -> PaperEvidenceEntry:
     return PaperEvidenceEntry(
         source=EvidenceSource.USER_SUPPLIED,
@@ -76,6 +83,22 @@ def _user_evidence(
         figure_id=figure_id,
         excerpt=excerpt,
         missing_param_prompt_id=missing_param_prompt_id,
+        user_action=user_action,
+    )
+
+
+def _correction_evidence(correction: PaperParameterCorrection) -> PaperEvidenceEntry:
+    return PaperEvidenceEntry(
+        source=EvidenceSource.USER_SUPPLIED,
+        document_id=None,
+        paper_section_id=None,
+        equation_id=None,
+        figure_id=None,
+        excerpt=None,
+        missing_param_prompt_id=None,
+        user_action=UserEvidenceAction.CORRECT_EXTRACTED,
+        parameter_correction_id=correction.correction_id,
+        correction_param_key=correction.param_key,
     )
 
 
@@ -227,6 +250,7 @@ def test_tag_user_supplied_creates_user_evidence_entry() -> None:
         figure_id=None,
         excerpt=None,
         missing_param_prompt_id="MISS-1",
+        user_action=UserEvidenceAction.FILL_MISSING,
     )
 
 
@@ -354,6 +378,39 @@ def test_validate_for_record_rejects_unresolved_user_evidence() -> None:
             [_user_evidence(missing_param_prompt_id="MISS-1")],
             record,
         )
+
+
+def test_resolved_user_evidence_refs_returns_fill_missing_refs() -> None:
+    record = _record(
+        mapping=_mapping("H", "3.5", source=EvidenceSource.USER_SUPPLIED),
+        plan_evidence=[_document_evidence(), _user_evidence(missing_param_prompt_id="MISS-1")],
+    )
+
+    assert resolved_user_evidence_refs(record, []) == {
+        UserEvidenceRef(kind=UserEvidenceAction.FILL_MISSING, key="MISS-1")
+    }
+
+
+def test_resolved_user_evidence_refs_returns_active_correction_refs() -> None:
+    correction = _correction()
+    record = _record(
+        mapping=_mapping("H", "3.8", source=EvidenceSource.USER_SUPPLIED),
+        plan_evidence=[_document_evidence(), _correction_evidence(correction)],
+    )
+
+    assert resolved_user_evidence_refs(record, [correction]) == {
+        UserEvidenceRef(kind=UserEvidenceAction.CORRECT_EXTRACTED, key="CORR-1")
+    }
+
+
+def test_resolved_user_evidence_refs_rejects_stale_correction_target() -> None:
+    correction = _correction(plan_mapping_index=1)
+    record = _record(
+        mapping=_mapping("H", "3.8", source=EvidenceSource.USER_SUPPLIED),
+        plan_evidence=[_document_evidence(), _correction_evidence(correction)],
+    )
+
+    assert resolved_user_evidence_refs(record, [correction]) == set()
 
 
 def test_validate_and_derive_build_steps_success_derives_display_text() -> None:
@@ -844,4 +901,25 @@ def _missing_prompt() -> MissingParameterPrompt:
         suggested_unit="s",
         user_supplied_value=None,
         user_supplied_unit=None,
+    )
+
+
+def _correction(*, plan_mapping_index: int = 0) -> PaperParameterCorrection:
+    return PaperParameterCorrection(
+        correction_id="CORR-1",
+        paper_id="PAPER-1",
+        param_key="H::Synchronous Machine.H",
+        plan_target=PlanCorrectionTarget(
+            paper_param_name="H",
+            model_param_name="Synchronous Machine.H",
+            plan_mapping_index=plan_mapping_index,
+        ),
+        original_value="3.5",
+        original_unit="s",
+        original_source=EvidenceSource.DOCUMENT_EXTRACTED,
+        original_document_id="DOC-001",
+        corrected_value="3.8",
+        corrected_unit="s",
+        created_at="2026-07-02T00:00:00",
+        updated_at="2026-07-02T00:00:00",
     )

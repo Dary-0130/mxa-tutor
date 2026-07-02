@@ -1119,4 +1119,7 @@ def _user_evidence_payload() -> dict[str, Any]:
         "figure_id": None,
         "excerpt": None,
         "missing_param_prompt_id": "MISS-1",
+        "user_action": "fill_missing",
+        "parameter_correction_id": None,
+        "correction_param_key": None,
     }

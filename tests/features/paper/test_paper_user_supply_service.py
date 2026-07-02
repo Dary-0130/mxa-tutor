@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from core.domain.exceptions import PaperPlanGenerationError, PaperUserSupplyError
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
     BlockRecommendation,
@@ -59,6 +59,7 @@ async def test_merge_fills_sentinel_mappings_and_appends_user_evidence() -> None
         figure_id=None,
         excerpt=None,
         missing_param_prompt_id="MISS-1",
+        user_action=UserEvidenceAction.FILL_MISSING,
     )
 
 

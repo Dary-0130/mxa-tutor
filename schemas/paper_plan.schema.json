@@ -301,6 +301,43 @@
           ],
           "default": null,
           "title": "Missing Param Prompt Id"
+        },
+        "user_action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserEvidenceAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "parameter_correction_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parameter Correction Id"
+        },
+        "correction_param_key": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Correction Param Key"
         }
       },
       "required": [
@@ -425,6 +462,15 @@
       ],
       "title": "StepBlockRefModel",
       "type": "object"
+    },
+    "UserEvidenceAction": {
+      "description": "Action represented by a user-supplied evidence entry.",
+      "enum": [
+        "fill_missing",
+        "correct_extracted"
+      ],
+      "title": "UserEvidenceAction",
+      "type": "string"
     }
   },
   "additionalProperties": false,

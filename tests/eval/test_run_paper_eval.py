@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 import eval.run_paper_eval as subject
 from core.domain.exceptions import LLMRateLimitError, PaperPlanGenerationError
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import BlockRecommendation, ModelGenerationPlan, ParameterMapping
 from core.domain.paper_spec import FigureRef, PaperDocument, PaperSpec
@@ -586,6 +586,7 @@ def _updated_plan_for_prompts(
                     figure_id=None,
                     excerpt=None,
                     missing_param_prompt_id=prompt.prompt_id,
+                    user_action=UserEvidenceAction.FILL_MISSING,
                 )
                 for prompt in prompts
             ],

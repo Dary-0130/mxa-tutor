@@ -19,10 +19,15 @@ from core.domain.paper_document_identity import (
     LEGACY_DOCUMENT_FILENAME,
     validate_paper_spec_document_identity,
 )
+from core.domain.paper_evidence import EvidenceSource, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
 from core.domain.paper_parameter_conflicts import (
     detect_parameter_conflicts,
     validate_parameter_conflicts_materialized,
+)
+from core.domain.paper_parameter_correction import (
+    PaperParameterCorrection,
+    PlanCorrectionTarget,
 )
 from core.domain.paper_plan import ModelGenerationPlan, PaperPlanRecord
 from core.domain.paper_reparse_source import (
@@ -45,6 +50,7 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
     _PROMPTS_ADAPTER = TypeAdapter(list[MissingParameterPrompt])
     _BINDINGS_ADAPTER = TypeAdapter(list[MissingParameterBinding])
     _SOURCE_ADAPTER = TypeAdapter(PaperReparseSource)
+    _CORRECTION_TARGET_ADAPTER = TypeAdapter(PlanCorrectionTarget)
 
     def __init__(
         self,
@@ -123,6 +129,10 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                 )
                 if spec_cur.rowcount == 0 or plan_cur.rowcount == 0 or source_cur.rowcount == 0:
                     raise StoreError("paper_reparse_bundle_incomplete")
+                await conn.execute(
+                    "DELETE FROM paper_parameter_correction WHERE paper_id=?",
+                    (record.paper_id,),
+                )
                 await conn.commit()
             except StoreError:
                 await self._rollback_preserving_error(conn, record.paper_id)
@@ -344,6 +354,10 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                     "DELETE FROM paper_reparse_source_cache WHERE paper_id=?",
                     (paper_id,),
                 )
+                await conn.execute(
+                    "DELETE FROM paper_parameter_correction WHERE paper_id=?",
+                    (paper_id,),
+                )
                 await conn.commit()
             except aiosqlite.Error as exc:
                 await self._rollback_preserving_error(conn, paper_id)
@@ -518,6 +532,14 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                         """,
                         (current_iso,),
                     )
+                    await conn.execute(
+                        """
+                        DELETE FROM paper_parameter_correction
+                        WHERE paper_id NOT IN (
+                            SELECT paper_id FROM paper_spec_cache
+                        )
+                        """,
+                    )
                     await conn.commit()
                     return 0
 
@@ -535,9 +557,21 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                         "DELETE FROM paper_reparse_source_cache WHERE paper_id=?",
                         (paper_id,),
                     )
+                    await conn.execute(
+                        "DELETE FROM paper_parameter_correction WHERE paper_id=?",
+                        (paper_id,),
+                    )
                 await conn.execute(
                     """
                     DELETE FROM paper_reparse_source_cache
+                    WHERE paper_id NOT IN (
+                        SELECT paper_id FROM paper_spec_cache
+                    )
+                    """,
+                )
+                await conn.execute(
+                    """
+                    DELETE FROM paper_parameter_correction
                     WHERE paper_id NOT IN (
                         SELECT paper_id FROM paper_spec_cache
                     )
@@ -555,6 +589,172 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
             except Exception:
                 await self._rollback_preserving_error(conn, "paper_cleanup")
                 raise
+
+    async def insert_parameter_correction(self, correction: PaperParameterCorrection) -> None:
+        plan_target_json = self._dump(
+            self._CORRECTION_TARGET_ADAPTER,
+            correction.plan_target,
+            "paper_parameter_correction_serialize_failed",
+        )
+        async with self._connect() as conn:
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO paper_parameter_correction(
+                        correction_id,
+                        paper_id,
+                        param_key,
+                        plan_target_json,
+                        original_value,
+                        original_unit,
+                        original_source,
+                        original_document_id,
+                        corrected_value,
+                        corrected_unit,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        correction.correction_id,
+                        correction.paper_id,
+                        correction.param_key,
+                        plan_target_json,
+                        correction.original_value,
+                        correction.original_unit,
+                        correction.original_source.value,
+                        correction.original_document_id,
+                        correction.corrected_value,
+                        correction.corrected_unit,
+                        correction.created_at,
+                        correction.updated_at,
+                    ),
+                )
+                await conn.commit()
+            except aiosqlite.Error as exc:
+                logger.error(
+                    "SqlitePaperBundleStore.insert_parameter_correction failed: exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+
+    async def update_parameter_correction_value(
+        self,
+        paper_id: str,
+        correction_id: str,
+        corrected_value: str,
+        corrected_unit: str | None,
+        updated_at: str,
+    ) -> None:
+        async with self._connect() as conn:
+            try:
+                await conn.execute(
+                    """
+                    UPDATE paper_parameter_correction
+                    SET corrected_value=?,
+                        corrected_unit=?,
+                        updated_at=?
+                    WHERE paper_id=? AND correction_id=?
+                    """,
+                    (corrected_value, corrected_unit, updated_at, paper_id, correction_id),
+                )
+                await conn.commit()
+            except aiosqlite.Error as exc:
+                logger.error(
+                    "SqlitePaperBundleStore.update_parameter_correction_value failed: "
+                    "exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+
+    async def get_parameter_correction(
+        self,
+        paper_id: str,
+        correction_id: str,
+    ) -> PaperParameterCorrection | None:
+        async with self._connect() as conn:
+            try:
+                cur = await conn.execute(
+                    """
+                    SELECT correction_id,
+                           paper_id,
+                           param_key,
+                           plan_target_json,
+                           original_value,
+                           original_unit,
+                           original_source,
+                           original_document_id,
+                           corrected_value,
+                           corrected_unit,
+                           created_at,
+                           updated_at
+                    FROM paper_parameter_correction
+                    WHERE paper_id=? AND correction_id=?
+                    """,
+                    (paper_id, correction_id),
+                )
+                row = await cur.fetchone()
+            except aiosqlite.Error as exc:
+                logger.error(
+                    "SqlitePaperBundleStore.get_parameter_correction failed: exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+
+        if row is None:
+            return None
+        return self._load_parameter_correction_row(row)
+
+    async def list_parameter_corrections(self, paper_id: str) -> list[PaperParameterCorrection]:
+        async with self._connect() as conn:
+            try:
+                cur = await conn.execute(
+                    """
+                    SELECT correction_id,
+                           paper_id,
+                           param_key,
+                           plan_target_json,
+                           original_value,
+                           original_unit,
+                           original_source,
+                           original_document_id,
+                           corrected_value,
+                           corrected_unit,
+                           created_at,
+                           updated_at
+                    FROM paper_parameter_correction
+                    WHERE paper_id=?
+                    ORDER BY created_at, correction_id
+                    """,
+                    (paper_id,),
+                )
+                rows = await cur.fetchall()
+            except aiosqlite.Error as exc:
+                logger.error(
+                    "SqlitePaperBundleStore.list_parameter_corrections failed: exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+
+        return [self._load_parameter_correction_row(row) for row in rows]
+
+    async def delete_parameter_correction(self, paper_id: str, correction_id: str) -> None:
+        async with self._connect() as conn:
+            try:
+                await conn.execute(
+                    """
+                    DELETE FROM paper_parameter_correction
+                    WHERE paper_id=? AND correction_id=?
+                    """,
+                    (paper_id, correction_id),
+                )
+                await conn.commit()
+            except aiosqlite.Error as exc:
+                logger.error(
+                    "SqlitePaperBundleStore.delete_parameter_correction failed: exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
 
     def _connect(self) -> AbstractAsyncContextManager[aiosqlite.Connection]:
         return self._connection_factory(self._db_path)
@@ -625,6 +825,31 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
             )
             raise StoreError(error_code) from None
 
+    def _load_parameter_correction_row(self, row: aiosqlite.Row) -> PaperParameterCorrection:
+        try:
+            plan_target = self._CORRECTION_TARGET_ADAPTER.validate_json(row["plan_target_json"])
+            original_source = EvidenceSource(row["original_source"])
+            return PaperParameterCorrection(
+                correction_id=row["correction_id"],
+                paper_id=row["paper_id"],
+                param_key=row["param_key"],
+                plan_target=plan_target,
+                original_value=row["original_value"],
+                original_unit=row["original_unit"],
+                original_source=original_source,
+                original_document_id=row["original_document_id"],
+                corrected_value=row["corrected_value"],
+                corrected_unit=row["corrected_unit"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "SqlitePaperBundleStore correction deserialize failed: exception={}",
+                type(exc).__name__,
+            )
+            raise StoreError("paper_parameter_correction_deserialize_failed") from None
+
     async def _rollback_preserving_error(
         self,
         conn: aiosqlite.Connection,
@@ -659,6 +884,7 @@ def _migrate_spec_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if _is_legacy_single_document_payload(migrated):
         _add_missing_document_ids_to_extracted_items(migrated.get("equations"))
         _add_missing_document_ids_to_extracted_items(migrated.get("figure_locations"))
+    migrated = _normalize_user_evidence_actions(migrated)
     _refresh_parameter_conflicts(migrated)
     return migrated
 
@@ -680,7 +906,30 @@ def _refresh_parameter_conflicts(payload: dict[str, Any]) -> None:
 
 def _migrate_nested_evidence_payloads(payload: Any) -> Any:
     legacy_evidence_payload = not _any_evidence_payload_has_document_id(payload)
-    return _visit_evidence_payloads(payload, fill_missing=legacy_evidence_payload)
+    migrated = _visit_evidence_payloads(payload, fill_missing=legacy_evidence_payload)
+    return _normalize_user_evidence_actions(migrated)
+
+
+def _normalize_user_evidence_actions(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_normalize_user_evidence_actions(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    result = {key: _normalize_user_evidence_actions(item) for key, item in value.items()}
+    if _looks_like_evidence_payload(result):
+        _normalize_one_evidence_action(result)
+    return result
+
+
+def _normalize_one_evidence_action(payload: dict[str, Any]) -> None:
+    if payload.get("source") != EvidenceSource.USER_SUPPLIED.value:
+        return
+    if "user_action" in payload:
+        return
+    if payload.get("missing_param_prompt_id") is None:
+        return
+    payload["user_action"] = UserEvidenceAction.FILL_MISSING.value
 
 
 def _add_missing_document_ids_to_spec_evidence(value: Any) -> None:
@@ -755,6 +1004,9 @@ _EVIDENCE_KEYS = frozenset(
         "figure_id",
         "excerpt",
         "missing_param_prompt_id",
+        "user_action",
+        "parameter_correction_id",
+        "correction_param_key",
     }
 )
 _MISSING = object()

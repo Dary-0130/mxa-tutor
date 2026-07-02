@@ -224,6 +224,9 @@ def _plan(*, user_filled: bool) -> dict[str, object]:
                 "figure_id": None,
                 "excerpt": None,
                 "missing_param_prompt_id": "MISS-101",
+                "user_action": "fill_missing",
+                "parameter_correction_id": None,
+                "correction_param_key": None,
             },
             {
                 "source": "user_supplied",
@@ -232,6 +235,9 @@ def _plan(*, user_filled: bool) -> dict[str, object]:
                 "figure_id": None,
                 "excerpt": None,
                 "missing_param_prompt_id": "MISS-102",
+                "user_action": "fill_missing",
+                "parameter_correction_id": None,
+                "correction_param_key": None,
             },
         ]
         if user_filled

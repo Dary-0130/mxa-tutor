@@ -57,10 +57,10 @@ def _shared_paper_plan_constraints() -> str:
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
 
 【evidence 双源契约】(每个 PaperEvidenceEntry 必守):
-- LLM 输出字段(6 个,逐字匹配):source / paper_section_id / equation_id / figure_id / excerpt / missing_param_prompt_id
-- document_id 是后端注入的第 7 个契约字段,LLM 不输出、不自创
+- LLM 输出字段(9 个,逐字匹配):source / paper_section_id / equation_id / figure_id / excerpt / missing_param_prompt_id / user_action / parameter_correction_id / correction_param_key
+- document_id 是后端注入的契约字段,LLM 不输出、不自创
 - source = "document_extracted":必须填写私有 source_ref(来自 plan_evidence_sources_json);三 locator 填 null;excerpt 由后端按 source_ref 回填;missing_param_prompt_id = null;document_id 由后端按 source_ref 注入
-- source = "user_supplied":三 locator 全 null;excerpt = null;missing_param_prompt_id 必填(关联 MissingParameterPrompt.prompt_id);document_id 由系统注入 null
+- source = "user_supplied":三 locator 全 null;excerpt = null;user_action = "fill_missing";missing_param_prompt_id 必填(关联 MissingParameterPrompt.prompt_id);parameter_correction_id / correction_param_key = null;document_id 由系统注入 null
 
 【私有引用桥】:
 - document_extracted evidence 只能引用 plan_evidence_sources_json 里的 source_ref,形如 REF-001;严禁自创 source_ref
@@ -84,7 +84,7 @@ def _shared_paper_plan_constraints() -> str:
 - ParameterMapping 用户补充项:
   {"paper_param_name":"(用户补充) H","model_param_name":"Synchronous Machine.H (s)","value":"3.5","unit":"s","source":"user_supplied"}
 - PaperEvidenceEntry user_supplied:
-  {"source":"user_supplied","paper_section_id":null,"equation_id":null,"figure_id":null,"excerpt":null,"missing_param_prompt_id":"MISS-001"}
+  {"source":"user_supplied","paper_section_id":null,"equation_id":null,"figure_id":null,"excerpt":null,"missing_param_prompt_id":"MISS-001","user_action":"fill_missing","parameter_correction_id":null,"correction_param_key":null}
 
 【双源契约红线】:
 - 不得伪造 evidence(凭空生成 locator / excerpt)
@@ -268,6 +268,7 @@ def build_messages_for_tuning_suggest(
         entry
         for entry in record.plan.evidence
         if entry.source is EvidenceSource.USER_SUPPLIED
+        and entry.user_action is not None
         and entry.missing_param_prompt_id in resolved_ids
     ]
 
@@ -377,6 +378,9 @@ def _dedupe_evidence(entries: list[PaperEvidenceEntry]) -> list[PaperEvidenceEnt
             entry.figure_id,
             entry.excerpt,
             entry.missing_param_prompt_id,
+            entry.user_action,
+            entry.parameter_correction_id,
+            entry.correction_param_key,
         )
         if key in seen:
             continue

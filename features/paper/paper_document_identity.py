@@ -19,6 +19,9 @@ _EVIDENCE_KEYS = frozenset(
         "figure_id",
         "excerpt",
         "missing_param_prompt_id",
+        "user_action",
+        "parameter_correction_id",
+        "correction_param_key",
     }
 )
 _MISSING = object()

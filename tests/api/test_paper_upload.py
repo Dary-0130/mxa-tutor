@@ -20,6 +20,7 @@ from api.main import create_app
 from core.domain.exceptions import DocumentParseError, PaperSpecGenerationError, StoreError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
+from core.domain.paper_parameter_correction import PaperParameterCorrection
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
@@ -153,6 +154,37 @@ class FakePaperBundleStore(PaperBundleStore, PaperReparseStore):
         self.deleted_ids.append(paper_id)
         self.records.pop(paper_id, None)
         self.sources.pop(paper_id, None)
+
+    async def insert_parameter_correction(self, correction: PaperParameterCorrection) -> None:
+        _ = correction
+
+    async def update_parameter_correction_value(
+        self,
+        paper_id: str,
+        correction_id: str,
+        corrected_value: str,
+        corrected_unit: str | None,
+        updated_at: str,
+    ) -> None:
+        _ = paper_id, correction_id, corrected_value, corrected_unit, updated_at
+
+    async def get_parameter_correction(
+        self,
+        paper_id: str,
+        correction_id: str,
+    ) -> PaperParameterCorrection | None:
+        _ = paper_id, correction_id
+        return None
+
+    async def list_parameter_corrections(
+        self,
+        paper_id: str,
+    ) -> list[PaperParameterCorrection]:
+        _ = paper_id
+        return []
+
+    async def delete_parameter_correction(self, paper_id: str, correction_id: str) -> None:
+        _ = paper_id, correction_id
 
 
 def test_upload_document_returns_200_with_paper_id_and_spec(

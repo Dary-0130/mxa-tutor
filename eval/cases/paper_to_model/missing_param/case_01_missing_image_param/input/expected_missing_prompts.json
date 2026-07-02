@@ -10,7 +10,10 @@
         "equation_id": null,
         "figure_id": "FIG-01",
         "excerpt": "标准同步发电机模型参数如下:",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       },
       "suggested_unit": "s",
       "user_supplied_value": null,
@@ -27,7 +30,10 @@
         "equation_id": null,
         "figure_id": "FIG-01",
         "excerpt": "标准同步发电机模型参数如下:",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       },
       "suggested_unit": "pu",
       "user_supplied_value": null,
@@ -44,7 +50,10 @@
         "equation_id": null,
         "figure_id": "FIG-02",
         "excerpt": "变压器参数如下:",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       },
       "suggested_unit": "kV / kV",
       "user_supplied_value": null,
@@ -61,7 +70,10 @@
         "equation_id": null,
         "figure_id": "FIG-02",
         "excerpt": "变压器参数如下:",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       },
       "suggested_unit": "pu",
       "user_supplied_value": null,
@@ -78,7 +90,10 @@
         "equation_id": null,
         "figure_id": "FIG-02",
         "excerpt": "变压器参数如下:",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       },
       "suggested_unit": null,
       "user_supplied_value": null,
@@ -95,7 +110,10 @@
         "equation_id": null,
         "figure_id": "FIG-03",
         "excerpt": "根据电机初始化工具的截图可得,定子侧电流 a 相滞后电压 -4.43°",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       },
       "suggested_unit": "rad",
       "user_supplied_value": null,

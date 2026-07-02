@@ -54,6 +54,11 @@ def test_paper_cache_interfaces_have_expected_abstract_methods() -> None:
         "get_spec",
         "get_plan_record",
         "delete_bundle",
+        "insert_parameter_correction",
+        "update_parameter_correction_value",
+        "get_parameter_correction",
+        "list_parameter_corrections",
+        "delete_parameter_correction",
     }
     assert PaperSpecCache.__abstractmethods__ == {"get", "put", "invalidate"}
     assert PaperPlanCache.__abstractmethods__ == {"get", "set", "delete"}

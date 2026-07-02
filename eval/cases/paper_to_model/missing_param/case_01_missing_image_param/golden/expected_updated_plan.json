@@ -13,7 +13,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立如下的 Simulink 模型",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -26,7 +29,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "假设一台有阻尼绕组同步发电机,PN=200MW,UN=13.8kV,fN=50Hz,xd=1.0,xq=0.6,xd'=0.3,xd''=0.21,xq''=0.31,r=0.005,xσf=0.18,xaD=0.1,xσQ=0.25,Td0'=5s,TD=2s,Tq0''=1.4s。",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -39,7 +45,10 @@
         "equation_id": null,
         "figure_id": "FIG-02",
         "excerpt": "变压器参数如下:",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -52,7 +61,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "故障模块设置 0.2s 时发生三相短路故障",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -65,7 +77,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "对以上公式采用 .m 文件进行数值计算和绘图。",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -78,7 +93,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "端口并联有功功率为 5MW 的负荷模块",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -91,7 +109,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "同步电机突然三相短路,基频周期分量从短路电流有效值衰减至稳态值。非周期分量从短路电流初始值衰减至 0,倍频分量从短路电流初始值按指数规律衰减至 0。",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -104,7 +125,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "绘图包括发电机端突然三相短路时的 a 相定子电流",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     }
   ],
@@ -312,7 +336,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": "假设一台有阻尼绕组同步发电机,PN=200MW,UN=13.8kV,fN=50Hz,xd=1.0,xq=0.6,xd'=0.3,xd''=0.21,xq''=0.31,r=0.005,xσf=0.18,xaD=0.1,xσQ=0.25,Td0'=5s,TD=2s,Tq0''=1.4s。",
-      "missing_param_prompt_id": null
+      "missing_param_prompt_id": null,
+      "user_action": null,
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "document_extracted",
@@ -321,7 +348,10 @@
       "equation_id": "EQ-01",
       "figure_id": null,
       "excerpt": "ia = -cos(ωt+α0) - 1.4·e^(-2.97t)·cos(ωt+α0) - 2.34·e^(0.608t)·cos(ωt+α0) + 4·e^(-6.3t)·cos(-α0) + 0.77·e^(-6.3t)·cos(2ωt+α0)",
-      "missing_param_prompt_id": null
+      "missing_param_prompt_id": null,
+      "user_action": null,
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "document_extracted",
@@ -330,7 +360,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": "端口并联有功功率为 5MW 的负荷模块,设定同步发电机为平衡节点,故障模块设置 0.2s 时发生三相短路故障,选择 ode15s 算法,仿真时长设定为 1s,其他参数为默认值。",
-      "missing_param_prompt_id": null
+      "missing_param_prompt_id": null,
+      "user_action": null,
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "user_supplied",
@@ -339,7 +372,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": null,
-      "missing_param_prompt_id": "MISS-001"
+      "missing_param_prompt_id": "MISS-001",
+      "user_action": "fill_missing",
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "user_supplied",
@@ -348,7 +384,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": null,
-      "missing_param_prompt_id": "MISS-002"
+      "missing_param_prompt_id": "MISS-002",
+      "user_action": "fill_missing",
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "user_supplied",
@@ -357,7 +396,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": null,
-      "missing_param_prompt_id": "MISS-003"
+      "missing_param_prompt_id": "MISS-003",
+      "user_action": "fill_missing",
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "user_supplied",
@@ -366,7 +408,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": null,
-      "missing_param_prompt_id": "MISS-004"
+      "missing_param_prompt_id": "MISS-004",
+      "user_action": "fill_missing",
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "user_supplied",
@@ -375,7 +420,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": null,
-      "missing_param_prompt_id": "MISS-005"
+      "missing_param_prompt_id": "MISS-005",
+      "user_action": "fill_missing",
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "user_supplied",
@@ -384,7 +432,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": null,
-      "missing_param_prompt_id": "MISS-006"
+      "missing_param_prompt_id": "MISS-006",
+      "user_action": "fill_missing",
+      "parameter_correction_id": null,
+      "correction_param_key": null
     }
   ],
   "build_steps": null
