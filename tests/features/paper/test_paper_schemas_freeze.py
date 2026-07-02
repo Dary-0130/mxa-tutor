@@ -14,7 +14,7 @@ from core.domain.paper_ask import (
     PlanMappingParameterTarget,
     SectionTarget,
 )
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
     BlockRecommendation,
@@ -125,6 +125,24 @@ def _user_evidence_payload() -> dict[str, object]:
         "figure_id": None,
         "excerpt": None,
         "missing_param_prompt_id": "MISS-1",
+        "user_action": "fill_missing",
+        "parameter_correction_id": None,
+        "correction_param_key": None,
+    }
+
+
+def _correction_evidence_payload() -> dict[str, object]:
+    return {
+        "source": "user_supplied",
+        "document_id": None,
+        "paper_section_id": None,
+        "equation_id": None,
+        "figure_id": None,
+        "excerpt": None,
+        "missing_param_prompt_id": None,
+        "user_action": "correct_extracted",
+        "parameter_correction_id": "CORR-1",
+        "correction_param_key": "H::Synchronous Machine.H",
     }
 
 
@@ -635,11 +653,24 @@ def test_domain_literal_rejects_general() -> None:
 def test_document_extracted_evidence_invariants() -> None:
     model = PaperEvidenceEntryModel.model_validate(_document_evidence_payload())
     assert model.source is EvidenceSource.DOCUMENT_EXTRACTED
+    assert model.user_action is None
+    assert model.parameter_correction_id is None
+    assert model.correction_param_key is None
 
 
 def test_user_supplied_evidence_invariants() -> None:
     model = PaperEvidenceEntryModel.model_validate(_user_evidence_payload())
     assert model.source is EvidenceSource.USER_SUPPLIED
+    assert model.user_action is UserEvidenceAction.FILL_MISSING
+
+
+def test_correct_extracted_evidence_invariants() -> None:
+    model = PaperEvidenceEntryModel.model_validate(_correction_evidence_payload())
+
+    assert model.source is EvidenceSource.USER_SUPPLIED
+    assert model.user_action is UserEvidenceAction.CORRECT_EXTRACTED
+    assert model.parameter_correction_id == "CORR-1"
+    assert model.missing_param_prompt_id is None
 
 
 @pytest.mark.parametrize(
@@ -679,6 +710,39 @@ def test_user_supplied_evidence_invariants() -> None:
             "paper_section_id": None,
             "excerpt": None,
             "missing_param_prompt_id": None,
+            "user_action": "fill_missing",
+        },
+        {
+            "source": "user_supplied",
+            "document_id": None,
+            "paper_section_id": None,
+            "equation_id": None,
+            "figure_id": None,
+            "excerpt": None,
+            "missing_param_prompt_id": "MISS-1",
+            "user_action": "fill_missing",
+            "parameter_correction_id": "CORR-1",
+        },
+        {
+            "source": "user_supplied",
+            "document_id": None,
+            "paper_section_id": None,
+            "equation_id": None,
+            "figure_id": None,
+            "excerpt": None,
+            "missing_param_prompt_id": "MISS-1",
+            "user_action": "correct_extracted",
+            "parameter_correction_id": "CORR-1",
+        },
+        {
+            "source": "document_extracted",
+            "document_id": "DOC-001",
+            "paper_section_id": "S1",
+            "equation_id": None,
+            "figure_id": None,
+            "excerpt": "The document states the simulation target.",
+            "missing_param_prompt_id": None,
+            "user_action": "fill_missing",
         },
     ],
 )

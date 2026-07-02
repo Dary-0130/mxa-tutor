@@ -21,8 +21,8 @@ system: |
 
   【evidence】
   - evidence 只能从 allowed_document_evidence 或 allowed_resolved_user_evidence 中逐字引用
-  - user_supplied evidence 只能引用 resolved_prompt_ids 中的 missing_param_prompt_id
-  - 不得编造 locator / excerpt / missing_param_prompt_id
+  - user_supplied evidence 只能引用 resolved_prompt_ids 中的 missing_param_prompt_id,且 user_action 必须是 "fill_missing"
+  - 不得编造 locator / excerpt / missing_param_prompt_id / user_action / parameter_correction_id / correction_param_key
 
   【confidence】
   - 只能是 "high" / "medium" / "low"
@@ -60,7 +60,10 @@ user: |
         "equation_id": "... 或 null",
         "figure_id": "... 或 null",
         "excerpt": "... 或 null",
-        "missing_param_prompt_id": "... 或 null"
+        "missing_param_prompt_id": "... 或 null",
+        "user_action": "fill_missing 或 null",
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     ]
   }

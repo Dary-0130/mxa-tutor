@@ -16,6 +16,7 @@ async def test_new_database_latest_schema_includes_paper_tables(db_path: str) ->
         "paper_spec_cache",
         "paper_plan_cache",
         "paper_reparse_source_cache",
+        "paper_parameter_correction",
         "teaching_units",
         "chunks",
     }.issubset(tables)
@@ -61,6 +62,7 @@ async def test_migrates_v1_to_latest_and_preserves_project_and_chat(db_path: str
         "paper_spec_cache",
         "paper_plan_cache",
         "paper_reparse_source_cache",
+        "paper_parameter_correction",
     }.issubset(tables)
     assert project["project_id"] == "p1"
     assert session["session_id"] == "s1"
@@ -88,6 +90,7 @@ async def test_migrates_v2_to_latest_and_preserves_chunks(db_path: str) -> None:
         "paper_spec_cache",
         "paper_plan_cache",
         "paper_reparse_source_cache",
+        "paper_parameter_correction",
     }.issubset(tables)
 
 
@@ -115,6 +118,7 @@ async def test_migrates_v3_to_latest_and_preserves_teaching_units(db_path: str) 
         "paper_spec_cache",
         "paper_plan_cache",
         "paper_reparse_source_cache",
+        "paper_parameter_correction",
     }.issubset(tables)
 
 
@@ -132,7 +136,25 @@ async def test_migrates_v5_to_latest_and_preserves_run_state_tables(db_path: str
         "bridge_run_state_session",
         "bridge_run_state_run",
         "paper_reparse_source_cache",
+        "paper_parameter_correction",
     }.issubset(tables)
+
+
+async def test_migrates_v6_to_latest_and_adds_parameter_correction_table(
+    db_path: str,
+) -> None:
+    async with open_connection(db_path) as conn:
+        await _create_v6_database(conn)
+
+    async with open_connection(db_path) as conn:
+        await schema.init_schema(conn)
+        version = await _schema_version(conn)
+        tables = await _tables(conn)
+        indexes = await _indexes(conn)
+
+    assert version == schema.CURRENT_SCHEMA_VERSION
+    assert "paper_parameter_correction" in tables
+    assert "idx_paper_parameter_correction_paper" in indexes
 
 
 async def test_target_latest_schema_is_idempotent(db_path: str) -> None:
@@ -211,6 +233,13 @@ async def _create_v5_database(conn) -> None:  # type: ignore[no-untyped-def]
     await conn.commit()
 
 
+async def _create_v6_database(conn) -> None:  # type: ignore[no-untyped-def]
+    await _create_v5_database(conn)
+    await conn.executescript(schema._PAPER_REPARSE_SOURCE_DDL)
+    await conn.execute("UPDATE schema_version SET version=6 WHERE id=1")
+    await conn.commit()
+
+
 async def _insert_project_chat(conn) -> None:  # type: ignore[no-untyped-def]
     await conn.execute(
         """
@@ -265,4 +294,9 @@ async def _schema_version(conn) -> int:  # type: ignore[no-untyped-def]
 
 async def _tables(conn) -> set[str]:  # type: ignore[no-untyped-def]
     cur = await conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    return {row["name"] for row in await cur.fetchall()}
+
+
+async def _indexes(conn) -> set[str]:  # type: ignore[no-untyped-def]
+    cur = await conn.execute("SELECT name FROM sqlite_master WHERE type='index'")
     return {row["name"] for row in await cur.fetchall()}

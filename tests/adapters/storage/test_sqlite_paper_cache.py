@@ -13,8 +13,12 @@ from adapters.storage.sqlite_paper_cache import (
     SqlitePaperSpecCacheView,
 )
 from core.domain.exceptions import StoreError
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
+from core.domain.paper_parameter_correction import (
+    PaperParameterCorrection,
+    PlanCorrectionTarget,
+)
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
@@ -146,6 +150,7 @@ async def test_delete_bundle_deletes_reparse_source(initialized_db_path: str) ->
     record = _record()
     store = SqlitePaperBundleStore(initialized_db_path)
     await store.save_ready_bundle_with_source(record, _source(record.paper_id))
+    await store.insert_parameter_correction(_correction(record.paper_id))
 
     await store.delete_bundle(record.paper_id)
 
@@ -153,6 +158,7 @@ async def test_delete_bundle_deletes_reparse_source(initialized_db_path: str) ->
     assert await store.get_plan_record(record.paper_id) is None
     async with open_connection(initialized_db_path) as conn:
         assert await _count(conn, "paper_reparse_source_cache") == 0
+        assert await _count(conn, "paper_parameter_correction") == 0
 
 
 async def test_invalidate_spec_deletes_both_rows(initialized_db_path: str) -> None:
@@ -220,12 +226,29 @@ async def test_replace_ready_bundle_source_fault_rolls_back_all_tables(
     assert await fresh_store.get_reparse_source(old_record.paper_id) == old_source
 
 
+async def test_replace_ready_bundle_with_source_clears_parameter_corrections(
+    initialized_db_path: str,
+) -> None:
+    old_record = _record()
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.save_ready_bundle_with_source(old_record, _source(old_record.paper_id))
+    await store.insert_parameter_correction(_correction(old_record.paper_id))
+
+    await store.replace_ready_bundle_with_source(
+        _record(title="Reparsed report"),
+        _source(old_record.paper_id, text="new text"),
+    )
+
+    assert await store.list_parameter_corrections(old_record.paper_id) == []
+
+
 async def test_delete_expired_paper_bundles_cascades_plan_spec_source(
     initialized_db_path: str,
 ) -> None:
     store = SqlitePaperBundleStore(initialized_db_path)
     record = _record()
     await store.save_ready_bundle_with_source(record, _source(record.paper_id))
+    await store.insert_parameter_correction(_correction(record.paper_id))
     expired = datetime(2026, 7, 2, 12, 0, 0)
     async with open_connection(initialized_db_path) as conn:
         await conn.execute(
@@ -241,6 +264,77 @@ async def test_delete_expired_paper_bundles_cascades_plan_spec_source(
         assert await _count(conn, "paper_plan_cache") == 0
         assert await _count(conn, "paper_spec_cache") == 0
         assert await _count(conn, "paper_reparse_source_cache") == 0
+        assert await _count(conn, "paper_parameter_correction") == 0
+
+
+async def test_delete_expired_paper_bundles_cleans_orphan_parameter_corrections(
+    initialized_db_path: str,
+) -> None:
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.insert_parameter_correction(_correction("orphan-paper"))
+
+    deleted = await store.delete_expired_paper_bundles(now=datetime(2026, 7, 2, 12, 0, 0))
+
+    assert deleted == 0
+    async with open_connection(initialized_db_path) as conn:
+        assert await _count(conn, "paper_parameter_correction") == 0
+
+
+async def test_parameter_correction_crud_round_trips_and_preserves_original(
+    initialized_db_path: str,
+) -> None:
+    store = SqlitePaperBundleStore(initialized_db_path)
+    correction = _correction("paper-1")
+
+    await store.insert_parameter_correction(correction)
+    await store.update_parameter_correction_value(
+        "paper-1",
+        correction.correction_id,
+        corrected_value="4.0",
+        corrected_unit="s",
+        updated_at="2026-07-02T01:00:00",
+    )
+
+    fetched = await store.get_parameter_correction("paper-1", correction.correction_id)
+    assert fetched == PaperParameterCorrection(
+        correction_id=correction.correction_id,
+        paper_id=correction.paper_id,
+        param_key=correction.param_key,
+        plan_target=correction.plan_target,
+        original_value=correction.original_value,
+        original_unit=correction.original_unit,
+        original_source=correction.original_source,
+        original_document_id=correction.original_document_id,
+        corrected_value="4.0",
+        corrected_unit="s",
+        created_at=correction.created_at,
+        updated_at="2026-07-02T01:00:00",
+    )
+    assert await store.list_parameter_corrections("paper-1") == [fetched]
+
+    await store.delete_parameter_correction("paper-1", correction.correction_id)
+
+    assert await store.get_parameter_correction("paper-1", correction.correction_id) is None
+    assert await store.list_parameter_corrections("paper-1") == []
+
+
+async def test_legacy_user_supplied_evidence_readback_normalizes_user_action(
+    initialized_db_path: str,
+) -> None:
+    await _insert_bundle(
+        initialized_db_path,
+        paper_spec_json=_json(_current_spec_payload()),
+        plan_json=_legacy_user_supplied_plan_json(),
+        missing_prompts_json=_current_missing_prompts_json(),
+    )
+
+    record = await SqlitePaperBundleStore(initialized_db_path).get_plan_record("paper-1")
+
+    assert record is not None
+    user_evidence = record.plan.evidence[-1]
+    assert user_evidence.source is EvidenceSource.USER_SUPPLIED
+    assert user_evidence.missing_param_prompt_id == "MISS-1"
+    assert user_evidence.user_action is UserEvidenceAction.FILL_MISSING
 
 
 async def test_rollback_failure_does_not_cover_primary_error(
@@ -548,6 +642,23 @@ def _old_missing_prompts_json() -> str:
     )
 
 
+def _current_missing_prompts_json() -> str:
+    evidence = {**_old_document_evidence_payload(), "document_id": "DOC-001"}
+    return _json(
+        [
+            {
+                "prompt_id": "MISS-1",
+                "parameter_name": "H",
+                "paper_reference": evidence,
+                "suggested_unit": "s",
+                "user_supplied_value": None,
+                "user_supplied_unit": None,
+                "source": "user_supplied",
+            }
+        ]
+    )
+
+
 def _old_spec_payload() -> dict[str, object]:
     return {
         "paper_title": "Short-circuit report",
@@ -574,6 +685,17 @@ def _old_spec_payload() -> dict[str, object]:
         "pseudocode_blocks": [],
         "evidence": [_old_document_evidence_payload()],
     }
+
+
+def _current_spec_payload() -> dict[str, object]:
+    payload = _old_spec_payload()
+    payload["documents"] = [{"document_id": "DOC-001", "filename": "paper.pdf"}]
+    payload["primary_document_id"] = None
+    payload["parameter_table"][0]["document_id"] = "DOC-001"  # type: ignore[index]
+    payload["equations"][0]["document_id"] = "DOC-001"  # type: ignore[index]
+    payload["evidence"][0]["document_id"] = "DOC-001"  # type: ignore[index]
+    payload["parameter_conflicts"] = []
+    return payload
 
 
 def _conflict_spec_payload() -> dict[str, object]:
@@ -644,6 +766,40 @@ def _old_document_evidence_payload() -> dict[str, object]:
         "excerpt": "The report states the machine parameter.",
         "missing_param_prompt_id": None,
     }
+
+
+def _legacy_user_supplied_plan_json() -> str:
+    document_evidence = {**_old_document_evidence_payload(), "document_id": "DOC-001"}
+    user_evidence = {
+        "source": "user_supplied",
+        "document_id": None,
+        "paper_section_id": None,
+        "equation_id": None,
+        "figure_id": None,
+        "excerpt": None,
+        "missing_param_prompt_id": "MISS-1",
+    }
+    return _json(
+        {
+            "plan_id": "PLAN-paper-1",
+            "paper_spec_id": "paper-1",
+            "library_choice": "SimPowerSystems",
+            "block_recommendations": [],
+            "parameter_mapping": [
+                {
+                    "paper_param_name": "H",
+                    "model_param_name": "Synchronous Machine.H",
+                    "value": "3.5",
+                    "unit": "s",
+                    "source": "user_supplied",
+                }
+            ],
+            "subsystem_breakdown": ["Place machine", "Apply fault", "Observe current"],
+            "m_script_skeleton": None,
+            "evidence": [document_evidence, user_evidence],
+            "build_steps": None,
+        }
+    )
 
 
 def _json(payload: object) -> str:
@@ -750,6 +906,27 @@ def _source(paper_id: str, *, text: str = "paper text") -> PaperReparseSource:
             )
         ],
         primary_index=None,
+    )
+
+
+def _correction(paper_id: str) -> PaperParameterCorrection:
+    return PaperParameterCorrection(
+        correction_id="CORR-1",
+        paper_id=paper_id,
+        param_key="H::Synchronous Machine.H",
+        plan_target=PlanCorrectionTarget(
+            paper_param_name="H",
+            model_param_name="Synchronous Machine.H",
+            plan_mapping_index=0,
+        ),
+        original_value="3.5",
+        original_unit="s",
+        original_source=EvidenceSource.DOCUMENT_EXTRACTED,
+        original_document_id="DOC-001",
+        corrected_value="3.8",
+        corrected_unit="s",
+        created_at="2026-07-02T00:00:00",
+        updated_at="2026-07-02T00:00:00",
     )
 
 

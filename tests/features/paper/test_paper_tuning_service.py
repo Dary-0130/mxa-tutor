@@ -16,7 +16,7 @@ from core.domain.exceptions import (
     LLMTimeoutError,
     PaperTuningError,
 )
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
 from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_plan import (
@@ -451,6 +451,7 @@ def _user_evidence(prompt_id: str) -> PaperEvidenceEntry:
         figure_id=None,
         excerpt=None,
         missing_param_prompt_id=prompt_id,
+        user_action=UserEvidenceAction.FILL_MISSING,
     )
 
 
@@ -475,4 +476,7 @@ def _user_evidence_payload(prompt_id: str) -> dict[str, Any]:
         "figure_id": None,
         "excerpt": None,
         "missing_param_prompt_id": prompt_id,
+        "user_action": "fill_missing",
+        "parameter_correction_id": None,
+        "correction_param_key": None,
     }

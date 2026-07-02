@@ -18,7 +18,7 @@ from api.dependencies import (
     get_settings,
 )
 from api.main import create_app
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
 from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_plan import (
@@ -482,4 +482,5 @@ def _user_evidence(prompt_id: str) -> PaperEvidenceEntry:
         figure_id=None,
         excerpt=None,
         missing_param_prompt_id=prompt_id,
+        user_action=UserEvidenceAction.FILL_MISSING,
     )

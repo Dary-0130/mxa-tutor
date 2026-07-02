@@ -13,7 +13,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -26,7 +29,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "假设一台有阻尼绕组同步发电机,PN=200MW,UN=13.8kV,fN=50Hz,xd=1.0,xq=0.6,xd'=0.3,xd''=0.21,xq''=0.31,r=0.005,xσf=0.18,xaD=0.1,xσQ=0.25,Td0'=5s,TD=2s,Tq0''=1.4s。",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -39,7 +45,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "端子突然发生三相短路",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -52,7 +61,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "对以上公式采用 .m 文件进行数值计算和绘图。绘图包括发电机端突然三相短路时的 a 相定子电流,以及基频分量、倍频分量和非周期分量波形。",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -65,7 +77,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -78,7 +93,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -91,7 +109,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "非周期分量从短路电流初始值衰减至 0,倍频分量从短路电流初始值按指数规律衰减至 0。",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     },
     {
@@ -104,7 +125,10 @@
         "equation_id": null,
         "figure_id": null,
         "excerpt": "绘图包括发电机端突然三相短路时的 a 相定子电流",
-        "missing_param_prompt_id": null
+        "missing_param_prompt_id": null,
+        "user_action": null,
+        "parameter_correction_id": null,
+        "correction_param_key": null
       }
     }
   ],
@@ -269,7 +293,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": "假设一台有阻尼绕组同步发电机,PN=200MW,UN=13.8kV,fN=50Hz,xd=1.0,xq=0.6,xd'=0.3,xd''=0.21,xq''=0.31,r=0.005,xσf=0.18,xaD=0.1,xσQ=0.25,Td0'=5s,TD=2s,Tq0''=1.4s。",
-      "missing_param_prompt_id": null
+      "missing_param_prompt_id": null,
+      "user_action": null,
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "document_extracted",
@@ -278,7 +305,10 @@
       "equation_id": "EQ-01",
       "figure_id": null,
       "excerpt": "ia = -cos(ωt+α0) - 1.4·e^(-2.97t)·cos(ωt+α0) - 2.34·e^(0.608t)·cos(ωt+α0) + 4·e^(-6.3t)·cos(-α0) + 0.77·e^(-6.3t)·cos(2ωt+α0)",
-      "missing_param_prompt_id": null
+      "missing_param_prompt_id": null,
+      "user_action": null,
+      "parameter_correction_id": null,
+      "correction_param_key": null
     },
     {
       "source": "document_extracted",
@@ -287,7 +317,10 @@
       "equation_id": null,
       "figure_id": null,
       "excerpt": "对同步发电机突然三相短路暂态过程进行仿真,建立 Simulink 模型。",
-      "missing_param_prompt_id": null
+      "missing_param_prompt_id": null,
+      "user_action": null,
+      "parameter_correction_id": null,
+      "correction_param_key": null
     }
   ],
   "build_steps": null

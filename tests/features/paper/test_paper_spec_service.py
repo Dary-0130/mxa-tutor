@@ -212,6 +212,9 @@ def test_paper_spec_service_rejects_user_supplied_evidence_in_task501() -> None:
             "figure_id": None,
             "excerpt": None,
             "missing_param_prompt_id": "MISS-1",
+            "user_action": "fill_missing",
+            "parameter_correction_id": None,
+            "correction_param_key": None,
         }
     ]
 

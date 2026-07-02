@@ -17,7 +17,7 @@ from core.domain.paper_document_identity import (
     DOCUMENT_ID_PATTERN,
     validate_paper_spec_document_identity,
 )
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_parameter_conflicts import validate_parameter_conflicts_materialized
 from core.domain.paper_plan import (
@@ -66,6 +66,9 @@ class PaperEvidenceEntryModel(_StrictBaseModel):
     figure_id: str | None = Field(default=None, min_length=1)
     excerpt: str | None = Field(default=None, min_length=1, max_length=300)
     missing_param_prompt_id: str | None = Field(default=None, min_length=1)
+    user_action: UserEvidenceAction | None = None
+    parameter_correction_id: str | None = Field(default=None, min_length=1)
+    correction_param_key: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def validate_source_invariants(self) -> Self:
@@ -79,6 +82,12 @@ class PaperEvidenceEntryModel(_StrictBaseModel):
                 raise ValueError("document_extracted evidence requires excerpt")
             if self.missing_param_prompt_id is not None:
                 raise ValueError("document_extracted evidence cannot link missing prompt")
+            if self.user_action is not None:
+                raise ValueError("document_extracted evidence cannot have user action")
+            if self.parameter_correction_id is not None:
+                raise ValueError("document_extracted evidence cannot link correction")
+            if self.correction_param_key is not None:
+                raise ValueError("document_extracted evidence cannot link correction param key")
             return self
 
         if self.document_id is not None:
@@ -87,8 +96,22 @@ class PaperEvidenceEntryModel(_StrictBaseModel):
             raise ValueError("user_supplied evidence cannot have paper locators")
         if self.excerpt is not None:
             raise ValueError("user_supplied evidence cannot have excerpt")
-        if self.missing_param_prompt_id is None:
-            raise ValueError("user_supplied evidence requires missing prompt id")
+        if self.user_action is None:
+            raise ValueError("user_supplied evidence requires user action")
+        if self.user_action is UserEvidenceAction.FILL_MISSING:
+            if self.missing_param_prompt_id is None:
+                raise ValueError("fill_missing evidence requires missing prompt id")
+            if self.parameter_correction_id is not None:
+                raise ValueError("fill_missing evidence cannot link correction")
+            if self.correction_param_key is not None:
+                raise ValueError("fill_missing evidence cannot link correction param key")
+            return self
+        if self.user_action is UserEvidenceAction.CORRECT_EXTRACTED:
+            if self.parameter_correction_id is None:
+                raise ValueError("correct_extracted evidence requires correction id")
+            if self.missing_param_prompt_id is not None:
+                raise ValueError("correct_extracted evidence cannot link missing prompt")
+            return self
         return self
 
     def to_domain(self) -> PaperEvidenceEntry:
@@ -100,6 +123,9 @@ class PaperEvidenceEntryModel(_StrictBaseModel):
             figure_id=self.figure_id,
             excerpt=self.excerpt,
             missing_param_prompt_id=self.missing_param_prompt_id,
+            user_action=self.user_action,
+            parameter_correction_id=self.parameter_correction_id,
+            correction_param_key=self.correction_param_key,
         )
 
 

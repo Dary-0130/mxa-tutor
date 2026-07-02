@@ -13,7 +13,7 @@ from core.domain.exceptions import (
     LLMTimeoutError,
 )
 from core.domain.paper_ask import EquationTarget
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
 from core.domain.paper_plan import (
     BlockRecommendation,
@@ -642,4 +642,5 @@ def _user_evidence(prompt_id: str) -> PaperEvidenceEntry:
         figure_id=None,
         excerpt=None,
         missing_param_prompt_id=prompt_id,
+        user_action=UserEvidenceAction.FILL_MISSING,
     )

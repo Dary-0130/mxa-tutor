@@ -395,15 +395,24 @@ v0.1 - 2026-06-05 起 freeze,与 TASK-203 commit `871c8e2` 的 `ProjectOverview`
 | `excerpt` | string \| null | 见不变量 | 文档原文摘录 |
 | `missing_param_prompt_id` | string \| null | 见不变量 | 用户补充流程关联 ID |
 | `document_id` | string \| null | 见不变量 | 该条证据来自哪篇文档 |
+| `user_action` | `fill_missing` / `correct_extracted` \| null | 见不变量 | 用户证据动作 |
+| `parameter_correction_id` | string \| null | 见不变量 | 用户纠错审计 ID |
+| `correction_param_key` | string \| null | 见不变量 | 用户纠错目标参数键 |
 
-两套不变量:
+三套不变量:
 
 - `source = document_extracted`: `paper_section_id` / `equation_id` / `figure_id` 至少一个非
   null;`excerpt` 必须是 1-300 字非空字符串;`missing_param_prompt_id` 必须为 null;
-  `document_id` 必填且必须属于同一 `PaperSpec.documents`。
-- `source = user_supplied`: `paper_section_id` / `equation_id` / `figure_id` 全部为 null;
-  `excerpt` 必须为 null;`missing_param_prompt_id` 必填,并关联到
-  `MissingParameterPrompt.prompt_id`;`document_id` 必须为 null。
+  `document_id` 必填且必须属于同一 `PaperSpec.documents`;`user_action` /
+  `parameter_correction_id` / `correction_param_key` 必须为 null。
+- `source = user_supplied,user_action = fill_missing`: `paper_section_id` / `equation_id` /
+  `figure_id` 全部为 null;`excerpt` 必须为 null;`missing_param_prompt_id` 必填,并关联到
+  `MissingParameterPrompt.prompt_id`;`document_id` / `parameter_correction_id` /
+  `correction_param_key` 必须为 null。旧持久化 blob 若缺 `user_action`,读回层归一化为
+  `fill_missing`。
+- `source = user_supplied,user_action = correct_extracted`: `paper_section_id` / `equation_id` /
+  `figure_id` 全部为 null;`excerpt` / `missing_param_prompt_id` / `document_id` 必须为 null;
+  `parameter_correction_id` 必填;`correction_param_key` 可为空。
 
 Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 `core/domain/paper_document_identity.py` 跨结构 helper,以及
