@@ -72,6 +72,7 @@ from features.paper import (
     UserSupplyService,
 )
 from features.paper.paper_ask_service import PaperAskService
+from features.paper.paper_parameter_correction_service import ParameterCorrectionService
 from features.paper.paper_plan_service import PaperPlanService
 from features.paper.paper_reparse_service import PaperReparseLockRegistry, PaperReparseService
 from features.paper.paper_tuning_service import TuningSuggestionService
@@ -366,6 +367,13 @@ def get_paper_user_supply_service(
 ) -> UserSupplyService:
     """装配 UserSupplyService。"""
     return UserSupplyService(cache=cache)
+
+
+def get_paper_parameter_correction_service(
+    store: Annotated[PaperBundleStore, Depends(get_paper_bundle_store)],
+) -> ParameterCorrectionService:
+    """装配 ParameterCorrectionService。"""
+    return ParameterCorrectionService(store=store)
 
 
 def get_paper_ask_service(

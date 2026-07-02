@@ -17,7 +17,8 @@
     "smoke:task520b2": "node scripts/task520b2-smoke.mjs",
     "smoke:task520d": "node scripts/task520d-smoke.mjs",
     "smoke:task521d": "node scripts/task521d-smoke.mjs",
-    "smoke:task522b": "node scripts/task522b-smoke.mjs"
+    "smoke:task522b": "node scripts/task522b-smoke.mjs",
+    "smoke:task522c2": "node scripts/task522c2-smoke.mjs"
   },
   "dependencies": {
     "react": "^19.2.6",

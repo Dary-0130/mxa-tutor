@@ -24,13 +24,18 @@ from core.domain.paper_ask import (
     PlanMappingParameterTarget,
     SectionTarget,
 )
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
+from core.domain.paper_parameter_correction import PaperParameterCorrection
 from core.domain.paper_plan import ModelBuildStep, PaperPlanRecord
 from core.domain.paper_tuning import ConfidenceValue
 from core.interfaces.llm_provider import LLMMessage, TextProvider
 from features.paper._prompt_loader import load_prompt_template
 from features.paper.paper_ask_schemas import PaperAskResponseModel
-from features.paper.paper_plan_helpers import resolved_prompt_ids
+from features.paper.paper_plan_helpers import (
+    UserEvidenceRef,
+    resolved_prompt_ids,
+    resolved_user_evidence_refs,
+)
 
 DEFAULT_ASK_TIMEOUT_SECONDS = 60.0
 DEFAULT_ASK_MAX_TOKENS = 1800
@@ -106,9 +111,19 @@ class PaperAskService:
         self._max_tokens = max_tokens
         self._source_table_limit = max(0, source_table_limit)
 
-    async def ask(self, record: PaperPlanRecord, request: PaperAskRequest) -> PaperAskResponse:
+    async def ask(
+        self,
+        record: PaperPlanRecord,
+        request: PaperAskRequest,
+        *,
+        corrections: list[PaperParameterCorrection] | None = None,
+    ) -> PaperAskResponse:
         """Return a validated answer or a 200-level fallback response."""
-        full_source_table = build_paper_ask_source_table(record)
+        full_source_table = (
+            build_paper_ask_source_table(record)
+            if corrections is None
+            else build_paper_ask_source_table(record, corrections=corrections)
+        )
         prompt_source_table = full_source_table[: self._source_table_limit]
         session_id = request.session_id or str(uuid.uuid4())
 
@@ -239,12 +254,22 @@ class PaperAskService:
         return PaperAskResponseModel.from_domain(response).to_domain()
 
 
-def build_paper_ask_source_table(record: PaperPlanRecord) -> list[SourceTableEntry]:
+def build_paper_ask_source_table(
+    record: PaperPlanRecord,
+    *,
+    corrections: list[PaperParameterCorrection] | None = None,
+) -> list[SourceTableEntry]:
     """Build the full backend-owned PaperAsk source table for a plan record."""
     candidates: list[_SourceCandidate] = []
     candidates.extend(_spec_candidates(record))
     candidates.extend(_plan_document_section_candidates(record))
-    candidates.extend(_user_supplied_parameter_candidates(record))
+    candidates.extend(
+        _user_supplied_parameter_candidates(
+            record,
+            None if corrections is None else resolved_user_evidence_refs(record, corrections),
+            corrections,
+        )
+    )
     candidates.extend(_remaining_missing_prompt_candidates(record))
 
     return [
@@ -340,10 +365,21 @@ def _plan_document_section_candidates(record: PaperPlanRecord) -> list[_SourceCa
     return candidates
 
 
-def _user_supplied_parameter_candidates(record: PaperPlanRecord) -> list[_SourceCandidate]:
+def _user_supplied_parameter_candidates(
+    record: PaperPlanRecord,
+    resolved_user_refs: set[UserEvidenceRef] | None,
+    corrections: list[PaperParameterCorrection] | None,
+) -> list[_SourceCandidate]:
     candidates: list[_SourceCandidate] = []
     for row_index, mapping in enumerate(record.plan.parameter_mapping):
         if mapping.source is not EvidenceSource.USER_SUPPLIED:
+            continue
+        if resolved_user_refs is not None and not _mapping_has_resolved_user_evidence(
+            record,
+            row_index,
+            resolved_user_refs,
+            corrections or [],
+        ):
             continue
         candidates.append(
             _SourceCandidate(
@@ -362,6 +398,45 @@ def _user_supplied_parameter_candidates(record: PaperPlanRecord) -> list[_Source
             )
         )
     return candidates
+
+
+def _mapping_has_resolved_user_evidence(
+    record: PaperPlanRecord,
+    row_index: int,
+    resolved_user_refs: set[UserEvidenceRef],
+    corrections: list[PaperParameterCorrection],
+) -> bool:
+    mapping = record.plan.parameter_mapping[row_index]
+    for binding in record.missing_bindings:
+        if (
+            binding.paper_param_name == mapping.paper_param_name
+            and binding.model_param_name == mapping.model_param_name
+            and UserEvidenceRef(kind=UserEvidenceAction.FILL_MISSING, key=binding.prompt_id)
+            in resolved_user_refs
+        ):
+            return True
+    corrections_by_id = {correction.correction_id: correction for correction in corrections}
+    for entry in record.plan.evidence:
+        correction = (
+            corrections_by_id.get(entry.parameter_correction_id)
+            if entry.parameter_correction_id is not None
+            else None
+        )
+        if (
+            entry.user_action is UserEvidenceAction.CORRECT_EXTRACTED
+            and entry.parameter_correction_id is not None
+            and correction is not None
+            and correction.plan_target.plan_mapping_index == row_index
+            and correction.plan_target.paper_param_name == mapping.paper_param_name
+            and correction.plan_target.model_param_name == mapping.model_param_name
+            and UserEvidenceRef(
+                kind=UserEvidenceAction.CORRECT_EXTRACTED,
+                key=entry.parameter_correction_id,
+            )
+            in resolved_user_refs
+        ):
+            return True
+    return False
 
 
 def _remaining_missing_prompt_candidates(record: PaperPlanRecord) -> list[_SourceCandidate]:
@@ -581,7 +656,13 @@ def _source_entry_target_resolves(entry: SourceTableEntry, record: PaperPlanReco
             if equation.document_id is not None
         }
     if isinstance(target, PlanMappingParameterTarget):
-        return 0 <= target.row_index < len(record.plan.parameter_mapping)
+        if target.row_index < 0 or target.row_index >= len(record.plan.parameter_mapping):
+            return False
+        mapping = record.plan.parameter_mapping[target.row_index]
+        return (
+            mapping.paper_param_name == target.paper_param_name
+            and mapping.model_param_name == target.model_param_name
+        )
     if isinstance(target, MissingPromptParameterTarget):
         remaining_ids = {
             prompt.prompt_id

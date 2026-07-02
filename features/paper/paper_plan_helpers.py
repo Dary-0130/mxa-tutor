@@ -149,24 +149,29 @@ class EvidenceTagger:
         self,
         evidence: list[PaperEvidenceEntry],
         record: PaperPlanRecord,
+        *,
+        allowed_user_evidence_refs: set[UserEvidenceRef] | None = None,
     ) -> None:
         """Validate evidence against PaperSpec and resolved user-supplied provenance."""
 
         self.validate_for_spec(evidence, record.spec)
-        resolved_ids = resolved_prompt_ids(record)
-        plan_user_evidence_ids = {
-            entry.missing_param_prompt_id
-            for entry in record.plan.evidence
-            if entry.source is EvidenceSource.USER_SUPPLIED
-            and entry.user_action is UserEvidenceAction.FILL_MISSING
-            and entry.missing_param_prompt_id is not None
-        }
+        resolved_refs = (
+            resolved_user_evidence_refs(record, [])
+            if allowed_user_evidence_refs is None
+            else allowed_user_evidence_refs
+        )
+        plan_user_evidence_refs = _plan_user_evidence_refs(record.plan.evidence)
         for entry in evidence:
             if entry.source is not EvidenceSource.USER_SUPPLIED:
                 continue
-            if entry.missing_param_prompt_id not in resolved_ids:
+            ref = _user_evidence_ref(entry)
+            if ref is None:
+                raise PaperPlanGenerationError("user_evidence_unresolved")
+            if ref not in resolved_refs:
+                if ref.kind is UserEvidenceAction.CORRECT_EXTRACTED:
+                    raise PaperPlanGenerationError("user_evidence_unresolved_correction")
                 raise PaperPlanGenerationError("user_evidence_unresolved_prompt")
-            if entry.missing_param_prompt_id not in plan_user_evidence_ids:
+            if ref not in plan_user_evidence_refs:
                 raise PaperPlanGenerationError("user_evidence_missing_from_plan")
 
     def tag_user_supplied(
@@ -876,11 +881,43 @@ def _correction_target_matches_plan(
     )
 
 
+def _plan_user_evidence_refs(evidence: list[PaperEvidenceEntry]) -> set[UserEvidenceRef]:
+    refs: set[UserEvidenceRef] = set()
+    for entry in evidence:
+        ref = _user_evidence_ref(entry)
+        if ref is not None:
+            refs.add(ref)
+    return refs
+
+
+def _user_evidence_ref(entry: PaperEvidenceEntry) -> UserEvidenceRef | None:
+    if entry.source is not EvidenceSource.USER_SUPPLIED:
+        return None
+    if (
+        entry.user_action is UserEvidenceAction.FILL_MISSING
+        and entry.missing_param_prompt_id is not None
+    ):
+        return UserEvidenceRef(
+            kind=UserEvidenceAction.FILL_MISSING,
+            key=entry.missing_param_prompt_id,
+        )
+    if (
+        entry.user_action is UserEvidenceAction.CORRECT_EXTRACTED
+        and entry.parameter_correction_id is not None
+    ):
+        return UserEvidenceRef(
+            kind=UserEvidenceAction.CORRECT_EXTRACTED,
+            key=entry.parameter_correction_id,
+        )
+    return None
+
+
 def validate_build_step_evidence_for_spec(
     evidence: list[PaperEvidenceEntry],
     spec: PaperSpec,
     *,
     allowed_user_prompt_ids: frozenset[str],
+    allowed_user_evidence_refs: set[UserEvidenceRef] | None = None,
 ) -> None:
     """Validate build-step evidence with explicit generate-time user evidence allowlist."""
 
@@ -890,10 +927,16 @@ def validate_build_step_evidence_for_spec(
         reason = str(exc) or "evidence_invalid"
         raise BuildStepsEvidenceError(reason) from None
 
+    allowed_refs = allowed_user_evidence_refs or set()
     for entry in evidence:
         if entry.source is not EvidenceSource.USER_SUPPLIED:
             continue
-        if entry.missing_param_prompt_id not in allowed_user_prompt_ids:
+        if entry.user_action is UserEvidenceAction.FILL_MISSING:
+            if entry.missing_param_prompt_id not in allowed_user_prompt_ids:
+                raise BuildStepsEvidenceError("user_supplied_evidence_not_allowed")
+            continue
+        ref = _user_evidence_ref(entry)
+        if ref is None or ref not in allowed_refs:
             raise BuildStepsEvidenceError("user_supplied_evidence_not_allowed")
 
 

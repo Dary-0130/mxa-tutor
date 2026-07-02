@@ -21,6 +21,7 @@ from api.main import create_app
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
 from core.domain.paper_parameter_conflicts import with_parameter_conflicts
+from core.domain.paper_parameter_correction import PaperParameterCorrection
 from core.domain.paper_plan import (
     BlockRecommendation,
     ModelGenerationPlan,
@@ -42,7 +43,14 @@ class RecordingTuningService:
     def __init__(self) -> None:
         self.records: list[PaperPlanRecord] = []
 
-    async def suggest(self, record: PaperPlanRecord, user_scenario: str) -> TuningSuggestion:
+    async def suggest(
+        self,
+        record: PaperPlanRecord,
+        user_scenario: str,
+        *,
+        corrections: list[PaperParameterCorrection] | None = None,
+    ) -> TuningSuggestion:
+        _ = corrections
         self.records.append(record)
         return TuningSuggestion(
             suggestion_id="TUNE-paper-1-test",

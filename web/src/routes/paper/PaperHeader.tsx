@@ -8,7 +8,7 @@ const REPARSE_CONFIRM_COPY = {
   prefix: "重新解析会用同一份论文文字重新抽取并",
   currentResult: "替换当前结果",
   separator: ";",
-  resetScope: "已补充的缺失参数、当前 plan 和调参结果会被替换",
+  resetScope: "已补充的缺失参数、当前 plan 和调参结果会被替换,已纠错的参数值也会被替换",
   suffix:
     "。它只重跑已读入的论文文字;若缺的信息在图片 / 表格里,或某篇上传时就失败,重新解析补不回,需要重新上传或等解析升级。",
 };
@@ -36,7 +36,11 @@ function shouldShowDocumentSources(
   return originalDocumentCount > 1 || spec.documents.length > 1;
 }
 
-function PaperPartialSuccessNotice({ documentStatuses }: { documentStatuses?: UploadDocumentStatus[] }) {
+function PaperPartialSuccessNotice({
+  documentStatuses,
+}: {
+  documentStatuses?: UploadDocumentStatus[];
+}) {
   const failedStatuses = documentStatuses?.filter((status) => status.status === "failed") ?? [];
   if (!documentStatuses || failedStatuses.length === 0) {
     return null;
@@ -174,7 +178,11 @@ export function PaperHeader({
               {REPARSE_CONFIRM_COPY.suffix}
             </p>
             <div>
-              <button type="button" className="paper-secondary-button" onClick={() => setConfirmOpen(false)}>
+              <button
+                type="button"
+                className="paper-secondary-button"
+                onClick={() => setConfirmOpen(false)}
+              >
                 取消
               </button>
               <button

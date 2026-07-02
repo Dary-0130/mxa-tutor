@@ -590,6 +590,204 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                 await self._rollback_preserving_error(conn, "paper_cleanup")
                 raise
 
+    async def apply_parameter_correction_atomically(
+        self,
+        paper_id: str,
+        updated_record: PaperPlanRecord,
+        correction: PaperParameterCorrection,
+        *,
+        is_recorrect: bool,
+    ) -> None:
+        if updated_record.paper_id != paper_id or correction.paper_id != paper_id:
+            raise StoreError("paper_parameter_correction_paper_mismatch")
+        validate_paper_spec_document_identity(updated_record.spec)
+        plan_json = self._dump(
+            self._PLAN_ADAPTER,
+            updated_record.plan,
+            "paper_plan_serialize_failed",
+        )
+        prompts_json = self._dump(
+            self._PROMPTS_ADAPTER,
+            updated_record.missing_prompts,
+            "missing_prompts_serialize_failed",
+        )
+        bindings_json = self._dump(
+            self._BINDINGS_ADAPTER,
+            updated_record.missing_bindings,
+            "missing_bindings_serialize_failed",
+        )
+        plan_target_json = self._dump(
+            self._CORRECTION_TARGET_ADAPTER,
+            correction.plan_target,
+            "paper_parameter_correction_serialize_failed",
+        )
+        now = datetime.utcnow().isoformat()
+
+        async with self._connect() as conn:
+            try:
+                await conn.execute("BEGIN")
+                cur = await conn.execute(
+                    "SELECT 1 FROM paper_spec_cache WHERE paper_id=?",
+                    (paper_id,),
+                )
+                if await cur.fetchone() is None:
+                    raise StoreError("paper_spec_missing_for_plan")
+                await conn.execute(
+                    """
+                    INSERT INTO paper_plan_cache(
+                        paper_id, plan_json, missing_prompts_json, missing_bindings_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(paper_id) DO UPDATE SET
+                        plan_json=excluded.plan_json,
+                        missing_prompts_json=excluded.missing_prompts_json,
+                        missing_bindings_json=excluded.missing_bindings_json,
+                        updated_at=excluded.updated_at
+                    """,
+                    (paper_id, plan_json, prompts_json, bindings_json, now, now),
+                )
+                if is_recorrect:
+                    update_cur = await conn.execute(
+                        """
+                        UPDATE paper_parameter_correction
+                        SET corrected_value=?,
+                            corrected_unit=?,
+                            updated_at=?
+                        WHERE paper_id=? AND correction_id=?
+                        """,
+                        (
+                            correction.corrected_value,
+                            correction.corrected_unit,
+                            correction.updated_at,
+                            paper_id,
+                            correction.correction_id,
+                        ),
+                    )
+                    if update_cur.rowcount != 1:
+                        raise StoreError("paper_parameter_correction_missing")
+                else:
+                    await conn.execute(
+                        """
+                        INSERT INTO paper_parameter_correction(
+                            correction_id,
+                            paper_id,
+                            param_key,
+                            plan_target_json,
+                            original_value,
+                            original_unit,
+                            original_source,
+                            original_document_id,
+                            corrected_value,
+                            corrected_unit,
+                            created_at,
+                            updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            correction.correction_id,
+                            correction.paper_id,
+                            correction.param_key,
+                            plan_target_json,
+                            correction.original_value,
+                            correction.original_unit,
+                            correction.original_source.value,
+                            correction.original_document_id,
+                            correction.corrected_value,
+                            correction.corrected_unit,
+                            correction.created_at,
+                            correction.updated_at,
+                        ),
+                    )
+                await conn.commit()
+            except StoreError:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, paper_id)
+                logger.error(
+                    "SqlitePaperBundleStore.apply_parameter_correction_atomically failed: "
+                    "exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+
+    async def undo_parameter_correction_atomically(
+        self,
+        paper_id: str,
+        updated_record: PaperPlanRecord,
+        correction_id: str,
+    ) -> None:
+        if updated_record.paper_id != paper_id:
+            raise StoreError("paper_parameter_correction_paper_mismatch")
+        validate_paper_spec_document_identity(updated_record.spec)
+        plan_json = self._dump(
+            self._PLAN_ADAPTER,
+            updated_record.plan,
+            "paper_plan_serialize_failed",
+        )
+        prompts_json = self._dump(
+            self._PROMPTS_ADAPTER,
+            updated_record.missing_prompts,
+            "missing_prompts_serialize_failed",
+        )
+        bindings_json = self._dump(
+            self._BINDINGS_ADAPTER,
+            updated_record.missing_bindings,
+            "missing_bindings_serialize_failed",
+        )
+        now = datetime.utcnow().isoformat()
+
+        async with self._connect() as conn:
+            try:
+                await conn.execute("BEGIN")
+                cur = await conn.execute(
+                    "SELECT 1 FROM paper_spec_cache WHERE paper_id=?",
+                    (paper_id,),
+                )
+                if await cur.fetchone() is None:
+                    raise StoreError("paper_spec_missing_for_plan")
+                await conn.execute(
+                    """
+                    INSERT INTO paper_plan_cache(
+                        paper_id, plan_json, missing_prompts_json, missing_bindings_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(paper_id) DO UPDATE SET
+                        plan_json=excluded.plan_json,
+                        missing_prompts_json=excluded.missing_prompts_json,
+                        missing_bindings_json=excluded.missing_bindings_json,
+                        updated_at=excluded.updated_at
+                    """,
+                    (paper_id, plan_json, prompts_json, bindings_json, now, now),
+                )
+                delete_cur = await conn.execute(
+                    """
+                    DELETE FROM paper_parameter_correction
+                    WHERE paper_id=? AND correction_id=?
+                    """,
+                    (paper_id, correction_id),
+                )
+                if delete_cur.rowcount != 1:
+                    raise StoreError("paper_parameter_correction_missing")
+                await conn.commit()
+            except StoreError:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, paper_id)
+                logger.error(
+                    "SqlitePaperBundleStore.undo_parameter_correction_atomically failed: "
+                    "exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+
     async def insert_parameter_correction(self, correction: PaperParameterCorrection) -> None:
         plan_target_json = self._dump(
             self._CORRECTION_TARGET_ADAPTER,

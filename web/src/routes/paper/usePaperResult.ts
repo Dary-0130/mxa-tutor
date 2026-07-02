@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { ApiException } from "../../lib/api";
-import { getPaperPlan, getPaperSpec, postPaperReparse } from "../../lib/paperApi";
+import {
+  getParameterCorrections,
+  getPaperPlan,
+  getPaperSpec,
+  postPaperReparse,
+} from "../../lib/paperApi";
 import type {
   MissingParameterPrompt,
   ModelGenerationPlan,
+  ParameterCorrection,
   PaperPlanResponse,
   PaperSpec,
   UploadDocumentResponse,
@@ -17,6 +23,7 @@ export interface PaperResultData {
   plan: ModelGenerationPlan;
   missingPrompts: MissingParameterPrompt[];
   remainingMissingPrompts: MissingParameterPrompt[];
+  parameterCorrections: ParameterCorrection[];
   documentStatuses?: UploadDocumentStatus[];
   version: number;
 }
@@ -25,6 +32,7 @@ export type PaperPlanUpdate = {
   plan: ModelGenerationPlan;
   missingPrompts?: MissingParameterPrompt[];
   remainingMissingPrompts?: MissingParameterPrompt[];
+  parameterCorrections?: ParameterCorrection[];
 };
 
 type LoadState = {
@@ -48,7 +56,9 @@ function isUploadDocumentResponse(value: unknown): value is UploadDocumentRespon
     return false;
   }
   const candidate = value as Partial<UploadDocumentResponse>;
-  return Boolean(candidate.paper_id && candidate.spec && candidate.plan && candidate.missing_prompts);
+  return Boolean(
+    candidate.paper_id && candidate.spec && candidate.plan && candidate.missing_prompts,
+  );
 }
 
 function applyPlanResponse(data: PaperResultData, response: PaperPlanResponse): PaperResultData {
@@ -61,9 +71,10 @@ function applyPlanResponse(data: PaperResultData, response: PaperPlanResponse): 
 }
 
 async function fetchPaperResult(paperId: string): Promise<PaperResultData> {
-  const [specResponse, planResponse] = await Promise.all([
+  const [specResponse, planResponse, correctionsResponse] = await Promise.all([
     getPaperSpec(paperId),
     getPaperPlan(paperId),
+    getParameterCorrections(paperId),
   ]);
   return {
     paperId,
@@ -71,6 +82,7 @@ async function fetchPaperResult(paperId: string): Promise<PaperResultData> {
     plan: planResponse.plan,
     missingPrompts: planResponse.missing_prompts,
     remainingMissingPrompts: planResponse.remaining_missing_prompts,
+    parameterCorrections: correctionsResponse.corrections,
     version: 0,
   };
 }
@@ -87,6 +99,7 @@ export function usePaperResult(paperId: string | undefined) {
       plan: location.state.plan,
       missingPrompts: location.state.missing_prompts,
       remainingMissingPrompts: location.state.missing_prompts,
+      parameterCorrections: [],
       documentStatuses: location.state.document_statuses,
       version: 0,
     };
@@ -188,24 +201,27 @@ export function usePaperResult(paperId: string | undefined) {
     }
     queueMicrotask(() => {
       if (!cancelled) {
-          setState({
-            data: routeData,
-            loading: false,
-            error: null,
-            reparsing: false,
-            reparseError: null,
-            reparseSourceUnavailable: false,
-          });
-        }
-      });
-    getPaperPlan(paperId)
-      .then((response) => {
+        setState({
+          data: routeData,
+          loading: false,
+          error: null,
+          reparsing: false,
+          reparseError: null,
+          reparseSourceUnavailable: false,
+        });
+      }
+    });
+    Promise.all([getPaperPlan(paperId), getParameterCorrections(paperId)])
+      .then(([response, corrections]) => {
         if (!cancelled) {
           setState((current) =>
             current.data
               ? {
                   ...current,
-                  data: applyPlanResponse(current.data, response),
+                  data: {
+                    ...applyPlanResponse(current.data, response),
+                    parameterCorrections: corrections.corrections,
+                  },
                   loading: false,
                   error: null,
                 }
@@ -231,6 +247,7 @@ export function usePaperResult(paperId: string | undefined) {
           missingPrompts: update.missingPrompts ?? current.data.missingPrompts,
           remainingMissingPrompts:
             update.remainingMissingPrompts ?? current.data.remainingMissingPrompts,
+          parameterCorrections: update.parameterCorrections ?? current.data.parameterCorrections,
         },
         loading: false,
         error: null,
@@ -262,6 +279,7 @@ export function usePaperResult(paperId: string | undefined) {
             plan: response.plan,
             missingPrompts: response.missing_prompts,
             remainingMissingPrompts: response.remaining_missing_prompts,
+            parameterCorrections: [],
             documentStatuses: undefined,
             version: previousVersion + 1,
           },

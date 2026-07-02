@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import aiosqlite
@@ -318,6 +319,34 @@ async def test_parameter_correction_crud_round_trips_and_preserves_original(
     assert await store.list_parameter_corrections("paper-1") == []
 
 
+async def test_apply_parameter_correction_atomically_rolls_back_second_write_fault(
+    initialized_db_path: str,
+) -> None:
+    old_record = _record()
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.save_ready_bundle(old_record)
+    updated_record = _record_with_mapping_value(old_record, "3.8")
+    faulting_store = SqlitePaperBundleStore(
+        initialized_db_path,
+        connection_factory=_faulting_connection_factory(
+            fail_on_plan_insert=False,
+            fail_on_correction_write=True,
+        ),
+    )
+
+    with pytest.raises(StoreError, match="sqlite_operation_failed"):
+        await faulting_store.apply_parameter_correction_atomically(
+            old_record.paper_id,
+            updated_record,
+            _correction(old_record.paper_id),
+            is_recorrect=False,
+        )
+
+    fresh_store = SqlitePaperBundleStore(initialized_db_path)
+    assert await fresh_store.get_plan_record(old_record.paper_id) == old_record
+    assert await fresh_store.list_parameter_corrections(old_record.paper_id) == []
+
+
 async def test_legacy_user_supplied_evidence_readback_normalizes_user_action(
     initialized_db_path: str,
 ) -> None:
@@ -496,7 +525,9 @@ async def test_new_bad_plan_json_without_nested_document_id_fails(
 def _faulting_connection_factory(
     *,
     rollback_fails: bool = False,
+    fail_on_plan_insert: bool = True,
     fail_on_source_update: bool = False,
+    fail_on_correction_write: bool = False,
 ):
     @asynccontextmanager
     async def factory(db_path: str) -> AsyncIterator[object]:
@@ -504,7 +535,9 @@ def _faulting_connection_factory(
             yield _FaultingConnection(
                 conn,
                 rollback_fails=rollback_fails,
+                fail_on_plan_insert=fail_on_plan_insert,
                 fail_on_source_update=fail_on_source_update,
+                fail_on_correction_write=fail_on_correction_write,
             )
 
     return factory
@@ -516,20 +549,30 @@ class _FaultingConnection:
         conn: aiosqlite.Connection,
         *,
         rollback_fails: bool,
+        fail_on_plan_insert: bool,
         fail_on_source_update: bool,
+        fail_on_correction_write: bool,
     ) -> None:
         self._conn = conn
         self._rollback_fails = rollback_fails
+        self._fail_on_plan_insert = fail_on_plan_insert
         self._fail_on_source_update = fail_on_source_update
+        self._fail_on_correction_write = fail_on_correction_write
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._conn, name)
 
     async def execute(self, sql: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-        if "INSERT INTO paper_plan_cache" in sql:
+        if self._fail_on_plan_insert and "INSERT INTO paper_plan_cache" in sql:
             raise aiosqlite.OperationalError("injected paper_plan_cache failure")
         if self._fail_on_source_update and "UPDATE paper_reparse_source_cache" in sql:
             raise aiosqlite.OperationalError("injected source failure")
+        if self._fail_on_correction_write and (
+            "INSERT INTO paper_parameter_correction" in sql
+            or "UPDATE paper_parameter_correction" in sql
+            or "DELETE FROM paper_parameter_correction" in sql
+        ):
+            raise aiosqlite.OperationalError("injected correction failure")
         return await self._conn.execute(sql, *args, **kwargs)
 
     async def rollback(self) -> None:
@@ -881,6 +924,22 @@ def _record(*, title: str = "Short-circuit report") -> PaperPlanRecord:
             )
         ],
     )
+
+
+def _record_with_mapping_value(record: PaperPlanRecord, value: str) -> PaperPlanRecord:
+    plan = record.plan
+    mapping = plan.parameter_mapping[0]
+    updated_plan = replace(
+        plan,
+        parameter_mapping=[
+            replace(
+                mapping,
+                value=value,
+                source=EvidenceSource.USER_SUPPLIED,
+            )
+        ],
+    )
+    return replace(record, plan=updated_plan)
 
 
 def _source(paper_id: str, *, text: str = "paper text") -> PaperReparseSource:

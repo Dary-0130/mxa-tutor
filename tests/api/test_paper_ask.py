@@ -55,6 +55,26 @@ class FakeBundleStore(PaperBundleStore):
         _ = paper_id
         self.record = None
 
+    async def apply_parameter_correction_atomically(
+        self,
+        paper_id: str,
+        updated_record: PaperPlanRecord,
+        correction: PaperParameterCorrection,
+        *,
+        is_recorrect: bool,
+    ) -> None:
+        _ = paper_id, correction, is_recorrect
+        self.record = updated_record
+
+    async def undo_parameter_correction_atomically(
+        self,
+        paper_id: str,
+        updated_record: PaperPlanRecord,
+        correction_id: str,
+    ) -> None:
+        _ = paper_id, correction_id
+        self.record = updated_record
+
     async def insert_parameter_correction(self, correction: PaperParameterCorrection) -> None:
         _ = correction
 
@@ -92,7 +112,14 @@ class FakeAskService:
         self.response = response
         self.calls: list[tuple[PaperPlanRecord, PaperAskRequest]] = []
 
-    async def ask(self, record: PaperPlanRecord, request: PaperAskRequest) -> PaperAskResponse:
+    async def ask(
+        self,
+        record: PaperPlanRecord,
+        request: PaperAskRequest,
+        *,
+        corrections: list[PaperParameterCorrection] | None = None,
+    ) -> PaperAskResponse:
+        _ = corrections
         self.calls.append((record, request))
         return self.response
 

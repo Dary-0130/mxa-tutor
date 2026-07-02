@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from api.dependencies import get_paper_plan_cache, get_settings
+from api.dependencies import get_paper_plan_cache, get_paper_reparse_lock_registry, get_settings
 from api.main import create_app
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
@@ -23,6 +23,7 @@ from core.domain.paper_spec import (
 )
 from features.paper.paper_plan_cache import InMemoryPaperPlanCache, PaperPlanRecord
 from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL, MissingBindingModel
+from features.paper.paper_reparse_service import PaperReparseLockRegistry
 
 
 def test_post_user_supply_happy_path_returns_200_with_updated_plan() -> None:
@@ -70,6 +71,27 @@ def test_post_user_supply_already_filled_returns_400() -> None:
 
     assert response.status_code == 400
     assert response.json()["error"] == "paper_user_supply_invalid"
+
+
+def test_post_user_supply_lock_conflict_returns_409() -> None:
+    cache = InMemoryPaperPlanCache()
+    asyncio.run(cache.set("paper-1", _record()))
+    registry = PaperReparseLockRegistry()
+    token = asyncio.run(registry.acquire("paper-1"))
+    app = _create_app(cache)
+    app.dependency_overrides[get_paper_reparse_lock_registry] = lambda: registry
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/papers/paper-1/user-supply",
+                json=_payload(),
+            )
+    finally:
+        asyncio.run(token.__aexit__(None, None, None))
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "paper_user_supply_in_progress"
 
 
 def test_response_field_name_is_updated_plan_not_plan() -> None:

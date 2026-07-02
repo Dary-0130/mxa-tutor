@@ -110,6 +110,19 @@ class PaperUserSupplyError(MxaError):
     """用户补充 paper plan 参数失败。"""
 
 
+class PaperUserSupplyInProgressError(PaperUserSupplyError):
+    """A paper plan mutation is already running for the same paper."""
+
+
+class PaperParameterCorrectionError(MxaError):
+    """用户纠错 paper plan 参数失败。"""
+
+    def __init__(self, error_code: str, status_code: int) -> None:
+        self.error_code = error_code
+        self.status_code = status_code
+        super().__init__(error_code)
+
+
 class PaperReparseSourceUnavailableError(MxaError):
     """Paper reparse source package is missing or expired."""
 

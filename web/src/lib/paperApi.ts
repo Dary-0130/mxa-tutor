@@ -2,6 +2,9 @@ import { apiGet, apiPost, apiUploadFormTask, type UploadTask } from "./api";
 import type {
   PaperAskRequest,
   PaperAskResponse,
+  ParameterCorrectionRequest,
+  ParameterCorrectionResponse,
+  ParameterCorrectionsResponse,
   PaperPlanResponse,
   PaperReparseResponse,
   PaperSpecResponse,
@@ -50,10 +53,7 @@ export function postTuningSuggest(
   return apiPost<TuningSuggestResponse>(paperPath(paperId, "/tuning-suggest"), request);
 }
 
-export function postPaperAsk(
-  paperId: string,
-  request: PaperAskRequest,
-): Promise<PaperAskResponse> {
+export function postPaperAsk(paperId: string, request: PaperAskRequest): Promise<PaperAskResponse> {
   return apiPost<PaperAskResponse>(paperPath(paperId, "/ask"), request);
 }
 
@@ -62,4 +62,24 @@ export function postUserSupply(
   request: UserSuppliedResponseBatch,
 ): Promise<UpdatedPlanResponse> {
   return apiPost<UpdatedPlanResponse>(paperPath(paperId, "/user-supply"), request);
+}
+
+export function getParameterCorrections(paperId: string): Promise<ParameterCorrectionsResponse> {
+  return apiGet<ParameterCorrectionsResponse>(paperPath(paperId, "/parameter-corrections"));
+}
+
+export function postParameterCorrection(
+  paperId: string,
+  request: ParameterCorrectionRequest,
+): Promise<ParameterCorrectionResponse> {
+  return apiPost<ParameterCorrectionResponse>(paperPath(paperId, "/parameter-correction"), request);
+}
+
+export function postUndoParameterCorrection(
+  paperId: string,
+  correctionId: string,
+): Promise<UpdatedPlanResponse> {
+  return apiPost<UpdatedPlanResponse>(
+    paperPath(paperId, `/parameter-correction/${encodeURIComponent(correctionId)}/undo`),
+  );
 }

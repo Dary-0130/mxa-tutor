@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_parameter_conflicts import (
     conflict_prompt_summary,
     parameter_entry_hits_conflict,
     without_conflicted_parameter_entries,
 )
+from core.domain.paper_parameter_correction import PaperParameterCorrection
 from core.domain.paper_plan import BlockRecommendation, PaperPlanRecord, ParameterMapping
 from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterConflict, ParameterEntry
 from core.interfaces.document_parser import FigurePlaceholder, ParsedDocument
@@ -17,8 +18,10 @@ from core.interfaces.llm_provider import LLMMessage
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     PlanEvidenceSourceRef,
+    UserEvidenceRef,
     build_plan_evidence_source_refs,
     resolved_prompt_ids,
+    resolved_user_evidence_refs,
 )
 from features.paper.paper_schemas import (
     BlockRecommendationModel,
@@ -248,10 +251,12 @@ def build_messages_for_mscript_draft(
 def build_messages_for_tuning_suggest(
     record: PaperPlanRecord,
     user_scenario: str,
+    corrections: list[PaperParameterCorrection] | None = None,
 ) -> list[LLMMessage]:
     """Build TuningSuggestion messages with server-side allowlists."""
 
     resolved_ids = resolved_prompt_ids(record)
+    resolved_user_refs = resolved_user_evidence_refs(record, corrections or [])
     allowed_document_evidence = _dedupe_evidence(
         [
             entry
@@ -268,8 +273,7 @@ def build_messages_for_tuning_suggest(
         entry
         for entry in record.plan.evidence
         if entry.source is EvidenceSource.USER_SUPPLIED
-        and entry.user_action is not None
-        and entry.missing_param_prompt_id in resolved_ids
+        and _user_evidence_entry_is_resolved(entry, resolved_user_refs)
     ]
 
     template = load_prompt_template("paper_tuning_suggest.yaml")
@@ -306,6 +310,35 @@ def build_messages_for_tuning_suggest(
         },
     )
     return _role_messages(template.system, user)
+
+
+def _user_evidence_entry_is_resolved(
+    entry: PaperEvidenceEntry,
+    resolved_user_refs: set[UserEvidenceRef],
+) -> bool:
+    if (
+        entry.user_action is UserEvidenceAction.FILL_MISSING
+        and entry.missing_param_prompt_id is not None
+    ):
+        return (
+            UserEvidenceRef(
+                kind=UserEvidenceAction.FILL_MISSING,
+                key=entry.missing_param_prompt_id,
+            )
+            in resolved_user_refs
+        )
+    if (
+        entry.user_action is UserEvidenceAction.CORRECT_EXTRACTED
+        and entry.parameter_correction_id is not None
+    ):
+        return (
+            UserEvidenceRef(
+                kind=UserEvidenceAction.CORRECT_EXTRACTED,
+                key=entry.parameter_correction_id,
+            )
+            in resolved_user_refs
+        )
+    return False
 
 
 def _role_messages(system: str, user: str) -> list[LLMMessage]:

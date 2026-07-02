@@ -33,6 +33,28 @@ class PaperBundleStore(ABC):
         ...
 
     @abstractmethod
+    async def apply_parameter_correction_atomically(
+        self,
+        paper_id: str,
+        updated_record: PaperPlanRecord,
+        correction: PaperParameterCorrection,
+        *,
+        is_recorrect: bool,
+    ) -> None:
+        """Atomically store a corrected plan and insert or update its correction row."""
+        ...
+
+    @abstractmethod
+    async def undo_parameter_correction_atomically(
+        self,
+        paper_id: str,
+        updated_record: PaperPlanRecord,
+        correction_id: str,
+    ) -> None:
+        """Atomically store an undo plan and delete its correction row."""
+        ...
+
+    @abstractmethod
     async def insert_parameter_correction(self, correction: PaperParameterCorrection) -> None:
         """Persist a parameter correction overlay row."""
         ...
