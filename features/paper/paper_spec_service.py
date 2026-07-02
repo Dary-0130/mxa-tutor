@@ -76,8 +76,27 @@ class PaperSpecService:
         document_id: str = DEFAULT_DOCUMENT_ID,
     ) -> PaperSpec:
         """Extract a PaperSpec without reading or writing the cache."""
+        parsed = await self.parse_uncached(file_path)
+        return await self.extract_parsed_uncached(
+            parsed,
+            paper_id,
+            display_filename=sanitize_paper_display_filename(display_filename or file_path.name),
+            document_id=document_id,
+        )
+
+    async def parse_uncached(self, file_path: Path) -> ParsedDocument:
+        """Parse a document file without reading or writing the cache."""
         parser = await asyncio.to_thread(self._document_parser_router.route, file_path)
-        parsed = await asyncio.to_thread(run_in_sandbox, parser, file_path)
+        return await asyncio.to_thread(run_in_sandbox, parser, file_path)
+
+    async def extract_parsed_uncached(
+        self,
+        parsed: ParsedDocument,
+        paper_id: str,
+        display_filename: str | None = None,
+        document_id: str = DEFAULT_DOCUMENT_ID,
+    ) -> PaperSpec:
+        """Extract a PaperSpec from an existing parser output package."""
         if len(parsed.raw_text) > self._max_raw_text_chars:
             raise DocumentParseError("document_too_long_for_v0_1") from None
 
@@ -94,7 +113,7 @@ class PaperSpecService:
         return self._parse_and_validate(
             response,
             parsed,
-            display_filename=sanitize_paper_display_filename(display_filename or file_path.name),
+            display_filename=display_filename,
             document_id=document_id,
         )
 

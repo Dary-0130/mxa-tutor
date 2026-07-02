@@ -46,6 +46,7 @@ from api.routes.matlab_bridge_auth import router as matlab_bridge_auth_router
 from api.routes.overview import router as overview_router
 from api.routes.paper_ask import router as paper_ask_router
 from api.routes.paper_query import router as paper_query_router
+from api.routes.paper_reparse import router as paper_reparse_router
 from api.routes.paper_tuning import router as paper_tuning_router
 from api.routes.paper_upload import router as paper_upload_router
 from api.routes.paper_user_supply import router as paper_user_supply_router
@@ -68,6 +69,7 @@ from features.ingest.cleanup_worker import CleanupWorker
 from features.matlab_bridge.run_state_cleanup_worker import RunStateCleanupWorker
 from features.overview import InMemoryOverviewCache
 from features.overview.project_graph_builder import ProjectGraphBuilder
+from features.paper.paper_reparse_service import PaperReparseLockRegistry
 
 
 def _validate_matlab_bridge_settings(settings: AppSettings) -> None:
@@ -246,6 +248,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.paper_bundle_store = paper_bundle_store
         app.state.paper_spec_cache = SqlitePaperSpecCacheView(paper_bundle_store)
         app.state.paper_plan_cache = SqlitePaperPlanCacheView(paper_bundle_store)
+        app.state.paper_reparse_lock_registry = PaperReparseLockRegistry()
         try:
             embedder: EmbeddingProvider = await asyncio.to_thread(_build_embedder, settings)
         except Exception as exc:
@@ -302,6 +305,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             store=store,
             upload_dir=upload_dir,
             ttl_hours=settings.upload_ttl_hours,
+            paper_store=paper_bundle_store,
         )
         cleanup_task = asyncio.create_task(worker.run_forever())
         run_state_worker = RunStateCleanupWorker(bridge_run_state_store)
@@ -349,6 +353,7 @@ def create_app() -> FastAPI:
     app.include_router(upload_router)
     app.include_router(paper_upload_router)
     app.include_router(paper_query_router)
+    app.include_router(paper_reparse_router)
     app.include_router(paper_ask_router)
     app.include_router(paper_tuning_router)
     app.include_router(paper_user_supply_router)

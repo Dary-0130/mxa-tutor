@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 
 import aiosqlite
 import pytest
@@ -20,6 +21,11 @@ from core.domain.paper_plan import (
     PaperPlanRecord,
     ParameterMapping,
 )
+from core.domain.paper_reparse_source import (
+    PaperReparseDocumentSource,
+    PaperReparseLocatorIndex,
+    PaperReparseSource,
+)
 from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec, ParameterEntry
 
 
@@ -34,6 +40,32 @@ async def test_save_ready_bundle_round_trips_across_connections(
     fresh_store = SqlitePaperBundleStore(initialized_db_path)
     assert await fresh_store.get_spec("paper-1") == record.spec
     assert await fresh_store.get_plan_record("paper-1") == record
+
+
+async def test_save_ready_bundle_with_source_round_trips_minimal_source(
+    initialized_db_path: str,
+) -> None:
+    record = _record()
+    source = _source(record.paper_id)
+    store = SqlitePaperBundleStore(initialized_db_path)
+
+    await store.save_ready_bundle_with_source(record, source)
+
+    assert await store.get_plan_record(record.paper_id) == record
+    assert await store.get_reparse_source(record.paper_id) == source
+    async with open_connection(initialized_db_path) as conn:
+        row = await (
+            await conn.execute(
+                "SELECT source_json FROM paper_reparse_source_cache WHERE paper_id=?",
+                (record.paper_id,),
+            )
+        ).fetchone()
+    payload = json.loads(row["source_json"])
+    document = payload["documents"][0]
+    assert document["raw_text"] == "paper text"
+    assert document["filename"] == "paper.pdf"
+    assert "file_path" not in document
+    assert "bytes" not in document
 
 
 async def test_spec_only_state_is_legal(initialized_db_path: str) -> None:
@@ -110,6 +142,19 @@ async def test_delete_plan_leaves_spec_only_state(initialized_db_path: str) -> N
     assert await store.get_plan_record(record.paper_id) is None
 
 
+async def test_delete_bundle_deletes_reparse_source(initialized_db_path: str) -> None:
+    record = _record()
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.save_ready_bundle_with_source(record, _source(record.paper_id))
+
+    await store.delete_bundle(record.paper_id)
+
+    assert await store.get_spec(record.paper_id) is None
+    assert await store.get_plan_record(record.paper_id) is None
+    async with open_connection(initialized_db_path) as conn:
+        assert await _count(conn, "paper_reparse_source_cache") == 0
+
+
 async def test_invalidate_spec_deletes_both_rows(initialized_db_path: str) -> None:
     record = _record()
     store = SqlitePaperBundleStore(initialized_db_path)
@@ -119,6 +164,17 @@ async def test_invalidate_spec_deletes_both_rows(initialized_db_path: str) -> No
 
     assert await store.get_spec(record.paper_id) is None
     assert await store.get_plan_record(record.paper_id) is None
+
+
+async def test_invalidate_spec_deletes_reparse_source(initialized_db_path: str) -> None:
+    record = _record()
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.save_ready_bundle_with_source(record, _source(record.paper_id))
+
+    await store.invalidate_spec(record.paper_id)
+
+    async with open_connection(initialized_db_path) as conn:
+        assert await _count(conn, "paper_reparse_source_cache") == 0
 
 
 async def test_save_ready_bundle_sqlite_fault_rolls_back_both_tables(
@@ -138,6 +194,53 @@ async def test_save_ready_bundle_sqlite_fault_rolls_back_both_tables(
 
     assert spec_count == 0
     assert plan_count == 0
+
+
+async def test_replace_ready_bundle_source_fault_rolls_back_all_tables(
+    initialized_db_path: str,
+) -> None:
+    old_record = _record()
+    old_source = _source(old_record.paper_id, text="old text")
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.save_ready_bundle_with_source(old_record, old_source)
+    faulting_store = SqlitePaperBundleStore(
+        initialized_db_path,
+        connection_factory=_faulting_connection_factory(fail_on_source_update=True),
+    )
+    new_record = _record(title="New title")
+
+    with pytest.raises(StoreError, match="sqlite_operation_failed"):
+        await faulting_store.replace_ready_bundle_with_source(
+            new_record,
+            _source(old_record.paper_id, text="new text"),
+        )
+
+    fresh_store = SqlitePaperBundleStore(initialized_db_path)
+    assert await fresh_store.get_plan_record(old_record.paper_id) == old_record
+    assert await fresh_store.get_reparse_source(old_record.paper_id) == old_source
+
+
+async def test_delete_expired_paper_bundles_cascades_plan_spec_source(
+    initialized_db_path: str,
+) -> None:
+    store = SqlitePaperBundleStore(initialized_db_path)
+    record = _record()
+    await store.save_ready_bundle_with_source(record, _source(record.paper_id))
+    expired = datetime(2026, 7, 2, 12, 0, 0)
+    async with open_connection(initialized_db_path) as conn:
+        await conn.execute(
+            "UPDATE paper_spec_cache SET created_at=? WHERE paper_id=?",
+            ((expired - timedelta(hours=25)).isoformat(), record.paper_id),
+        )
+        await conn.commit()
+
+    deleted = await store.delete_expired_paper_bundles(now=expired)
+
+    assert deleted == 1
+    async with open_connection(initialized_db_path) as conn:
+        assert await _count(conn, "paper_plan_cache") == 0
+        assert await _count(conn, "paper_spec_cache") == 0
+        assert await _count(conn, "paper_reparse_source_cache") == 0
 
 
 async def test_rollback_failure_does_not_cover_primary_error(
@@ -299,19 +402,31 @@ async def test_new_bad_plan_json_without_nested_document_id_fails(
 def _faulting_connection_factory(
     *,
     rollback_fails: bool = False,
+    fail_on_source_update: bool = False,
 ):
     @asynccontextmanager
     async def factory(db_path: str) -> AsyncIterator[object]:
         async with open_connection(db_path) as conn:
-            yield _FaultingConnection(conn, rollback_fails=rollback_fails)
+            yield _FaultingConnection(
+                conn,
+                rollback_fails=rollback_fails,
+                fail_on_source_update=fail_on_source_update,
+            )
 
     return factory
 
 
 class _FaultingConnection:
-    def __init__(self, conn: aiosqlite.Connection, *, rollback_fails: bool) -> None:
+    def __init__(
+        self,
+        conn: aiosqlite.Connection,
+        *,
+        rollback_fails: bool,
+        fail_on_source_update: bool,
+    ) -> None:
         self._conn = conn
         self._rollback_fails = rollback_fails
+        self._fail_on_source_update = fail_on_source_update
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._conn, name)
@@ -319,6 +434,8 @@ class _FaultingConnection:
     async def execute(self, sql: str, *args, **kwargs):  # type: ignore[no-untyped-def]
         if "INSERT INTO paper_plan_cache" in sql:
             raise aiosqlite.OperationalError("injected paper_plan_cache failure")
+        if self._fail_on_source_update and "UPDATE paper_reparse_source_cache" in sql:
+            raise aiosqlite.OperationalError("injected source failure")
         return await self._conn.execute(sql, *args, **kwargs)
 
     async def rollback(self) -> None:
@@ -533,12 +650,12 @@ def _json(payload: object) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
-def _record() -> PaperPlanRecord:
+def _record(*, title: str = "Short-circuit report") -> PaperPlanRecord:
     evidence = _document_evidence()
     return PaperPlanRecord(
         paper_id="paper-1",
         spec=PaperSpec(
-            paper_title="Short-circuit report",
+            paper_title=title,
             paper_type="report",
             domain="motor_control",
             documents=[PaperDocument(document_id="DOC-001", filename="paper.pdf")],
@@ -607,6 +724,32 @@ def _record() -> PaperPlanRecord:
                 model_param_name="Synchronous Machine.H",
             )
         ],
+    )
+
+
+def _source(paper_id: str, *, text: str = "paper text") -> PaperReparseSource:
+    return PaperReparseSource(
+        paper_id=paper_id,
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+        documents=[
+            PaperReparseDocumentSource(
+                document_id="DOC-001",
+                upload_index=0,
+                filename="paper.pdf",
+                raw_text=text,
+                page_count=1,
+                figure_placeholders=[],
+                table_placeholders=[],
+                locator_index=PaperReparseLocatorIndex(
+                    section_ids=["S1"],
+                    equation_ids=["EQ-01"],
+                    figure_ids=[],
+                ),
+                file_hash="hash",
+                extracted_at=datetime(2026, 7, 2, 0, 0, 0),
+            )
+        ],
+        primary_index=None,
     )
 
 

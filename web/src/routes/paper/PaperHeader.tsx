@@ -1,6 +1,17 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { resolveDocumentStatusErrorMessage } from "../../lib/errorMessages";
+import type { ApiException } from "../../lib/api";
+import { resolveDocumentStatusErrorMessage, resolveErrorMessage } from "../../lib/errorMessages";
 import type { PaperDomain, PaperSpec, PaperType, UploadDocumentStatus } from "../../lib/paperTypes";
+
+const REPARSE_CONFIRM_COPY = {
+  prefix: "重新解析会用同一份论文文字重新抽取并",
+  currentResult: "替换当前结果",
+  separator: ";",
+  resetScope: "已补充的缺失参数、当前 plan 和调参结果会被替换",
+  suffix:
+    "。它只重跑已读入的论文文字;若缺的信息在图片 / 表格里,或某篇上传时就失败,重新解析补不回,需要重新上传或等解析升级。",
+};
 
 const DOMAIN_LABELS: Record<PaperDomain, string> = {
   control_system: "控制系统",
@@ -86,10 +97,32 @@ function PaperDocumentSources({
 export function PaperHeader({
   spec,
   documentStatuses,
+  onReparse,
+  onDismissReparseError,
+  reparsing,
+  reparseError,
+  reparseSourceUnavailable,
 }: {
   spec: PaperSpec;
   documentStatuses?: UploadDocumentStatus[];
+  onReparse: () => void;
+  onDismissReparseError: () => void;
+  reparsing: boolean;
+  reparseError: ApiException | null;
+  reparseSourceUnavailable: boolean;
 }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const sourceUnavailable =
+    reparseSourceUnavailable || reparseError?.code === "reparse_source_unavailable";
+  const sourceUnavailableMessage = "这份结果没有可重跑的临时文字,请重新上传";
+  const reparseMessage =
+    !sourceUnavailable && reparseError ? resolveErrorMessage(reparseError.code) : "";
+
+  function confirmReparse() {
+    setConfirmOpen(false);
+    onReparse();
+  }
+
   return (
     <header className="paper-header">
       <div>
@@ -102,10 +135,60 @@ export function PaperHeader({
         </div>
         <PaperPartialSuccessNotice documentStatuses={documentStatuses} />
         <PaperDocumentSources spec={spec} documentStatuses={documentStatuses} />
+        {reparseMessage ? (
+          <aside className="paper-reparse-notice" aria-live="polite">
+            <span>{reparseMessage}</span>
+            {!sourceUnavailable ? (
+              <button type="button" onClick={onDismissReparseError}>
+                关闭
+              </button>
+            ) : null}
+          </aside>
+        ) : null}
       </div>
-      <Link className="paper-primary-link" to="/paper">
-        重新上传
-      </Link>
+      <div className="paper-header__actions">
+        <button
+          className="paper-secondary-button"
+          type="button"
+          disabled={reparsing || sourceUnavailable}
+          onClick={() => setConfirmOpen(true)}
+        >
+          {reparsing ? "重新解析中" : "重新解析"}
+        </button>
+        <Link className="paper-primary-link" to="/paper">
+          重新上传
+        </Link>
+        {sourceUnavailable ? (
+          <span className="paper-reparse-action-hint">{sourceUnavailableMessage}</span>
+        ) : null}
+      </div>
+      {confirmOpen ? (
+        <dialog className="paper-reparse-dialog" open>
+          <form method="dialog">
+            <h2>重新解析</h2>
+            <p>
+              {REPARSE_CONFIRM_COPY.prefix}
+              <strong>{REPARSE_CONFIRM_COPY.currentResult}</strong>
+              {REPARSE_CONFIRM_COPY.separator}
+              <strong>{REPARSE_CONFIRM_COPY.resetScope}</strong>
+              {REPARSE_CONFIRM_COPY.suffix}
+            </p>
+            <div>
+              <button type="button" className="paper-secondary-button" onClick={() => setConfirmOpen(false)}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="paper-primary-button"
+                disabled={reparsing}
+                onClick={confirmReparse}
+              >
+                确认重新解析
+              </button>
+            </div>
+          </form>
+        </dialog>
+      ) : null}
     </header>
   );
 }

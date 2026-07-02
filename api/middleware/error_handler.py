@@ -54,6 +54,10 @@ from core.domain.exceptions import (
     OverviewGenerationError,
     PaperNotFoundError,
     PaperPlanGenerationError,
+    PaperReparseFailedError,
+    PaperReparseInProgressError,
+    PaperReparseSourceUnavailableError,
+    PaperReparseStoreError,
     PaperSpecGenerationError,
     PaperTuningError,
     PaperUserSupplyError,
@@ -252,6 +256,26 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
                 "paper_not_found",
                 "没有找到这份资料,可能已过期或已被删除,请重新上传",
             ),
+        ),
+        (
+            PaperReparseSourceUnavailableError,
+            _make_handler(
+                410,
+                "reparse_source_unavailable",
+                "这份结果没有可重跑的临时文字,请重新上传",
+            ),
+        ),
+        (
+            PaperReparseInProgressError,
+            _make_handler(409, "reparse_in_progress", "重新解析正在进行,请稍后"),
+        ),
+        (
+            PaperReparseFailedError,
+            _make_handler(502, "paper_reparse_failed", "重新解析失败,旧结果已保留"),
+        ),
+        (
+            PaperReparseStoreError,
+            _make_handler(500, "paper_reparse_store_failed", "重新解析保存失败,旧结果已保留"),
         ),
         (
             PaperTuningError,

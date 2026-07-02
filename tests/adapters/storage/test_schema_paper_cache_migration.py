@@ -15,6 +15,7 @@ async def test_new_database_latest_schema_includes_paper_tables(db_path: str) ->
     assert {
         "paper_spec_cache",
         "paper_plan_cache",
+        "paper_reparse_source_cache",
         "teaching_units",
         "chunks",
     }.issubset(tables)
@@ -54,7 +55,13 @@ async def test_migrates_v1_to_latest_and_preserves_project_and_chat(db_path: str
         ).fetchone()
 
     assert version == schema.CURRENT_SCHEMA_VERSION
-    assert {"chunks", "teaching_units", "paper_spec_cache", "paper_plan_cache"}.issubset(tables)
+    assert {
+        "chunks",
+        "teaching_units",
+        "paper_spec_cache",
+        "paper_plan_cache",
+        "paper_reparse_source_cache",
+    }.issubset(tables)
     assert project["project_id"] == "p1"
     assert session["session_id"] == "s1"
 
@@ -76,7 +83,12 @@ async def test_migrates_v2_to_latest_and_preserves_chunks(db_path: str) -> None:
     assert version == schema.CURRENT_SCHEMA_VERSION
     assert chunk["chunk_id"] == "c1"
     assert chunk["source_text"] == "source"
-    assert {"teaching_units", "paper_spec_cache", "paper_plan_cache"}.issubset(tables)
+    assert {
+        "teaching_units",
+        "paper_spec_cache",
+        "paper_plan_cache",
+        "paper_reparse_source_cache",
+    }.issubset(tables)
 
 
 async def test_migrates_v3_to_latest_and_preserves_teaching_units(db_path: str) -> None:
@@ -99,7 +111,28 @@ async def test_migrates_v3_to_latest_and_preserves_teaching_units(db_path: str) 
     assert version == schema.CURRENT_SCHEMA_VERSION
     assert unit["teaching_unit_id"] == "tu1"
     assert unit["payload_json"] == "{}"
-    assert {"paper_spec_cache", "paper_plan_cache"}.issubset(tables)
+    assert {
+        "paper_spec_cache",
+        "paper_plan_cache",
+        "paper_reparse_source_cache",
+    }.issubset(tables)
+
+
+async def test_migrates_v5_to_latest_and_preserves_run_state_tables(db_path: str) -> None:
+    async with open_connection(db_path) as conn:
+        await _create_v5_database(conn)
+
+    async with open_connection(db_path) as conn:
+        await schema.init_schema(conn)
+        version = await _schema_version(conn)
+        tables = await _tables(conn)
+
+    assert version == schema.CURRENT_SCHEMA_VERSION
+    assert {
+        "bridge_run_state_session",
+        "bridge_run_state_run",
+        "paper_reparse_source_cache",
+    }.issubset(tables)
 
 
 async def test_target_latest_schema_is_idempotent(db_path: str) -> None:
@@ -167,6 +200,14 @@ async def _create_v3_database(conn) -> None:  # type: ignore[no-untyped-def]
     await _create_v2_database(conn)
     await conn.executescript(schema._TEACHING_UNITS_DDL)
     await conn.execute("UPDATE schema_version SET version=3 WHERE id=1")
+    await conn.commit()
+
+
+async def _create_v5_database(conn) -> None:  # type: ignore[no-untyped-def]
+    await _create_v3_database(conn)
+    await conn.executescript(schema._PAPER_CACHE_DDL)
+    await conn.executescript(schema._RUN_STATE_DDL)
+    await conn.execute("UPDATE schema_version SET version=5 WHERE id=1")
     await conn.commit()
 
 

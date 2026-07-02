@@ -30,7 +30,11 @@ def test_lifespan_wires_sqlite_paper_bundle_store_and_views(
         assert isinstance(app.state.paper_bundle_store, SqlitePaperBundleStore)
         assert isinstance(app.state.paper_spec_cache, SqlitePaperSpecCacheView)
         assert isinstance(app.state.paper_plan_cache, SqlitePaperPlanCacheView)
-        assert _table_names(db_path) >= {"paper_spec_cache", "paper_plan_cache"}
+        assert _table_names(db_path) >= {
+            "paper_spec_cache",
+            "paper_plan_cache",
+            "paper_reparse_source_cache",
+        }
 
 
 def _table_names(db_path: Path) -> set[str]:

@@ -7,7 +7,6 @@ import hashlib
 import shutil
 import tempfile
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -16,20 +15,26 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from api.dependencies import (
-    get_paper_bundle_store,
     get_paper_plan_service,
+    get_paper_reparse_store,
     get_paper_spec_service,
     get_settings,
 )
 from app.config import AppSettings
 from core.domain.exceptions import DocumentParseError, PaperSpecGenerationError
-from core.domain.paper_document_identity import validate_paper_spec_document_identity
-from core.domain.paper_parameter_conflicts import with_parameter_conflicts
-from core.domain.paper_spec import PaperSpec
-from core.interfaces.paper_cache import PaperBundleStore
+from core.interfaces.paper_reparse_store import PaperReparseStore
 from features.paper.paper_document_identity import sanitize_paper_display_filename
+from features.paper.paper_fusion import (
+    SuccessfulPaperSpec,
+    document_id_for_upload_index,
+    fuse_successful_specs,
+)
 from features.paper.paper_plan_cache import PaperPlanRecord
 from features.paper.paper_plan_service import PaperPlanService
+from features.paper.paper_reparse_source import (
+    SuccessfulParsedDocument,
+    build_reparse_source,
+)
 from features.paper.paper_schemas import (
     MissingParameterPromptModel,
     ModelGenerationPlanModel,
@@ -66,20 +71,12 @@ class UploadDocumentResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-@dataclass(frozen=True)
-class _SuccessfulUpload:
-    upload_index: int
-    document_id: str
-    filename: str
-    spec: PaperSpec
-
-
 @router.post("/api/v1/upload-document", response_model=UploadDocumentResponse)
 async def upload_document(
     file: Annotated[list[UploadFile], File(...)],
     service: Annotated[PaperSpecService, Depends(get_paper_spec_service)],
     plan_service: Annotated[PaperPlanService, Depends(get_paper_plan_service)],
-    bundle_store: Annotated[PaperBundleStore, Depends(get_paper_bundle_store)],
+    reparse_store: Annotated[PaperReparseStore, Depends(get_paper_reparse_store)],
     settings: Annotated[AppSettings, Depends(get_settings)],
     primary_index: Annotated[int | None, Form()] = None,
 ) -> UploadDocumentResponse:
@@ -90,12 +87,13 @@ async def upload_document(
     _validate_primary_index(primary_index, len(files))
     sandbox_dir = await asyncio.to_thread(_create_sandbox_dir_sync)
     paper_id = str(uuid.uuid4())
-    successes: list[_SuccessfulUpload] = []
+    successes: list[SuccessfulPaperSpec] = []
+    source_documents: list[SuccessfulParsedDocument] = []
     document_statuses: list[UploadDocumentStatusModel] = []
     first_error: Exception | None = None
     try:
         for upload_index, upload_file in enumerate(files):
-            document_id = _document_id_for_upload_index(upload_index)
+            document_id = document_id_for_upload_index(upload_index)
             display_filename = sanitize_paper_display_filename(upload_file.filename)
             try:
                 _validate_declared_size(upload_file.size, max_upload_bytes)
@@ -120,8 +118,9 @@ async def upload_document(
                     file_hash,
                     extension,
                 )
-                spec = await service.extract_uncached(
-                    saved_path,
+                parsed = await service.parse_uncached(saved_path)
+                spec = await service.extract_parsed_uncached(
+                    parsed,
                     paper_id,
                     display_filename=display_filename,
                     document_id=document_id,
@@ -141,11 +140,19 @@ async def upload_document(
                 continue
 
             successes.append(
-                _SuccessfulUpload(
+                SuccessfulPaperSpec(
                     upload_index=upload_index,
                     document_id=document_id,
                     filename=display_filename,
                     spec=spec,
+                )
+            )
+            source_documents.append(
+                SuccessfulParsedDocument(
+                    upload_index=upload_index,
+                    document_id=document_id,
+                    filename=display_filename,
+                    parsed=parsed,
                 )
             )
             document_statuses.append(
@@ -162,7 +169,7 @@ async def upload_document(
                 raise first_error
             raise DocumentParseError("document_parse_failed") from None
 
-        spec = _fuse_successful_specs(successes, primary_index)
+        spec = fuse_successful_specs(successes, primary_index)
         plan, missing_prompts, missing_bindings = await plan_service.generate(spec, paper_id)
         record = PaperPlanRecord(
             paper_id=paper_id,
@@ -171,7 +178,8 @@ async def upload_document(
             missing_prompts=missing_prompts,
             missing_bindings=missing_bindings,
         )
-        await bundle_store.save_ready_bundle(record)
+        source = build_reparse_source(paper_id, source_documents, primary_index)
+        await reparse_store.save_ready_bundle_with_source(record, source)
         return UploadDocumentResponse(
             paper_id=paper_id,
             spec=PaperSpecModel.from_domain(spec),
@@ -251,60 +259,9 @@ def _cleanup_sandbox_dir_sync(sandbox_dir: Path) -> None:
     shutil.rmtree(sandbox_dir, ignore_errors=True)
 
 
-def _document_id_for_upload_index(index: int) -> str:
-    return f"DOC-{index + 1:03d}"
-
-
 def _per_document_error_code(exc: Exception) -> str:
     if isinstance(exc, DocumentParseError):
         return "document_parse_failed"
     if isinstance(exc, PaperSpecGenerationError):
         return "paper_spec_generation_failed"
     return "document_processing_failed"
-
-
-def _fuse_successful_specs(
-    successes: list[_SuccessfulUpload],
-    primary_index: int | None,
-) -> PaperSpec:
-    representative = _representative_success(successes, primary_index)
-    primary_document_id = representative.document_id if primary_index is not None else None
-    spec = PaperSpec(
-        paper_title=representative.spec.paper_title,
-        paper_type=representative.spec.paper_type,
-        domain=representative.spec.domain,
-        documents=[
-            document
-            for success in successes
-            for document in success.spec.documents
-            if document.document_id == success.document_id
-        ],
-        primary_document_id=primary_document_id,
-        abstract=representative.spec.abstract,
-        equations=[equation for success in successes for equation in success.spec.equations],
-        parameter_table=[
-            parameter for success in successes for parameter in success.spec.parameter_table
-        ],
-        figure_locations=[
-            figure for success in successes for figure in success.spec.figure_locations
-        ],
-        pseudocode_blocks=[
-            block for success in successes for block in success.spec.pseudocode_blocks
-        ],
-        evidence=[entry for success in successes for entry in success.spec.evidence],
-    )
-    spec = with_parameter_conflicts(spec)
-    validate_paper_spec_document_identity(spec)
-    return spec
-
-
-def _representative_success(
-    successes: list[_SuccessfulUpload],
-    primary_index: int | None,
-) -> _SuccessfulUpload:
-    if primary_index is None:
-        return successes[0]
-    for success in successes:
-        if success.upload_index == primary_index:
-            return success
-    raise DocumentParseError("primary_document_failed") from None
