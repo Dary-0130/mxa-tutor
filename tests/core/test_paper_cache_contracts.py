@@ -54,6 +54,8 @@ def test_paper_cache_interfaces_have_expected_abstract_methods() -> None:
         "get_spec",
         "get_plan_record",
         "delete_bundle",
+        "apply_parameter_correction_atomically",
+        "undo_parameter_correction_atomically",
         "insert_parameter_correction",
         "update_parameter_correction_value",
         "get_parameter_correction",

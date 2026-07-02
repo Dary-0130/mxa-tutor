@@ -66,4 +66,5 @@ verify-schema: export-schema
 		schemas/paper_missing.schema.json \
 		schemas/paper_ask_request.schema.json \
 		schemas/paper_ask_response.schema.json \
+		schemas/paper_parameter_corrections.schema.json \
 		|| (echo "paper schemas drifted. Regenerate with 'make export-schema' and commit." && exit 1)

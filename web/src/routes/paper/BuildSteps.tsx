@@ -76,12 +76,15 @@ function describeDependency(stepId: string, stepLookup: Map<string, number | nul
 
 function renderEvidenceItems(entries: PaperEvidenceEntry[]) {
   return entries
-    .map((entry, index) => renderEvidenceMeta(entry, `${entry.paper_section_id ?? "evidence"}-${index}`))
+    .map((entry, index) =>
+      renderEvidenceMeta(entry, `${entry.paper_section_id ?? "evidence"}-${index}`),
+    )
     .filter(Boolean);
 }
 
 export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
-  const structuredSteps = Array.isArray(plan.build_steps) && plan.build_steps.length > 0 ? plan.build_steps : null;
+  const structuredSteps =
+    Array.isArray(plan.build_steps) && plan.build_steps.length > 0 ? plan.build_steps : null;
   const blockLookup = structuredSteps ? getBlockLookup(structuredSteps) : null;
   const stepLookup = structuredSteps ? getStepLookup(structuredSteps) : null;
 
@@ -95,7 +98,9 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
             return (
               <li key={step.step_id || index} aria-labelledby={titleId}>
                 <GlassCard className="paper-readable-card paper-step-card paper-build-step-card">
-                  <span className="paper-step-index paper-token">{String(index + 1).padStart(2, "0")}</span>
+                  <span className="paper-step-index paper-token">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
                   <div className="paper-build-step-body">
                     <header className="paper-build-step-header">
                       <h3 id={titleId} className="paper-copy">
@@ -109,7 +114,10 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
                         <h4>涉及块</h4>
                         <ul className="paper-build-step-block-list">
                           {step.block_refs.map((block, blockIndex) => (
-                            <li key={`${block.block_ref_id}-${blockIndex}`} className="paper-build-step-block">
+                            <li
+                              key={`${block.block_ref_id}-${blockIndex}`}
+                              className="paper-build-step-block"
+                            >
                               <div className="paper-build-step-token-row">
                                 <span className="paper-token">{block.block_ref_id}</span>
                                 <span className="paper-token">{block.block_type}</span>
@@ -117,9 +125,14 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
                               <p className="paper-copy">{block.purpose}</p>
                               <p className="paper-secondary paper-build-step-library">
                                 <span>库路径</span>
-                                <span className="paper-token">{block.library_path ?? "库路径待确认"}</span>
+                                <span className="paper-token">
+                                  {block.library_path ?? "库路径待确认"}
+                                </span>
                               </p>
-                              {renderEvidenceMeta(block.paper_reference, `${block.block_ref_id}-evidence`)}
+                              {renderEvidenceMeta(
+                                block.paper_reference,
+                                `${block.block_ref_id}-evidence`,
+                              )}
                             </li>
                           ))}
                         </ul>
@@ -131,7 +144,9 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
                         <h4>关联参数</h4>
                         <ul className="paper-build-step-param-list">
                           {step.parameter_refs.map((param, paramIndex) => (
-                            <li key={`${param.paper_param_name}-${param.model_param_name}-${paramIndex}`}>
+                            <li
+                              key={`${param.paper_param_name}-${param.model_param_name}-${paramIndex}`}
+                            >
                               <span className="paper-token">{param.paper_param_name}</span>
                               <span aria-hidden="true">→</span>
                               <span className="paper-token">{param.model_param_name}</span>
@@ -152,9 +167,13 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
                               className="paper-build-step-hint"
                             >
                               <p className="paper-build-step-wire">
-                                <span className="paper-token">{describeBlockRef(hint.from_block_ref, blockLookup)}</span>
+                                <span className="paper-token">
+                                  {describeBlockRef(hint.from_block_ref, blockLookup)}
+                                </span>
                                 <span aria-hidden="true">→</span>
-                                <span className="paper-token">{describeBlockRef(hint.to_block_ref, blockLookup)}</span>
+                                <span className="paper-token">
+                                  {describeBlockRef(hint.to_block_ref, blockLookup)}
+                                </span>
                               </p>
                               {hint.from_port || hint.to_port ? (
                                 <p className="paper-secondary paper-build-step-ports">
@@ -170,7 +189,9 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
                                   ) : null}
                                 </p>
                               ) : null}
-                              {hint.signal_meaning ? <p className="paper-copy">{hint.signal_meaning}</p> : null}
+                              {hint.signal_meaning ? (
+                                <p className="paper-copy">{hint.signal_meaning}</p>
+                              ) : null}
                             </li>
                           ))}
                         </ul>
@@ -184,10 +205,14 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
                           {step.configuration_hints.map((hint, hintIndex) => {
                             const evidenceItems = renderEvidenceItems(hint.evidence);
                             return (
-                              <li key={`${hint.target}-${hint.setting_name ?? "setting"}-${hintIndex}`}>
+                              <li
+                                key={`${hint.target}-${hint.setting_name ?? "setting"}-${hintIndex}`}
+                              >
                                 <div className="paper-build-step-token-row">
                                   <span className="paper-token">{hint.target}</span>
-                                  {hint.setting_name ? <span className="paper-token">{hint.setting_name}</span> : null}
+                                  {hint.setting_name ? (
+                                    <span className="paper-token">{hint.setting_name}</span>
+                                  ) : null}
                                 </div>
                                 <p className="paper-copy">{hint.instruction}</p>
                                 {evidenceItems.length > 0 ? (
@@ -231,6 +256,7 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
 
   return (
     <div className="paper-build-steps">
+      <p className="paper-secondary">当前显示推荐块视图;完整步骤需在重新解析后生成。</p>
       <p className="paper-library-choice">
         <span>推荐库:</span>
         <strong className="paper-token">{plan.library_choice}</strong>
@@ -241,11 +267,15 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
         <ol className="paper-step-list">
           {plan.block_recommendations.map((block, index) => {
             const evidenceText =
-              block.paper_reference.source === "document_extracted" ? formatEvidence(block.paper_reference) : "";
+              block.paper_reference.source === "document_extracted"
+                ? formatEvidence(block.paper_reference)
+                : "";
             return (
               <li key={`${block.block_type}-${index}`}>
                 <GlassCard className="paper-readable-card paper-step-card">
-                  <span className="paper-step-index paper-token">{String(index + 1).padStart(2, "0")}</span>
+                  <span className="paper-step-index paper-token">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
                   <div>
                     <h3 className="paper-token">{block.block_type}</h3>
                     <p className="paper-copy">{block.purpose}</p>

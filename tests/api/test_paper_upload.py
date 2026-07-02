@@ -155,6 +155,26 @@ class FakePaperBundleStore(PaperBundleStore, PaperReparseStore):
         self.records.pop(paper_id, None)
         self.sources.pop(paper_id, None)
 
+    async def apply_parameter_correction_atomically(
+        self,
+        paper_id: str,
+        updated_record: PaperPlanRecord,
+        correction: PaperParameterCorrection,
+        *,
+        is_recorrect: bool,
+    ) -> None:
+        _ = correction, is_recorrect
+        self.records[paper_id] = updated_record
+
+    async def undo_parameter_correction_atomically(
+        self,
+        paper_id: str,
+        updated_record: PaperPlanRecord,
+        correction_id: str,
+    ) -> None:
+        _ = correction_id
+        self.records[paper_id] = updated_record
+
     async def insert_parameter_correction(self, correction: PaperParameterCorrection) -> None:
         _ = correction
 

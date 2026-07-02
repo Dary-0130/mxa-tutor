@@ -45,6 +45,7 @@ from api.routes.matlab_bridge import (
 from api.routes.matlab_bridge_auth import router as matlab_bridge_auth_router
 from api.routes.overview import router as overview_router
 from api.routes.paper_ask import router as paper_ask_router
+from api.routes.paper_parameter_correction import router as paper_parameter_correction_router
 from api.routes.paper_query import router as paper_query_router
 from api.routes.paper_reparse import router as paper_reparse_router
 from api.routes.paper_tuning import router as paper_tuning_router
@@ -354,6 +355,7 @@ def create_app() -> FastAPI:
     app.include_router(paper_upload_router)
     app.include_router(paper_query_router)
     app.include_router(paper_reparse_router)
+    app.include_router(paper_parameter_correction_router)
     app.include_router(paper_ask_router)
     app.include_router(paper_tuning_router)
     app.include_router(paper_user_supply_router)

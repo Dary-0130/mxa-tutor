@@ -1,0 +1,186 @@
+{
+  "$defs": {
+    "ParameterCorrectionCorrectedModel": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "value",
+        "unit"
+      ],
+      "title": "ParameterCorrectionCorrectedModel",
+      "type": "object"
+    },
+    "ParameterCorrectionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "correction_id": {
+          "title": "Correction Id",
+          "type": "string"
+        },
+        "param_key": {
+          "title": "Param Key",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/PlanCorrectionTargetModel"
+        },
+        "original": {
+          "$ref": "#/$defs/ParameterCorrectionOriginalModel"
+        },
+        "corrected": {
+          "$ref": "#/$defs/ParameterCorrectionCorrectedModel"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "title": "Updated At",
+          "type": "string"
+        },
+        "can_undo": {
+          "title": "Can Undo",
+          "type": "boolean"
+        },
+        "can_undo_reason": {
+          "enum": [
+            "active",
+            "target_stale",
+            "missing_mapping"
+          ],
+          "title": "Can Undo Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "correction_id",
+        "param_key",
+        "target",
+        "original",
+        "corrected",
+        "created_at",
+        "updated_at",
+        "can_undo",
+        "can_undo_reason"
+      ],
+      "title": "ParameterCorrectionModel",
+      "type": "object"
+    },
+    "ParameterCorrectionOriginalModel": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit"
+        },
+        "source": {
+          "const": "document_extracted",
+          "title": "Source",
+          "type": "string"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Document Id"
+        },
+        "document_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Document Label"
+        }
+      },
+      "required": [
+        "value",
+        "unit",
+        "source",
+        "document_id",
+        "document_label"
+      ],
+      "title": "ParameterCorrectionOriginalModel",
+      "type": "object"
+    },
+    "PlanCorrectionTargetModel": {
+      "additionalProperties": false,
+      "properties": {
+        "paper_param_name": {
+          "title": "Paper Param Name",
+          "type": "string"
+        },
+        "model_param_name": {
+          "title": "Model Param Name",
+          "type": "string"
+        },
+        "plan_mapping_index": {
+          "title": "Plan Mapping Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "paper_param_name",
+        "model_param_name",
+        "plan_mapping_index"
+      ],
+      "title": "PlanCorrectionTargetModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "paper_id": {
+      "title": "Paper Id",
+      "type": "string"
+    },
+    "corrections": {
+      "items": {
+        "$ref": "#/$defs/ParameterCorrectionModel"
+      },
+      "title": "Corrections",
+      "type": "array"
+    }
+  },
+  "required": [
+    "paper_id",
+    "corrections"
+  ],
+  "title": "ParameterCorrectionsResponse",
+  "type": "object"
+}

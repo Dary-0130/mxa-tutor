@@ -53,6 +53,7 @@ from core.domain.exceptions import (
     MxaError,
     OverviewGenerationError,
     PaperNotFoundError,
+    PaperParameterCorrectionError,
     PaperPlanGenerationError,
     PaperReparseFailedError,
     PaperReparseInProgressError,
@@ -61,6 +62,7 @@ from core.domain.exceptions import (
     PaperSpecGenerationError,
     PaperTuningError,
     PaperUserSupplyError,
+    PaperUserSupplyInProgressError,
     ProjectError,
     ProjectNotFoundError,
     ProjectTooLargeError,
@@ -123,6 +125,43 @@ def _make_project_too_large_handler(settings: AppSettings) -> ExceptionHandler:
         )
 
     return handler
+
+
+_CORRECTION_ERROR_MESSAGES: dict[str, str] = {
+    "correction_target_not_extracted": "这个参数不能直接纠错,请刷新后重试",
+    "correction_requires_local_rerun": "这个参数需要局部重跑后才能处理",
+    "correction_target_ambiguous": "这个参数暂时不能唯一定位,请刷新后重试",
+    "correction_target_stale": "参数状态已变化,请刷新后重试",
+    "correction_target_not_correctable": "这个参数不能在这里纠错",
+    "correction_invalid_value": "纠错值无效,请重新输入",
+    "correction_unit_invalid": "单位无效,请重新输入",
+    "correction_lock_conflict": "这份结果正在更新,请稍后重试",
+    "correction_not_found": "这条纠错记录不存在或已失效",
+    "correction_store_failed": "纠错保存失败,旧结果已保留",
+}
+
+
+async def _paper_parameter_correction_handler(
+    request: Request,
+    exc: Exception,
+) -> JSONResponse:
+    status_code = exc.status_code if isinstance(exc, PaperParameterCorrectionError) else 500
+    error_code = (
+        exc.error_code
+        if isinstance(exc, PaperParameterCorrectionError)
+        else "correction_store_failed"
+    )
+    _log_error(request, exc, status_code)
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": error_code,
+            "message": _CORRECTION_ERROR_MESSAGES.get(
+                error_code,
+                "纠错保存失败,旧结果已保留",
+            ),
+        },
+    )
 
 
 def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
@@ -284,6 +323,14 @@ def register_error_handlers(app: FastAPI, settings: AppSettings) -> None:
         (
             PaperUserSupplyError,
             _make_handler(400, "paper_user_supply_invalid", "补充参数有问题,请检查后重试"),
+        ),
+        (
+            PaperUserSupplyInProgressError,
+            _make_handler(409, "paper_user_supply_in_progress", "这份结果正在更新,请稍后重试"),
+        ),
+        (
+            PaperParameterCorrectionError,
+            _paper_parameter_correction_handler,
         ),
         (
             BridgeExplanationError,

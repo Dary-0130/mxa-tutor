@@ -11,6 +11,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from core.domain.exceptions import PaperPlanGenerationError, PaperTuningError
+from core.domain.paper_parameter_correction import PaperParameterCorrection
 from core.domain.paper_plan import PaperPlanRecord, ParameterMapping
 from core.domain.paper_tuning import ConfidenceValue, TuningSuggestion
 from core.interfaces.llm_provider import LLMMessage, TextProvider
@@ -19,6 +20,7 @@ from features.paper.paper_document_identity import enrich_single_document_eviden
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     EvidenceTagger,
+    resolved_user_evidence_refs,
 )
 from features.paper.paper_plan_integrity import validate_tuning_does_not_resolve_conflicts
 from features.paper.paper_schemas import (
@@ -47,10 +49,16 @@ class TuningSuggestionService:
         self._timeout = timeout
         self._max_tokens = max_tokens
 
-    async def suggest(self, record: PaperPlanRecord, user_scenario: str) -> TuningSuggestion:
+    async def suggest(
+        self,
+        record: PaperPlanRecord,
+        user_scenario: str,
+        *,
+        corrections: list[PaperParameterCorrection] | None = None,
+    ) -> TuningSuggestion:
         """Return a validated tuning suggestion for ``user_scenario``."""
         data = await self._call_llm_json(
-            build_messages_for_tuning_suggest(record, user_scenario),
+            build_messages_for_tuning_suggest(record, user_scenario, corrections),
         )
         data = enrich_single_document_evidence_payloads(data)
         try:
@@ -80,7 +88,14 @@ class TuningSuggestionService:
         except PaperPlanGenerationError as exc:
             self._raise_tuning_error("parameter_conflict_tuning_stale", exc)
         try:
-            self._evidence_tagger.validate_for_record(suggestion.evidence, record)
+            self._evidence_tagger.validate_for_record(
+                suggestion.evidence,
+                record,
+                allowed_user_evidence_refs=resolved_user_evidence_refs(
+                    record,
+                    corrections or [],
+                ),
+            )
         except PaperPlanGenerationError as exc:
             self._raise_tuning_error("evidence_invalid", exc)
 

@@ -59,6 +59,9 @@ export interface PaperEvidenceEntry {
   figure_id?: string | null;
   excerpt?: string | null;
   missing_param_prompt_id?: string | null;
+  user_action?: "fill_missing" | "correct_extracted" | null;
+  parameter_correction_id?: string | null;
+  correction_param_key?: string | null;
 }
 
 export interface EquationEntry {
@@ -300,4 +303,53 @@ export interface UserSuppliedResponseBatch {
 export interface UpdatedPlanResponse {
   paper_id: string;
   updated_plan: ModelGenerationPlan;
+}
+
+export interface ParameterCorrectionTarget {
+  paper_param_name: string;
+  model_param_name: string;
+  plan_mapping_index: number;
+}
+
+export interface ParameterCorrectionRequestTarget extends ParameterCorrectionTarget {
+  expected_value: string;
+  expected_unit: string | null;
+}
+
+export interface ParameterCorrectionRequest {
+  target: ParameterCorrectionRequestTarget;
+  corrected_value: string;
+  corrected_unit?: string | null;
+}
+
+export interface ParameterCorrection {
+  correction_id: string;
+  param_key: string;
+  target: ParameterCorrectionTarget;
+  original: {
+    value: string;
+    unit: string | null;
+    source: "document_extracted";
+    document_id: string | null;
+    document_label: string | null;
+  };
+  corrected: {
+    value: string;
+    unit: string | null;
+  };
+  created_at: string;
+  updated_at: string;
+  can_undo: boolean;
+  can_undo_reason: "active" | "target_stale" | "missing_mapping";
+}
+
+export interface ParameterCorrectionsResponse {
+  paper_id: string;
+  corrections: ParameterCorrection[];
+}
+
+export interface ParameterCorrectionResponse {
+  paper_id: string;
+  updated_plan: ModelGenerationPlan;
+  correction: ParameterCorrection;
 }

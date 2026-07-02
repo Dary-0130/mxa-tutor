@@ -29,5 +29,6 @@ async def ask_paper(
     record = await store.get_plan_record(paper_id)
     if record is None:
         raise PaperNotFoundError("paper_not_found") from None
-    response = await service.ask(record, request.to_domain())
+    corrections = await store.list_parameter_corrections(paper_id)
+    response = await service.ask(record, request.to_domain(), corrections=corrections)
     return PaperAskResponseSchema.from_domain(response)

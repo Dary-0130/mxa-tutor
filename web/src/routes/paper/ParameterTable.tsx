@@ -1,14 +1,18 @@
 import { useMemo, useState } from "react";
 import { GlassCard } from "../../components/ui/GlassCard";
+import { resolveErrorMessage } from "../../lib/errorMessages";
 import { formatEvidence } from "../../lib/paperEvidence";
 import type {
   MissingParameterPrompt,
   ModelGenerationPlan,
+  ParameterCorrection,
+  ParameterCorrectionRequest,
   ParameterMapping,
   UserSuppliedResponse,
 } from "../../lib/paperTypes";
 import { makeMissingPromptAnchorId, makePlanMappingAnchorId } from "./paperAnchors";
 import { SourceBadge, type SourceBadgeKind } from "./SourceBadge";
+import { useParameterCorrection } from "./useParameterCorrection";
 import type { PaperPlanUpdate } from "./usePaperResult";
 import { useUserSupply } from "./useUserSupply";
 
@@ -16,10 +20,12 @@ interface ParameterTableProps {
   paperId: string;
   plan: ModelGenerationPlan;
   remainingMissingPrompts: MissingParameterPrompt[];
+  parameterCorrections: ParameterCorrection[];
   onPlanUpdate: (update: PaperPlanUpdate) => void;
 }
 
 type DraftMap = Record<string, { value: string; unit: string }>;
+type CorrectionDraftMap = Record<string, { value: string; unit: string }>;
 
 type ParameterRow = {
   key: string;
@@ -53,7 +59,12 @@ function mergeRows(
     if (prompt) {
       usedPromptIds.add(prompt.prompt_id);
     }
-    return { key: `mapping-${mapping.paper_param_name}-${index}`, mappingIndex: index, mapping, prompt };
+    return {
+      key: `mapping-${mapping.paper_param_name}-${index}`,
+      mappingIndex: index,
+      mapping,
+      prompt,
+    };
   });
   for (const prompt of prompts) {
     if (!usedPromptIds.has(prompt.prompt_id)) {
@@ -96,19 +107,54 @@ function statusMessage(status: ReturnType<typeof useUserSupply>["status"]): stri
   return null;
 }
 
+function correctionForMapping(
+  corrections: ParameterCorrection[],
+  mapping: ParameterMapping,
+  mappingIndex: number,
+): ParameterCorrection | undefined {
+  return corrections.find(
+    (correction) =>
+      correction.target.plan_mapping_index === mappingIndex &&
+      correction.target.paper_param_name === mapping.paper_param_name &&
+      correction.target.model_param_name === mapping.model_param_name,
+  );
+}
+
+function formatValueUnit(value: string, unit: string | null | undefined): string {
+  return unit ? `${value} ${unit}` : value;
+}
+
+function correctionErrorMessage(error: ReturnType<typeof useParameterCorrection>["error"]): string {
+  if (!error) {
+    return "";
+  }
+  return resolveErrorMessage(error.code);
+}
+
 export function ParameterTable({
   paperId,
   plan,
   remainingMissingPrompts,
+  parameterCorrections,
   onPlanUpdate,
 }: ParameterTableProps) {
   const [drafts, setDrafts] = useState<DraftMap>({});
+  const [correctionDrafts, setCorrectionDrafts] = useState<CorrectionDraftMap>({});
+  const [editingCorrectionKey, setEditingCorrectionKey] = useState<string | null>(null);
   const rows = useMemo(
     () => mergeRows(plan.parameter_mapping, remainingMissingPrompts),
     [plan.parameter_mapping, remainingMissingPrompts],
   );
   const { status, submit } = useUserSupply({ paperId, onPlanUpdate });
+  const {
+    status: correctionStatus,
+    error: correctionError,
+    apply: applyCorrection,
+    undo: undoCorrection,
+    dismissError: dismissCorrectionError,
+  } = useParameterCorrection({ paperId, onPlanUpdate });
   const message = statusMessage(status);
+  const correctionMessage = correctionErrorMessage(correctionError);
   const hasPendingPrompts = remainingMissingPrompts.length > 0;
 
   const updateDraft = (promptId: string, field: "value" | "unit", value: string) => {
@@ -141,6 +187,55 @@ export function ParameterTable({
     void submit(responses);
   };
 
+  const startCorrectionEdit = (rowKey: string, mapping: ParameterMapping) => {
+    setEditingCorrectionKey(rowKey);
+    setCorrectionDrafts((current) => ({
+      ...current,
+      [rowKey]: {
+        value: mapping.value === "null" ? "" : mapping.value,
+        unit: mapping.unit ?? "",
+      },
+    }));
+  };
+
+  const updateCorrectionDraft = (rowKey: string, field: "value" | "unit", value: string) => {
+    setCorrectionDrafts((current) => ({
+      ...current,
+      [rowKey]: {
+        value: field === "value" ? value : (current[rowKey]?.value ?? ""),
+        unit: field === "unit" ? value : (current[rowKey]?.unit ?? ""),
+      },
+    }));
+  };
+
+  const submitCorrection = async (
+    rowKey: string,
+    mapping: ParameterMapping,
+    mappingIndex: number,
+  ) => {
+    const draft = correctionDrafts[rowKey];
+    const value = draft?.value.trim();
+    if (!value) {
+      return;
+    }
+    const unit = draft.unit.trim();
+    const request: ParameterCorrectionRequest = {
+      target: {
+        paper_param_name: mapping.paper_param_name,
+        model_param_name: mapping.model_param_name,
+        plan_mapping_index: mappingIndex,
+        expected_value: mapping.value,
+        expected_unit: mapping.unit ?? null,
+      },
+      corrected_value: value,
+      corrected_unit: unit ? unit : null,
+    };
+    const ok = await applyCorrection(request);
+    if (ok) {
+      setEditingCorrectionKey(null);
+    }
+  };
+
   if (rows.length === 0) {
     return <p className="empty-state-text">暂无可展示的参数对照。</p>;
   }
@@ -158,6 +253,10 @@ export function ParameterTable({
         </div>
         {rows.map((row) => {
           const prompt = row.prompt;
+          const activeCorrection =
+            row.mapping && row.mappingIndex !== undefined
+              ? correctionForMapping(parameterCorrections, row.mapping, row.mappingIndex)
+              : undefined;
           const promptAnchorId = prompt ? makeMissingPromptAnchorId(prompt.prompt_id) : undefined;
           const mappingAnchorId =
             row.mapping && row.mappingIndex !== undefined
@@ -169,6 +268,11 @@ export function ParameterTable({
               : undefined;
           const rowAnchorId = mappingAnchorId ?? (!row.mapping ? promptAnchorId : undefined);
           const draft = prompt ? drafts[prompt.prompt_id] : undefined;
+          const correctionDraft = correctionDrafts[row.key];
+          const correctionEditing = editingCorrectionKey === row.key;
+          const canCorrect =
+            Boolean(row.mapping && row.mappingIndex !== undefined) &&
+            (row.mapping?.source === "document_extracted" || Boolean(activeCorrection));
           const sourceKind = getParamSourceKind({
             kind: prompt && !prompt.user_supplied_value ? "missing" : "mapping",
             source: row.mapping?.source ?? prompt?.source,
@@ -184,38 +288,130 @@ export function ParameterTable({
                 {row.mapping?.model_param_name ?? "待补充"}
               </span>
               <span className="paper-token" role="cell">
-                {valueLabel(row)}
-                {row.mapping?.unit ? <small>{row.mapping.unit}</small> : null}
+                {activeCorrection ? (
+                  <span className="paper-correction-value">
+                    <strong>你改的</strong>
+                    <span>{formatValueUnit(valueLabel(row), row.mapping?.unit)}</span>
+                    <small>
+                      AI 原本抽:
+                      {formatValueUnit(
+                        activeCorrection.original.value,
+                        activeCorrection.original.unit,
+                      )}
+                      {activeCorrection.original.document_label
+                        ? ` · ${activeCorrection.original.document_label}`
+                        : ""}
+                    </small>
+                  </span>
+                ) : (
+                  <>
+                    {valueLabel(row)}
+                    {row.mapping?.unit ? <small>{row.mapping.unit}</small> : null}
+                  </>
+                )}
               </span>
               <span role="cell">
-                <SourceBadge kind={sourceKind} />
+                <SourceBadge kind={activeCorrection ? "user_corrected" : sourceKind} />
               </span>
               <span role="cell">
                 {row.mapping && promptAnchorId ? (
                   <span id={promptAnchorId} className="paper-anchor-stub" aria-hidden="true" />
                 ) : null}
-                {prompt && !prompt.user_supplied_value ? (
+                {correctionEditing && row.mapping && row.mappingIndex !== undefined ? (
+                  <label className="paper-correction-input">
+                    <input
+                      value={correctionDraft?.value ?? ""}
+                      placeholder="改为"
+                      onChange={(event) =>
+                        updateCorrectionDraft(row.key, "value", event.target.value)
+                      }
+                    />
+                    <input
+                      value={correctionDraft?.unit ?? ""}
+                      placeholder={row.mapping.unit ?? "单位"}
+                      onChange={(event) =>
+                        updateCorrectionDraft(row.key, "unit", event.target.value)
+                      }
+                    />
+                    <span>
+                      <button
+                        type="button"
+                        disabled={correctionStatus === "submitting"}
+                        onClick={() =>
+                          void submitCorrection(row.key, row.mapping!, row.mappingIndex!)
+                        }
+                      >
+                        保存
+                      </button>
+                      <button type="button" onClick={() => setEditingCorrectionKey(null)}>
+                        取消
+                      </button>
+                    </span>
+                  </label>
+                ) : activeCorrection ? (
+                  <span className="paper-correction-actions">
+                    <button
+                      type="button"
+                      disabled={correctionStatus === "submitting" || correctionStatus === "undoing"}
+                      onClick={() => row.mapping && startCorrectionEdit(row.key, row.mapping)}
+                    >
+                      调整
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        correctionStatus === "submitting" ||
+                        correctionStatus === "undoing" ||
+                        !activeCorrection.can_undo
+                      }
+                      onClick={() => void undoCorrection(activeCorrection.correction_id)}
+                    >
+                      撤销
+                    </button>
+                  </span>
+                ) : canCorrect && row.mapping ? (
+                  <button
+                    className="paper-inline-action"
+                    type="button"
+                    disabled={correctionStatus === "submitting" || correctionStatus === "undoing"}
+                    onClick={() => startCorrectionEdit(row.key, row.mapping!)}
+                  >
+                    改
+                  </button>
+                ) : prompt && !prompt.user_supplied_value ? (
                   <label className="paper-missing-input">
                     <input
                       value={draft?.value ?? ""}
                       placeholder="数值(可选)"
-                      onChange={(event) => updateDraft(prompt.prompt_id, "value", event.target.value)}
+                      onChange={(event) =>
+                        updateDraft(prompt.prompt_id, "value", event.target.value)
+                      }
                     />
                     <input
                       value={draft?.unit ?? ""}
                       placeholder={prompt.suggested_unit ?? "单位"}
-                      onChange={(event) => updateDraft(prompt.prompt_id, "unit", event.target.value)}
+                      onChange={(event) =>
+                        updateDraft(prompt.prompt_id, "unit", event.target.value)
+                      }
                     />
-                    <small>{formatEvidence(prompt.paper_reference, { emptyText: "依据:未标注" })}</small>
+                    <small>
+                      {formatEvidence(prompt.paper_reference, { emptyText: "依据:未标注" })}
+                    </small>
                   </label>
-                ) : (
-                  null
-                )}
+                ) : null}
               </span>
             </div>
           );
         })}
       </div>
+      {correctionMessage ? (
+        <aside className="paper-correction-notice" aria-live="polite">
+          <span>{correctionMessage}</span>
+          <button type="button" onClick={dismissCorrectionError}>
+            关闭
+          </button>
+        </aside>
+      ) : null}
       <div className="paper-param-actions">
         <button
           className="paper-primary-button"

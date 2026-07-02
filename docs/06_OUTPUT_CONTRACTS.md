@@ -632,7 +632,36 @@ plan 生成文本不得伪装成文档 excerpt。`user_supplied` citation 的 `e
 DOM id;前端 AnchorRegistry 负责把合法语义 target 解析为可点击位置。非 fallback 必须至少有
 一个合法 citation;fallback 必须 `confidence="low"`、`citations=[]` 且 `fallback_reason` 非空。
 
-### 12.9 反模式
+### 12.9 ParameterCorrection schema
+
+用户纠错只修改 `ModelGenerationPlan.parameter_mapping` 的工作值,不修改
+`PaperSpec.parameter_table`,也不重算 `parameter_conflicts`。纠错审计清单是独立对外契约:
+`GET /api/v1/papers/{paper_id}/parameter-corrections` 返回
+`schemas/paper_parameter_corrections.schema.json`。
+
+POST 纠错请求只接受 `target` / `corrected_value` / `corrected_unit`;`source`、
+`document_id`、`user_action`、`correction_id`、时间戳均由服务端注入。POST 成功返回
+`{paper_id, updated_plan, correction}` route-local wrapper。undo 成功返回
+`{paper_id, updated_plan}` route-local wrapper。
+
+`ParameterCorrectionModel`:
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `correction_id` | string | 服务端生成 | 审计 ID;前端只回传 undo |
+| `param_key` | string | opaque | 展示/审计键;消费者不得解析还原身份 |
+| `target` | object | 见下 | plan mapping 的确定性定位 |
+| `original` | object | `source=document_extracted` | AI 原抽值和唯一可证明文档来源 |
+| `corrected` | object | string/null | 用户纠错后的工作值 |
+| `created_at` / `updated_at` | UTC ISO-8601 `Z` | 必填 | 审计时间 |
+| `can_undo` | bool | 必填 | 当前 plan 是否仍可撤销 |
+| `can_undo_reason` | `active` / `target_stale` / `missing_mapping` | 必填 | 不可撤销原因 |
+
+`target` 字段为 `paper_param_name`、`model_param_name`、`plan_mapping_index`。
+`original.document_id` / `document_label` 只有按抽取表唯一命中时填写;不得用 primary document
+兜底。错误响应只返回稳定错误码和文案,不得包含原值、新值、单位、参数名或 `param_key`。
+
+### 12.10 反模式
 
 反模式 1:资料入口使用 `general`:
 
