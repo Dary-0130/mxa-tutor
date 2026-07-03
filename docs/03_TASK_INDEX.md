@@ -192,6 +192,7 @@ P2 v0.1 不承诺:
 | TASK-307 | **Evidence Citation Enforcer(证据引用强制器)** ⭐ | ✅ | Codex | 304 |
 | TASK-308 | Simulation Explanation Pack(EvidenceBuilder + 讲解产物链) | ✅ | Codex + PM | 303, 307 |
 | TASK-310 | 架构债重构(ProjectOverview contract relocation + TeachingUnit 最小闭环) | ✅ | Codex | 203, 207, 308 |
+| TASK-311 | 文档解析 sandbox 大 payload 死锁修复(drain-before-join + grace drain 不用 empty + kill escalation + RLIMIT_CPU 软<硬两套超时按 exitcode/deadline 分类;内容多的 PDF/DOCX 从一律 timeout 变为能正常解析进来;PdfParser/DocxParser 同受益) | ✅ | Codex | 合并(#168) |
 
 ### Week 3 验收
 
