@@ -6,8 +6,10 @@ import math
 import multiprocessing as mp
 import os
 import shutil
+import signal
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty
@@ -19,8 +21,13 @@ from core.interfaces.document_parser import DocumentParser, ParsedDocument
 DEFAULT_PARSER_TIMEOUT_SECONDS = 30.0
 DEFAULT_MEM_LIMIT_BYTES = 512 * 1024 * 1024
 SANDBOX_TEMP_PREFIX = "mxa_paper_parse_"
+POLL_SECONDS = 0.1
+DEAD_PROCESS_DRAIN_GRACE_SECONDS = 0.2
+PROCESS_JOIN_SECONDS = 1.0
+SIGKILL_DEADLINE_GRACE_SECONDS = 1.0
 # Keep sandbox children from inheriting parent memory under Linux's default fork.
 _SANDBOX_MP_CONTEXT = mp.get_context("spawn")
+_MISSING_RESULT = object()
 _ENV_ALLOWLIST = {
     "COMSPEC",
     "PATH",
@@ -76,20 +83,86 @@ def _run_child(request: _SandboxChildRequest, timeout_seconds: float) -> ParsedD
         args=(request, result_queue),
     )
     process.start()
-    process.join(timeout_seconds)
+    deadline = time.monotonic() + timeout_seconds
+    result: Any = _MISSING_RESULT
 
+    while result is _MISSING_RESULT:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 and process.is_alive():
+            _terminate_then_kill(process)
+            raise DocumentParseError("document_parse_timeout") from None
+
+        try:
+            result = result_queue.get(timeout=max(0.0, min(POLL_SECONDS, remaining)))
+            break
+        except Empty:
+            if process.is_alive():
+                continue
+            result = _drain_dead_process_result(result_queue)
+            if result is _MISSING_RESULT:
+                _raise_for_missing_result(process, deadline)
+
+    process.join(PROCESS_JOIN_SECONDS)
+    if process.is_alive():
+        _terminate_then_kill(process)
+
+    return _unwrap_child_result(result)
+
+
+def _drain_dead_process_result(result_queue: Any) -> Any:
+    grace_until = time.monotonic() + DEAD_PROCESS_DRAIN_GRACE_SECONDS
+    while time.monotonic() < grace_until:
+        try:
+            return result_queue.get(timeout=min(0.05, max(0.0, grace_until - time.monotonic())))
+        except Empty:
+            pass
+    return _MISSING_RESULT
+
+
+def _raise_for_missing_result(process: Any, deadline: float) -> None:
+    now = time.monotonic()
+    if (
+        now >= deadline
+        or _is_cpu_limit_exit(process.exitcode)
+        or _is_sigkill_near_deadline(process.exitcode, deadline, now)
+    ):
+        raise DocumentParseError("document_parse_timeout") from None
+    raise DocumentParseError("document_parse_failed") from None
+
+
+def _terminate_then_kill(process: Any) -> None:
     if process.is_alive():
         process.terminate()
-        process.join(1)
-        raise DocumentParseError("document_parse_timeout") from None
+    process.join(PROCESS_JOIN_SECONDS)
+    if process.is_alive() and hasattr(process, "kill"):
+        process.kill()
+        process.join(PROCESS_JOIN_SECONDS)
 
-    try:
-        status, payload = result_queue.get_nowait()
-    except Empty:
+
+def _is_cpu_limit_exit(exitcode: int | None) -> bool:
+    sigxcpu = getattr(signal, "SIGXCPU", None)
+    return sigxcpu is not None and exitcode == -int(sigxcpu)
+
+
+def _is_sigkill_near_deadline(
+    exitcode: int | None, deadline: float, now: float | None = None
+) -> bool:
+    sigkill = getattr(signal, "SIGKILL", None)
+    if sigkill is None or exitcode != -int(sigkill):
+        return False
+    current_time = time.monotonic() if now is None else now
+    return deadline - current_time <= SIGKILL_DEADLINE_GRACE_SECONDS
+
+
+def _unwrap_child_result(result: Any) -> ParsedDocument:
+    if not isinstance(result, tuple) or len(result) != 2:
         raise DocumentParseError("document_parse_failed") from None
 
+    status, payload = result
     if status == "ok" and isinstance(payload, ParsedDocument):
         return payload
+    if status == "error" and payload == "document_parse_failed":
+        raise DocumentParseError("document_parse_failed") from None
     raise DocumentParseError("document_parse_failed") from None
 
 
@@ -133,5 +206,6 @@ def _apply_resource_limits(timeout_seconds: float, mem_limit_bytes: int) -> None
     import resource
 
     cpu_seconds = max(1, math.ceil(timeout_seconds))
+    cpu_hard_seconds = cpu_seconds + 1
     resource.setrlimit(resource.RLIMIT_AS, (mem_limit_bytes, mem_limit_bytes))
-    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_hard_seconds))
