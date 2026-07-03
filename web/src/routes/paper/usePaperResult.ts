@@ -6,6 +6,7 @@ import {
   getPaperPlan,
   getPaperSpec,
   postPaperReparse,
+  postRegenerateSteps,
 } from "../../lib/paperApi";
 import type {
   MissingParameterPrompt,
@@ -42,7 +43,21 @@ type LoadState = {
   reparsing: boolean;
   reparseError: ApiException | null;
   reparseSourceUnavailable: boolean;
+  regeneratingSteps: boolean;
+  regenerateStepsError: ApiException | null;
+  regenerateStepsNotice: string | null;
 };
+
+function idleMutationState() {
+  return {
+    reparsing: false,
+    reparseError: null,
+    reparseSourceUnavailable: false,
+    regeneratingSteps: false,
+    regenerateStepsError: null,
+    regenerateStepsNotice: null,
+  };
+}
 
 function toApiException(error: unknown): ApiException {
   if (error instanceof ApiException) {
@@ -111,17 +126,13 @@ export function usePaperResult(paperId: string | undefined) {
           data: routeData,
           loading: !routeData,
           error: null,
-          reparsing: false,
-          reparseError: null,
-          reparseSourceUnavailable: false,
+          ...idleMutationState(),
         }
       : {
           data: null,
           loading: false,
           error: new ApiException(404, "paper_not_found", "论文结果不存在或已过期,请重新上传。"),
-          reparsing: false,
-          reparseError: null,
-          reparseSourceUnavailable: false,
+          ...idleMutationState(),
         },
   );
 
@@ -131,9 +142,7 @@ export function usePaperResult(paperId: string | undefined) {
         data: null,
         loading: false,
         error: new ApiException(404, "paper_not_found", "论文结果不存在或已过期,请重新上传。"),
-        reparsing: false,
-        reparseError: null,
-        reparseSourceUnavailable: false,
+        ...idleMutationState(),
       });
       return;
     }
@@ -143,18 +152,14 @@ export function usePaperResult(paperId: string | undefined) {
         data: await fetchPaperResult(paperId),
         loading: false,
         error: null,
-        reparsing: false,
-        reparseError: null,
-        reparseSourceUnavailable: false,
+        ...idleMutationState(),
       });
     } catch (error) {
       setState({
         data: null,
         loading: false,
         error: toApiException(error),
-        reparsing: false,
-        reparseError: null,
-        reparseSourceUnavailable: false,
+        ...idleMutationState(),
       });
     }
   }, [paperId]);
@@ -177,9 +182,7 @@ export function usePaperResult(paperId: string | undefined) {
               data,
               loading: false,
               error: null,
-              reparsing: false,
-              reparseError: null,
-              reparseSourceUnavailable: false,
+              ...idleMutationState(),
             });
           }
         })
@@ -189,9 +192,7 @@ export function usePaperResult(paperId: string | undefined) {
               data: null,
               loading: false,
               error: toApiException(error),
-              reparsing: false,
-              reparseError: null,
-              reparseSourceUnavailable: false,
+              ...idleMutationState(),
             });
           }
         });
@@ -205,9 +206,7 @@ export function usePaperResult(paperId: string | undefined) {
           data: routeData,
           loading: false,
           error: null,
-          reparsing: false,
-          reparseError: null,
-          reparseSourceUnavailable: false,
+          ...idleMutationState(),
         });
       }
     });
@@ -254,6 +253,9 @@ export function usePaperResult(paperId: string | undefined) {
         reparsing: current.reparsing,
         reparseError: current.reparseError,
         reparseSourceUnavailable: current.reparseSourceUnavailable,
+        regeneratingSteps: current.regeneratingSteps,
+        regenerateStepsError: current.regenerateStepsError,
+        regenerateStepsNotice: current.regenerateStepsNotice,
       };
     });
   }, []);
@@ -285,9 +287,7 @@ export function usePaperResult(paperId: string | undefined) {
           },
           loading: false,
           error: null,
-          reparsing: false,
-          reparseError: null,
-          reparseSourceUnavailable: false,
+          ...idleMutationState(),
         };
       });
     } catch (error) {
@@ -302,9 +302,70 @@ export function usePaperResult(paperId: string | undefined) {
     }
   }, [paperId, state.data, state.reparsing]);
 
+  const regenerateSteps = useCallback(async () => {
+    if (!paperId || state.regeneratingSteps || !state.data) {
+      return;
+    }
+    setState((current) => {
+      if (current.regeneratingSteps || !current.data) {
+        return current;
+      }
+      return {
+        ...current,
+        regeneratingSteps: true,
+        regenerateStepsError: null,
+        regenerateStepsNotice: null,
+      };
+    });
+    try {
+      const response = await postRegenerateSteps(paperId);
+      setState((current) => {
+        if (!current.data) {
+          return current;
+        }
+        const hasFullSteps =
+          Array.isArray(response.updated_plan.build_steps) &&
+          response.updated_plan.build_steps.length > 0;
+        return {
+          ...current,
+          data: {
+            ...current.data,
+            plan: response.updated_plan,
+          },
+          regeneratingSteps: false,
+          regenerateStepsError: null,
+          regenerateStepsNotice: hasFullSteps ? null : "暂未生成完整步骤,可稍后重试",
+        };
+      });
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        regeneratingSteps: false,
+        regenerateStepsError: toApiException(error),
+        regenerateStepsNotice: null,
+      }));
+    }
+  }, [paperId, state.data, state.regeneratingSteps]);
+
   const dismissReparseError = useCallback(() => {
     setState((current) => ({ ...current, reparseError: null }));
   }, []);
 
-  return { ...state, retry: loadFromServer, updatePlan, reparse, dismissReparseError };
+  const dismissRegenerateStepsMessage = useCallback(() => {
+    setState((current) => ({
+      ...current,
+      regenerateStepsError: null,
+      regenerateStepsNotice: null,
+    }));
+  }, []);
+
+  return {
+    ...state,
+    retry: loadFromServer,
+    updatePlan,
+    reparse,
+    dismissReparseError,
+    regenerateSteps,
+    dismissRegenerateStepsMessage,
+  };
 }

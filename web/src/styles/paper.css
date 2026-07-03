@@ -235,6 +235,19 @@
   cursor: not-allowed;
   opacity: 0.54;
 }
+.paper-button-spinner {
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: paper-spin 0.8s linear infinite;
+}
+@keyframes paper-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .paper-shell {
   position: relative;
@@ -524,6 +537,44 @@
   display: grid;
   gap: 18px;
 }
+.paper-build-step-return-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.paper-build-step-return-head .paper-secondary {
+  margin: 0;
+}
+.paper-regenerate-steps-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+}
+.paper-regenerate-steps-notice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(255, 182, 158, 0.42);
+  background: rgba(8, 13, 13, 0.58);
+  padding: 12px;
+}
+.paper-regenerate-steps-notice span {
+  color: #ffb69e;
+  font: 850 0.86rem var(--font-display);
+  line-height: 1.45;
+}
+.paper-regenerate-steps-notice button {
+  border: 1px solid rgba(255, 182, 158, 0.42);
+  background: transparent;
+  color: #ffb69e;
+  cursor: pointer;
+  font: 900 0.72rem var(--font-mono);
+  padding: 7px 8px;
+}
 .paper-library-choice {
   display: flex;
   flex-wrap: wrap;
@@ -651,6 +702,21 @@
   align-items: center;
   gap: 8px;
   max-width: 100%;
+}
+.paper-interaction-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  background: rgba(3, 7, 7, 0.54);
+  color: var(--color-ite);
+  font: 900 0.92rem var(--font-display);
+  pointer-events: all;
+}
+.paper-interaction-lock span {
+  justify-self: center;
 }
 
 .paper-parameter-area {
@@ -1232,7 +1298,7 @@
     justify-content: space-between;
   }
   .paper-page {
-    padding-bottom: 300px;
+    padding-bottom: 96px;
   }
   .paper-shell {
     width: min(100% - 32px, 760px);
@@ -1271,18 +1337,16 @@
     text-align: center;
   }
   .paper-body-grid {
-    display: block;
+    grid-template-columns: 1fr;
   }
   .paper-ask-panel-wrap {
-    position: fixed;
-    top: auto;
-    right: 16px;
-    bottom: 12px;
-    left: 16px;
-    z-index: 6;
+    position: static;
+    z-index: auto;
+    margin-top: 40px;
   }
   .paper-ask-panel {
-    max-height: min(32vh, 260px);
+    max-height: none;
+    overflow: visible;
     padding: 14px;
   }
   .paper-ask-form {

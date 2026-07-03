@@ -166,6 +166,60 @@ async def test_apply_then_undo_keeps_build_steps_and_script_suppressed() -> None
 
 
 @pytest.mark.asyncio
+async def test_undo_after_regenerate_clears_steps_script_and_correction_refs() -> None:
+    store = _FakeBundleStore(_record())
+    service = ParameterCorrectionService(store)
+
+    applied = await service.apply(
+        "paper-1",
+        target=_target(expected_value="3.5", expected_unit="s"),
+        corrected_value="4.0",
+        corrected_unit=None,
+        corrected_unit_supplied=False,
+    )
+    correction = applied.correction
+    correction_evidence = next(
+        entry
+        for entry in applied.record.plan.evidence
+        if entry.parameter_correction_id == correction.correction_id
+    )
+    regenerated_plan = replace(
+        applied.record.plan,
+        build_steps=[
+            ModelBuildStep(
+                step_id="STEP-1",
+                title="Regenerated structured step",
+                intent="Use the corrected parameter source.",
+                block_refs=[],
+                parameter_refs=[],
+                connection_hints=[],
+                configuration_hints=[],
+                depends_on=[],
+                evidence=[correction_evidence],
+                display_text="Regenerated structured step",
+            )
+        ],
+        m_script_skeleton="clear; clc;",
+    )
+    store.record = replace(applied.record, plan=regenerated_plan)
+
+    undone = await service.undo("paper-1", correction.correction_id)
+
+    assert undone.plan.build_steps is None
+    assert undone.plan.m_script_skeleton is None
+    assert store.corrections == []
+    assert store.undo_calls == [correction.correction_id]
+    assert not any(
+        entry.user_action is UserEvidenceAction.CORRECT_EXTRACTED
+        for entry in undone.plan.evidence
+    )
+    assert not any(
+        entry.parameter_correction_id == correction.correction_id
+        for entry in undone.plan.evidence
+    )
+
+
+@pytest.mark.asyncio
 async def test_undo_other_paper_correction_raises_not_found_without_writing() -> None:
     store = _FakeBundleStore(_record())
     service = ParameterCorrectionService(store)

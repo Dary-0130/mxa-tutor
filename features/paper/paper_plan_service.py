@@ -30,7 +30,9 @@ from features.paper._prompt_builder import (
     build_messages_for_build_steps,
     build_messages_for_missing_detect,
     build_messages_for_mscript_draft,
+    build_messages_for_mscript_draft_from_mapping,
     build_messages_for_plan_compose,
+    build_messages_for_regenerate_build_steps,
     build_messages_for_subsystem_plan,
 )
 from features.paper.paper_plan_helpers import (
@@ -42,6 +44,7 @@ from features.paper.paper_plan_helpers import (
     MissingBindingModel,
     ModelBuildStepDraft,
     PlanAssembler,
+    UserEvidenceRef,
     apply_plan_evidence_reference_bridge,
     build_plan_evidence_source_refs,
     validate_build_step_evidence_for_spec,
@@ -62,6 +65,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS = 120.0
 DEFAULT_PAPER_PLAN_MAX_TOKENS = 8000  # R6 真启动调参,对齐 DeepSeek V3 8192 上限
 BUILD_STEP_ROLE_NAME = "build_step_planner"
+BUILD_STEP_REGENERATION_ROLE_NAME = "build_step_regenerator"
+BUILD_STEP_ROLE_NAMES = frozenset({BUILD_STEP_ROLE_NAME, BUILD_STEP_REGENERATION_ROLE_NAME})
 
 
 class PaperPlanService:
@@ -188,12 +193,12 @@ class PaperPlanService:
                 role_name,
                 type(last_json_error).__name__,
             )
-            if role_name == BUILD_STEP_ROLE_NAME:
+            if role_name in BUILD_STEP_ROLE_NAMES:
                 raise BuildStepsJsonParseError("json_parse_failed") from None
             raise PaperPlanGenerationError(f"role={role_name}: invalid_json") from None
 
         if not isinstance(payload, dict):
-            if role_name == BUILD_STEP_ROLE_NAME:
+            if role_name in BUILD_STEP_ROLE_NAMES:
                 raise BuildStepsDtoValidationError("json_top_level_must_be_object")
             self._raise_generation_error(role_name, "json_top_level_must_be_object")
         return payload
@@ -332,6 +337,42 @@ class PaperPlanService:
             raise BuildStepsDtoValidationError("dto_invalid") from None
         return model.to_drafts()
 
+    async def _llm_build_steps_for_regeneration(
+        self,
+        block_recommendations: list[BlockRecommendation],
+        parameter_mapping: list[ParameterMapping],
+        spec: PaperSpec,
+        record_plan_evidence: list[PaperEvidenceEntry],
+        allowed_user_evidence_refs: set[UserEvidenceRef],
+        allowed_user_prompt_ids: frozenset[str],
+    ) -> list[ModelBuildStepDraft]:
+        data = await self._call_llm_json(
+            build_messages_for_regenerate_build_steps(
+                block_recommendations,
+                parameter_mapping,
+                spec.evidence,
+                record_plan_evidence,
+                build_plan_evidence_source_refs(spec),
+                allowed_user_evidence_refs=allowed_user_evidence_refs,
+                allowed_user_prompt_ids=allowed_user_prompt_ids,
+            ),
+            BUILD_STEP_REGENERATION_ROLE_NAME,
+        )
+        source_refs = build_plan_evidence_source_refs(spec)
+        data = apply_plan_evidence_reference_bridge(data, source_refs)
+        if data.get("build_steps") == []:
+            raise BuildStepsDtoValidationError("empty_steps")
+        try:
+            model = _BuildStepsOutputModel.model_validate(data)
+        except ValidationError as exc:
+            logger.error(
+                "paper_plan_build_steps_dto_failed role=%s exc_type=%s",
+                BUILD_STEP_REGENERATION_ROLE_NAME,
+                type(exc).__name__,
+            )
+            raise BuildStepsDtoValidationError("dto_invalid") from None
+        return model.to_drafts()
+
     async def _llm_mscript_draft(self, spec: PaperSpec) -> str | None:
         role_name = "mscript_drafter"
         sanitized_spec = without_conflicted_parameter_entries(spec)
@@ -339,6 +380,31 @@ class PaperPlanService:
             build_messages_for_mscript_draft(
                 spec.equations,
                 sanitized_spec.parameter_table,
+                spec.parameter_conflicts,
+            ),
+            role_name,
+        )
+        if "m_script_skeleton" not in data:
+            self._raise_generation_error(role_name, "m_script_skeleton_missing")
+        mscript = data["m_script_skeleton"]
+        if mscript is not None and not isinstance(mscript, str):
+            self._raise_generation_error(role_name, "m_script_skeleton_invalid")
+        if mscript is not None and mscript_assigns_conflict_value(
+            mscript, spec.parameter_conflicts
+        ):
+            self._raise_generation_error(role_name, "parameter_conflict_mscript")
+        return mscript
+
+    async def _llm_mscript_draft_from_mapping(
+        self,
+        parameter_mapping: list[ParameterMapping],
+        spec: PaperSpec,
+    ) -> str | None:
+        role_name = "mscript_drafter_from_mapping"
+        data = await self._call_llm_json(
+            build_messages_for_mscript_draft_from_mapping(
+                spec.equations,
+                parameter_mapping,
                 spec.parameter_conflicts,
             ),
             role_name,

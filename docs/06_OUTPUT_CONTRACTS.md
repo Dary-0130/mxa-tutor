@@ -511,6 +511,30 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 
 **修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)→ v0.8(2026-07-01;TASK-521-C 对外 PaperAskCitation 追加可空 document_id/document_label,LLM ask prompt payload 仍不含 document 维度)
 
+### 12.5.1 Regenerate build steps endpoint
+
+`POST /api/v1/papers/{paper_id}/regenerate-steps` 用于在用户补充或纠错后,基于当前
+`ModelGenerationPlan.parameter_mapping` 工作值就地重生成 `build_steps` 和
+`m_script_skeleton`。请求体为空对象;额外字段会被拒绝。
+
+响应复用用户补充端点的 route-local 形状,不进入导出的 paper schema:
+
+```json
+{
+  "paper_id": "PAPER-001",
+  "updated_plan": {}
+}
+```
+
+契约约束:
+
+- 重生成不重新解析资料,不修改 `PaperSpec.parameter_table` 或 `parameter_conflicts`。
+- 重生成不修改 `parameter_mapping`;已补充或已纠错的 `user_supplied` 工作值保持不变。
+- 重生成不新增、不删除、不更新纠错记录;`correct_extracted` evidence 保持原样。
+- `build_steps` 生成成功时会替换为新的完整步骤;若暂未生成成功,可以仍为 `null`。
+- `m_script_skeleton` 生成失败不阻断 `build_steps`;失败时保持原值或 `null`。
+- `build_steps` 的表述可能与上一版不同,但必须继续遵守 evidence 双源契约与冲突参数守门。
+
 ### 12.6 TuningSuggestion schema
 
 `TuningSuggestion` 描述面向用户场景的调参方向。它给方向和物理影响,不承诺运行结果或最优调参。

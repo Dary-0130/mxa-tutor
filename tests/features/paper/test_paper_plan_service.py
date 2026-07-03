@@ -287,6 +287,38 @@ async def test_all_role_helpers_use_call_llm_json(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.asyncio
+async def test_regeneration_role_helpers_use_call_llm_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = PaperPlanService(NoopTextProvider())
+    calls: list[str] = []
+
+    async def fake_call(messages: list[LLMMessage], role_name: str) -> dict[str, Any]:
+        _ = messages
+        calls.append(role_name)
+        payloads = _payloads()
+        if role_name == "build_step_regenerator":
+            return copy.deepcopy(payloads["build_step_planner"])
+        if role_name == "mscript_drafter_from_mapping":
+            return copy.deepcopy(payloads["mscript_drafter"])
+        raise AssertionError(f"unexpected role {role_name}")
+
+    monkeypatch.setattr(service, "_call_llm_json", fake_call)
+
+    await service._llm_build_steps_for_regeneration(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        _spec(),
+        [_document_evidence()],
+        set(),
+        frozenset(),
+    )
+    await service._llm_mscript_draft_from_mapping([_sentinel_mapping()], _spec())
+
+    assert calls == ["build_step_regenerator", "mscript_drafter_from_mapping"]
+
+
+@pytest.mark.asyncio
 async def test_call_llm_json_bridges_via_asyncio_to_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = QueueTextProvider([json.dumps({"ok": True})])
     service = PaperPlanService(provider, timeout=12.0, max_tokens=34)
@@ -555,6 +587,18 @@ async def test_mscript_drafter_rejects_conflict_candidate_assignment() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mscript_drafter_from_mapping_rejects_conflict_candidate_assignment() -> None:
+    payloads = _payloads()
+    payloads["mscript_drafter_from_mapping"] = {"m_script_skeleton": "clear; clc;\nH = 3.5;"}
+
+    with pytest.raises(PaperPlanGenerationError, match="parameter_conflict_mscript"):
+        await PayloadPaperPlanService(payloads)._llm_mscript_draft_from_mapping(
+            [],
+            _conflict_spec(),
+        )
+
+
+@pytest.mark.asyncio
 async def test_structured_build_steps_invalid_payload_falls_back_to_legacy() -> None:
     payloads = _payloads()
     payloads["build_step_planner"] = {"build_steps": []}
@@ -748,6 +792,14 @@ async def test_build_step_invalid_json_raises_structured_error() -> None:
 
     with pytest.raises(BuildStepsJsonParseError, match="json_parse_failed"):
         await service._call_llm_json([LLMMessage("system", "x")], "build_step_planner")
+
+
+@pytest.mark.asyncio
+async def test_regenerate_build_step_invalid_json_raises_structured_error() -> None:
+    service = PaperPlanService(QueueTextProvider(["not json", "still not json"]))
+
+    with pytest.raises(BuildStepsJsonParseError, match="json_parse_failed"):
+        await service._call_llm_json([LLMMessage("system", "x")], "build_step_regenerator")
 
 
 @pytest.mark.asyncio

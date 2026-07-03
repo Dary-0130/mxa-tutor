@@ -82,15 +82,60 @@ function renderEvidenceItems(entries: PaperEvidenceEntry[]) {
     .filter(Boolean);
 }
 
-export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
+interface BuildStepsProps {
+  plan: ModelGenerationPlan;
+  regenerating?: boolean;
+  regenerateMessage?: string | null;
+  regenerateErrorMessage?: string | null;
+  onRegenerate?: () => void;
+  onDismissRegenerateMessage?: () => void;
+}
+
+export function BuildSteps({
+  plan,
+  regenerating = false,
+  regenerateMessage = null,
+  regenerateErrorMessage = null,
+  onRegenerate,
+  onDismissRegenerateMessage,
+}: BuildStepsProps) {
   const structuredSteps =
     Array.isArray(plan.build_steps) && plan.build_steps.length > 0 ? plan.build_steps : null;
   const blockLookup = structuredSteps ? getBlockLookup(structuredSteps) : null;
   const stepLookup = structuredSteps ? getStepLookup(structuredSteps) : null;
+  const regenerateButton = onRegenerate ? (
+    <button
+      className="paper-primary-button paper-regenerate-steps-button"
+      type="button"
+      disabled={regenerating}
+      onClick={onRegenerate}
+    >
+      {regenerating ? <span className="paper-button-spinner" aria-hidden="true" /> : null}
+      <span>{regenerating ? "生成中…" : "重新生成步骤"}</span>
+    </button>
+  ) : null;
+  const regenerateNotice =
+    regenerateMessage || regenerateErrorMessage ? (
+      <aside className="paper-regenerate-steps-notice" aria-live="polite">
+        <span>{regenerateErrorMessage ?? regenerateMessage}</span>
+        {onDismissRegenerateMessage ? (
+          <button type="button" onClick={onDismissRegenerateMessage}>
+            关闭
+          </button>
+        ) : null}
+      </aside>
+    ) : null;
 
   if (structuredSteps) {
     return (
       <div className="paper-build-steps">
+        {regenerateButton ? (
+          <div className="paper-build-step-return-head">
+            <p className="paper-secondary">当前步骤可按最新参数重新生成。</p>
+            {regenerateButton}
+          </div>
+        ) : null}
+        {regenerateNotice}
         <ol className="paper-step-list paper-build-step-list">
           {structuredSteps.map((step, index) => {
             const titleId = `paper-build-step-${index + 1}-title`;
@@ -256,7 +301,11 @@ export function BuildSteps({ plan }: { plan: ModelGenerationPlan }) {
 
   return (
     <div className="paper-build-steps">
-      <p className="paper-secondary">当前显示推荐块视图;完整步骤需在重新解析后生成。</p>
+      <div className="paper-build-step-return-head">
+        <p className="paper-secondary">当前显示推荐块视图;完整步骤可重新生成。</p>
+        {regenerateButton}
+      </div>
+      {regenerateNotice}
       <p className="paper-library-choice">
         <span>推荐库:</span>
         <strong className="paper-token">{plan.library_choice}</strong>
