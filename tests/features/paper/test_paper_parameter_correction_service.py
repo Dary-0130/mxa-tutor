@@ -210,12 +210,10 @@ async def test_undo_after_regenerate_clears_steps_script_and_correction_refs() -
     assert store.corrections == []
     assert store.undo_calls == [correction.correction_id]
     assert not any(
-        entry.user_action is UserEvidenceAction.CORRECT_EXTRACTED
-        for entry in undone.plan.evidence
+        entry.user_action is UserEvidenceAction.CORRECT_EXTRACTED for entry in undone.plan.evidence
     )
     assert not any(
-        entry.parameter_correction_id == correction.correction_id
-        for entry in undone.plan.evidence
+        entry.parameter_correction_id == correction.correction_id for entry in undone.plan.evidence
     )
 
 
