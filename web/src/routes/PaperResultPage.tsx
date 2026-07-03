@@ -59,6 +59,11 @@ export function PaperResultPage() {
     reparseError,
     reparseSourceUnavailable,
     dismissReparseError,
+    regeneratingSteps,
+    regenerateStepsError,
+    regenerateStepsNotice,
+    regenerateSteps,
+    dismissRegenerateStepsMessage,
   } = usePaperResult(paperId);
 
   if (loading && !data) {
@@ -78,6 +83,12 @@ export function PaperResultPage() {
     (equation) => equation.latex_or_text.trim() !== "",
   );
   const includeEquations = renderableEquations.length > 0;
+  const structuredSteps =
+    Array.isArray(data.plan.build_steps) && data.plan.build_steps.length > 0;
+  const hasRegenerationWork =
+    !structuredSteps ||
+    data.plan.m_script_skeleton === null ||
+    data.plan.m_script_skeleton === undefined;
 
   return (
     <main className="paper-page">
@@ -132,7 +143,16 @@ export function PaperResultPage() {
               aria-labelledby="paper-build-steps-title"
             >
               <h2 id="paper-build-steps-title">建模步骤</h2>
-              <BuildSteps plan={data.plan} />
+              <BuildSteps
+                plan={data.plan}
+                regenerating={regeneratingSteps}
+                regenerateMessage={regenerateStepsNotice}
+                regenerateErrorMessage={
+                  regenerateStepsError ? resolveErrorMessage(regenerateStepsError.code) : null
+                }
+                onRegenerate={hasRegenerationWork ? regenerateSteps : undefined}
+                onDismissRegenerateMessage={dismissRegenerateStepsMessage}
+              />
             </section>
             <section
               id="paper-parameters"
@@ -168,6 +188,12 @@ export function PaperResultPage() {
           />
         </div>
       </div>
+      {regeneratingSteps ? (
+        <div className="paper-interaction-lock" role="status" aria-live="polite">
+          <span className="paper-button-spinner" aria-hidden="true" />
+          <span>生成中…</span>
+        </div>
+      ) : null}
     </main>
   );
 }

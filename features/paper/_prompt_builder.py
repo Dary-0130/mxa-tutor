@@ -7,6 +7,7 @@ import json
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_parameter_conflicts import (
     conflict_prompt_summary,
+    label_hits_parameter_conflict,
     parameter_entry_hits_conflict,
     without_conflicted_parameter_entries,
 )
@@ -215,6 +216,59 @@ def build_messages_for_build_steps(
     return _role_messages(template.system, user)
 
 
+def build_messages_for_regenerate_build_steps(
+    block_recommendations: list[BlockRecommendation],
+    parameter_mapping: list[ParameterMapping],
+    document_evidence: list[PaperEvidenceEntry],
+    plan_evidence: list[PaperEvidenceEntry],
+    source_refs: list[PlanEvidenceSourceRef],
+    *,
+    allowed_user_evidence_refs: set[UserEvidenceRef],
+    allowed_user_prompt_ids: frozenset[str],
+) -> list[LLMMessage]:
+    """Build regeneration-only BuildStepPlanner messages."""
+
+    template = load_prompt_template("paper_plan_build_steps_regenerate.yaml")
+    allowed_user_evidence = [
+        entry
+        for entry in plan_evidence
+        if entry.source is EvidenceSource.USER_SUPPLIED
+        and _user_evidence_entry_is_resolved(entry, allowed_user_evidence_refs)
+    ]
+    user = _render_user(
+        template.user,
+        {
+            "block_recommendations_json": _json_dumps(
+                [
+                    BlockRecommendationModel.from_domain(block).model_dump(mode="json")
+                    for block in block_recommendations
+                ]
+            ),
+            "parameter_mapping_json": _json_dumps(
+                [
+                    ParameterMappingModel.from_domain(mapping).model_dump(mode="json")
+                    for mapping in parameter_mapping
+                ]
+            ),
+            "paper_evidence_json": _json_dumps(
+                [
+                    PaperEvidenceEntryModel.from_domain(entry).model_dump(mode="json")
+                    for entry in document_evidence
+                ]
+            ),
+            "allowed_user_evidence_json": _json_dumps(
+                [
+                    PaperEvidenceEntryModel.from_domain(entry).model_dump(mode="json")
+                    for entry in allowed_user_evidence
+                ]
+            ),
+            "resolved_prompt_ids_json": _json_dumps(sorted(allowed_user_prompt_ids)),
+            "plan_evidence_sources_json": _plan_evidence_sources_json(source_refs),
+        },
+    )
+    return _role_messages(template.system, user, shared_constraints=_regeneration_constraints())
+
+
 def build_messages_for_mscript_draft(
     equations: list[EquationEntry],
     parameter_table: list[ParameterEntry],
@@ -240,6 +294,39 @@ def build_messages_for_mscript_draft(
                 [
                     ParameterEntryModel.from_domain(entry).model_dump(mode="json")
                     for entry in filtered_parameter_table
+                ]
+            ),
+            "parameter_conflicts_json": _parameter_conflicts_prompt_json(conflicts),
+        },
+    )
+    return _role_messages(template.system, user)
+
+
+def build_messages_for_mscript_draft_from_mapping(
+    equations: list[EquationEntry],
+    parameter_mapping: list[ParameterMapping],
+    parameter_conflicts: list[ParameterConflict] | None = None,
+) -> list[LLMMessage]:
+    """Build regeneration-only MScriptDrafter messages from effective mappings."""
+
+    template = load_prompt_template("paper_plan_mscript_from_mapping.yaml")
+    conflicts = parameter_conflicts or []
+    filtered_mapping = [
+        mapping for mapping in parameter_mapping if not _mapping_hits_conflict(mapping, conflicts)
+    ]
+    user = _render_user(
+        template.user,
+        {
+            "equations_json": _json_dumps(
+                [
+                    EquationEntryModel.from_domain(entry).model_dump(mode="json")
+                    for entry in equations
+                ]
+            ),
+            "parameter_mapping_json": _json_dumps(
+                [
+                    ParameterMappingModel.from_domain(mapping).model_dump(mode="json")
+                    for mapping in filtered_mapping
                 ]
             ),
             "parameter_conflicts_json": _parameter_conflicts_prompt_json(conflicts),
@@ -341,14 +428,64 @@ def _user_evidence_entry_is_resolved(
     return False
 
 
-def _role_messages(system: str, user: str) -> list[LLMMessage]:
+def _role_messages(
+    system: str,
+    user: str,
+    *,
+    shared_constraints: str | None = None,
+) -> list[LLMMessage]:
     return [
         LLMMessage(
             role="system",
-            content=f"{system.rstrip()}\n\n{_shared_paper_plan_constraints()}",
+            content=f"{system.rstrip()}\n\n{shared_constraints or _shared_paper_plan_constraints()}",
         ),
         LLMMessage(role="user", content=user),
     ]
+
+
+def _regeneration_constraints() -> str:
+    return """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
+只返回有效 JSON 对象;不要 markdown,不要解释文字。
+
+【重生成阶段 evidence 双源契约】(每个 PaperEvidenceEntry 必守):
+- document_id 是后端注入的契约字段,LLM 不输出、不自创
+- source = "document_extracted":必须填写私有 source_ref(来自 plan_evidence_sources_json);三 locator 填 null;excerpt 由后端按 source_ref 回填;missing_param_prompt_id = null;document_id 由后端按 source_ref 注入
+- source = "user_supplied":只能逐字复用 allowed_user_evidence_json 中的一条;三 locator 全 null;excerpt = null;document_id = null
+- user_action = "fill_missing" 时,missing_param_prompt_id 必须在 resolved_prompt_ids_json 中;parameter_correction_id / correction_param_key = null
+- user_action = "correct_extracted" 时,parameter_correction_id / correction_param_key 必须逐字来自 allowed_user_evidence_json;missing_param_prompt_id = null
+
+【私有引用桥】:
+- document_extracted evidence 只能引用 plan_evidence_sources_json 里的 source_ref,形如 REF-001;严禁自创 source_ref
+- 不输出 document_id;不直接输出 paper_section_id / equation_id / figure_id 的真实 ID;后端会按 source_ref 解析、stamp document_id、回填 canonical locator、并 strip source_ref
+- user_supplied evidence 不填 source_ref,不得伪造 allowed_user_evidence_json 之外的用户证据
+
+【字段名硬约束】(逐字匹配,禁止自创字段名):
+- BlockRecommendation 3 字段:block_type / purpose / paper_reference
+- ParameterMapping 5 字段:paper_param_name / model_param_name / value / unit / source
+- ParameterMapping.unit 工程推断 / 无物理单位时优先填 null
+- 禁止字段名:locator / locators / paper_locator / param_name / parameter_name / param_symbol / param_value / param_unit
+- 禁止字段名嵌套对象:locator 必须把 paper_section_id / equation_id / figure_id 平铺,不嵌套
+
+【重生成阶段参数来源】:
+- parameter_mapping_json 是当前建模工作值,可能包含用户已补充或已纠错的 user_supplied 值
+- user_supplied 工作值可以作为合法参数来源进入步骤引用,但不得写成论文原文证据
+- 不得把 user_supplied evidence 标成 document_extracted;不得伪造论文 locator / excerpt
+
+【反幻觉】:
+- 不输出 PaperSpec / 资料没给的参数 / 公式 / 图占位
+- 工程推断字段只在 SimPowerSystems 工程惯例下推断;若已有,直接复用,不重新编
+- 缺参时只保留 value 字面 "null";不编值
+- plan_id / paper_spec_id 不要自生成"""
+
+
+def _mapping_hits_conflict(
+    mapping: ParameterMapping,
+    conflicts: list[ParameterConflict],
+) -> bool:
+    return label_hits_parameter_conflict(
+        mapping.paper_param_name,
+        conflicts,
+    ) or label_hits_parameter_conflict(mapping.model_param_name, conflicts)
 
 
 def _render_user(template: str, values: dict[str, str]) -> str:

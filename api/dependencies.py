@@ -75,6 +75,7 @@ from features.paper.paper_ask_service import PaperAskService
 from features.paper.paper_parameter_correction_service import ParameterCorrectionService
 from features.paper.paper_plan_service import PaperPlanService
 from features.paper.paper_reparse_service import PaperReparseLockRegistry, PaperReparseService
+from features.paper.paper_step_regeneration_service import PaperStepRegenerationService
 from features.paper.paper_tuning_service import TuningSuggestionService
 
 
@@ -374,6 +375,24 @@ def get_paper_parameter_correction_service(
 ) -> ParameterCorrectionService:
     """装配 ParameterCorrectionService。"""
     return ParameterCorrectionService(store=store)
+
+
+def get_paper_step_regeneration_service(
+    bundle_store: Annotated[PaperBundleStore, Depends(get_paper_bundle_store)],
+    plan_cache: Annotated[PaperPlanCache, Depends(get_paper_plan_cache)],
+    plan_service: Annotated[PaperPlanService, Depends(get_paper_plan_service)],
+    lock_registry: Annotated[
+        PaperReparseLockRegistry,
+        Depends(get_paper_reparse_lock_registry),
+    ],
+) -> PaperStepRegenerationService:
+    """装配 PaperStepRegenerationService。"""
+    return PaperStepRegenerationService(
+        bundle_store=bundle_store,
+        plan_cache=plan_cache,
+        plan_service=plan_service,
+        lock_registry=lock_registry,
+    )
 
 
 def get_paper_ask_service(

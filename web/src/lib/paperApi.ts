@@ -46,6 +46,10 @@ export function postPaperReparse(paperId: string): Promise<PaperReparseResponse>
   return apiPost<PaperReparseResponse>(paperPath(paperId, "/reparse"));
 }
 
+export function postRegenerateSteps(paperId: string): Promise<UpdatedPlanResponse> {
+  return apiPost<UpdatedPlanResponse>(paperPath(paperId, "/regenerate-steps"), {});
+}
+
 export function postTuningSuggest(
   paperId: string,
   request: TuningSuggestRequest,

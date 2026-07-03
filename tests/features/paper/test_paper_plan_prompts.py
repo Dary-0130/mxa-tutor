@@ -26,19 +26,23 @@ from features.paper._prompt_builder import (
     build_messages_for_build_steps,
     build_messages_for_missing_detect,
     build_messages_for_mscript_draft,
+    build_messages_for_mscript_draft_from_mapping,
     build_messages_for_plan_compose,
+    build_messages_for_regenerate_build_steps,
     build_messages_for_subsystem_plan,
     build_messages_for_tuning_suggest,
 )
 from features.paper._prompt_loader import load_prompt_template
-from features.paper.paper_plan_helpers import build_plan_evidence_source_refs
+from features.paper.paper_plan_helpers import UserEvidenceRef, build_plan_evidence_source_refs
 
 PAPER_PLAN_PROMPTS = [
     "paper_plan_missing_detector.yaml",
     "paper_plan_composer.yaml",
     "paper_plan_build_steps.yaml",
+    "paper_plan_build_steps_regenerate.yaml",
     "paper_plan_subsystem.yaml",
     "paper_plan_mscript.yaml",
+    "paper_plan_mscript_from_mapping.yaml",
     "paper_tuning_suggest.yaml",
 ]
 
@@ -83,12 +87,30 @@ def test_load_paper_plan_build_steps_yaml() -> None:
     assert "禁止输出 display_text" in template.system
 
 
+def test_load_paper_plan_build_steps_regenerate_yaml() -> None:
+    template = load_prompt_template("paper_plan_build_steps_regenerate.yaml")
+
+    assert template.version == "v0.1"
+    assert "BuildStepPlanner(Regenerate)" in template.system
+    assert "{allowed_user_evidence_json}" in template.user
+    assert "{resolved_prompt_ids_json}" in template.user
+    assert "correct_extracted" in template.system
+
+
 def test_load_paper_plan_mscript_yaml() -> None:
     template = load_prompt_template("paper_plan_mscript.yaml")
 
     assert template.version == "v0.1"
     assert "MScriptDrafter" in template.system
     assert "{equations_json}" in template.user
+
+
+def test_load_paper_plan_mscript_from_mapping_yaml() -> None:
+    template = load_prompt_template("paper_plan_mscript_from_mapping.yaml")
+
+    assert template.version == "v0.1"
+    assert "MScriptDrafter(Regenerate)" in template.system
+    assert "{parameter_mapping_json}" in template.user
 
 
 def test_load_paper_tuning_suggest_yaml() -> None:
@@ -273,6 +295,38 @@ def test_build_step_planner_system_specifies_structured_redline_contract() -> No
     assert '禁止写"增大 10%"' in system
 
 
+def test_original_build_step_prompt_still_forbids_user_supplied_evidence() -> None:
+    system = load_prompt_template("paper_plan_build_steps.yaml").system
+
+    assert '禁止输出 source="user_supplied"' in system
+    assert "allowed_user_evidence_json" not in system
+    assert "correct_extracted" not in system
+
+
+def test_regenerate_build_step_prompt_allows_resolved_user_evidence() -> None:
+    record = _record_with_resolved_prompt()
+    messages = build_messages_for_regenerate_build_steps(
+        record.plan.block_recommendations,
+        record.plan.parameter_mapping,
+        record.spec.evidence,
+        record.plan.evidence,
+        build_plan_evidence_source_refs(record.spec),
+        allowed_user_evidence_refs={
+            UserEvidenceRef(kind=UserEvidenceAction.FILL_MISSING, key="MISS-1")
+        },
+        allowed_user_prompt_ids=frozenset({"MISS-1"}),
+    )
+    system = messages[0].content
+    user = messages[1].content
+
+    assert "重生成阶段 evidence 双源契约" in system
+    assert "fill_missing" in system
+    assert "correct_extracted" in system
+    assert "allowed_user_evidence_json" in user
+    assert '"MISS-1"' in user
+    assert '"MISS-2"' not in user
+
+
 def test_build_messages_for_build_steps_includes_blocks_params_and_evidence() -> None:
     messages = build_messages_for_build_steps(
         [_block_recommendation()],
@@ -293,6 +347,57 @@ def test_mscript_drafter_system_allows_null_output() -> None:
 
     assert '"m_script_skeleton": "..." | null' in system
     assert "返回 null(R1 P2-2 显式允许)" in system
+
+
+def test_regenerate_mscript_prompt_uses_effective_mapping_values() -> None:
+    messages = build_messages_for_mscript_draft_from_mapping(
+        _spec().equations,
+        [
+            ParameterMapping(
+                paper_param_name="H",
+                model_param_name="Synchronous Machine.H",
+                value="7.0",
+                unit="s",
+                source=EvidenceSource.USER_SUPPLIED,
+            )
+        ],
+        [],
+    )
+    user = messages[1].content
+
+    assert "parameter_mapping_json" in user
+    assert '"value": "7.0"' in user
+    assert '"source": "user_supplied"' in user
+
+
+def test_regenerate_mscript_prompt_filters_conflicted_mapping_values() -> None:
+    spec = _conflict_spec()
+    messages = build_messages_for_mscript_draft_from_mapping(
+        spec.equations,
+        [
+            ParameterMapping(
+                paper_param_name="H",
+                model_param_name="Synchronous Machine.H",
+                value="3.5",
+                unit="s",
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+            ),
+            ParameterMapping(
+                paper_param_name="D",
+                model_param_name="Synchronous Machine.D",
+                value="9.0",
+                unit=None,
+                source=EvidenceSource.USER_SUPPLIED,
+            ),
+        ],
+        spec.parameter_conflicts,
+    )
+    user = messages[1].content
+
+    assert "需用户确认" in user
+    assert "3.5" not in user
+    assert "4.0" not in user
+    assert "9.0" in user
 
 
 def test_no_paper_plan_yaml_uses_self_generate_id_literal() -> None:
