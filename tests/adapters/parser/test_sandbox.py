@@ -1,11 +1,13 @@
 import json
 import os
+import signal
 import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from docx import Document
@@ -369,6 +371,32 @@ def test_sandbox_cpu_limit_exit_maps_to_timeout(tmp_path: Path) -> None:
 
     assert caught.value.args == ("document_parse_timeout",)
     assert elapsed < 8.0
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="SIGKILL classification is Linux-only"
+)
+def test_sandbox_sigkill_near_deadline_maps_to_timeout() -> None:
+    process = SimpleNamespace(exitcode=-int(signal.SIGKILL))
+    deadline = time.monotonic() + (sandbox.SIGKILL_DEADLINE_GRACE_SECONDS / 2)
+
+    with pytest.raises(DocumentParseError) as caught:
+        sandbox._raise_for_missing_result(process, deadline)
+
+    assert caught.value.args == ("document_parse_timeout",)
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="SIGKILL classification is Linux-only"
+)
+def test_sandbox_sigkill_before_deadline_stays_failed() -> None:
+    process = SimpleNamespace(exitcode=-int(signal.SIGKILL))
+    deadline = time.monotonic() + sandbox.SIGKILL_DEADLINE_GRACE_SECONDS + 1.0
+
+    with pytest.raises(DocumentParseError) as caught:
+        sandbox._raise_for_missing_result(process, deadline)
+
+    assert caught.value.args == ("document_parse_failed",)
 
 
 def _parsed(file_path: Path, raw_text: str) -> ParsedDocument:

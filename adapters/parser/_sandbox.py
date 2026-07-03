@@ -24,6 +24,7 @@ SANDBOX_TEMP_PREFIX = "mxa_paper_parse_"
 POLL_SECONDS = 0.1
 DEAD_PROCESS_DRAIN_GRACE_SECONDS = 0.2
 PROCESS_JOIN_SECONDS = 1.0
+SIGKILL_DEADLINE_GRACE_SECONDS = 1.0
 # Keep sandbox children from inheriting parent memory under Linux's default fork.
 _SANDBOX_MP_CONTEXT = mp.get_context("spawn")
 _MISSING_RESULT = object()
@@ -119,7 +120,12 @@ def _drain_dead_process_result(result_queue: Any) -> Any:
 
 
 def _raise_for_missing_result(process: Any, deadline: float) -> None:
-    if time.monotonic() >= deadline or _is_cpu_limit_exit(process.exitcode):
+    now = time.monotonic()
+    if (
+        now >= deadline
+        or _is_cpu_limit_exit(process.exitcode)
+        or _is_sigkill_near_deadline(process.exitcode, deadline, now)
+    ):
         raise DocumentParseError("document_parse_timeout") from None
     raise DocumentParseError("document_parse_failed") from None
 
@@ -136,6 +142,16 @@ def _terminate_then_kill(process: Any) -> None:
 def _is_cpu_limit_exit(exitcode: int | None) -> bool:
     sigxcpu = getattr(signal, "SIGXCPU", None)
     return sigxcpu is not None and exitcode == -int(sigxcpu)
+
+
+def _is_sigkill_near_deadline(
+    exitcode: int | None, deadline: float, now: float | None = None
+) -> bool:
+    sigkill = getattr(signal, "SIGKILL", None)
+    if sigkill is None or exitcode != -int(sigkill):
+        return False
+    current_time = time.monotonic() if now is None else now
+    return deadline - current_time <= SIGKILL_DEADLINE_GRACE_SECONDS
 
 
 def _unwrap_child_result(result: Any) -> ParsedDocument:
@@ -190,5 +206,6 @@ def _apply_resource_limits(timeout_seconds: float, mem_limit_bytes: int) -> None
     import resource
 
     cpu_seconds = max(1, math.ceil(timeout_seconds))
+    cpu_hard_seconds = cpu_seconds + 1
     resource.setrlimit(resource.RLIMIT_AS, (mem_limit_bytes, mem_limit_bytes))
-    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_hard_seconds))
