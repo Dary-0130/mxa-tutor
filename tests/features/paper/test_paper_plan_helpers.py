@@ -632,15 +632,23 @@ def test_coverage_is_vacuous_when_recommendations_are_empty() -> None:
     assert len(steps) == 3
 
 
-def test_display_text_does_not_dereference_parameter_value_or_unit() -> None:
+def test_display_text_does_not_dereference_parameter_value_unit_or_evidence_excerpt() -> None:
+    leak_evidence = _document_evidence(excerpt="__LEAK_EXCERPT__")
+    drafts = _build_step_drafts(paper_param_name="Rs", model_param_name="Synchronous Machine.Rs")
+    drafts[0] = replace(
+        drafts[0],
+        block_refs=[replace(drafts[0].block_refs[0], paper_reference=leak_evidence)],
+        evidence=[leak_evidence],
+    )
+
     steps = PlanAssembler().validate_and_derive_build_steps(
-        _build_step_drafts(paper_param_name="Rs", model_param_name="Synchronous Machine.Rs"),
+        drafts,
         [
             ParameterMapping(
                 paper_param_name="Rs",
                 model_param_name="Synchronous Machine.Rs",
-                value="0.05",
-                unit="Ω",
+                value="__LEAK_VALUE_0_0523__",
+                unit="__LEAK_UNIT_OHM__",
                 source=EvidenceSource.DOCUMENT_EXTRACTED,
             )
         ],
@@ -649,8 +657,137 @@ def test_display_text_does_not_dereference_parameter_value_or_unit() -> None:
 
     display_text = "\n".join(step.display_text for step in steps)
     assert "Rs" in display_text
-    assert "0.05" not in display_text
-    assert "Ω" not in display_text
+    assert "__LEAK_VALUE_0_0523__" not in display_text
+    assert "__LEAK_UNIT_OHM__" not in display_text
+    assert "__LEAK_EXCERPT__" not in display_text
+
+
+@pytest.mark.parametrize(
+    ("value", "unit", "intent"),
+    [
+        ("3", None, "Describe step 3 without assigning a parameter."),
+        ("2", None, "Include 2 output ports for routing."),
+        ("1", "s", "Observe the response in the s domain."),
+        ("3", "A", "Connect the A phase signal."),
+        ("113", None, "Use the ode113 solver family."),
+    ],
+)
+def test_regular_redline_allows_safe_unit_and_number_contexts(
+    value: str,
+    unit: str | None,
+    intent: str,
+) -> None:
+    drafts = _build_step_drafts()
+    drafts[0] = replace(drafts[0], intent=intent)
+
+    PlanAssembler().validate_and_derive_build_steps(
+        drafts,
+        [_mapping("H", value, unit=unit)],
+        [_block_recommendation()],
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "unit", "intent"),
+    [
+        ("0.05", "Ω", "Set the resistance to 0.05Ω."),
+        ("1e-3", None, "Use 1e-3 as the integration tolerance."),
+        ("512", None, "Use 512 as the model dimension."),
+        ("3", "A", "Set the current to 3 A."),
+        ("3", None, "Set H to 3."),
+    ],
+)
+def test_regular_redline_rejects_specific_values_and_contextual_short_integers(
+    value: str,
+    unit: str | None,
+    intent: str,
+) -> None:
+    drafts = _build_step_drafts()
+    drafts[0] = replace(drafts[0], intent=intent)
+
+    with pytest.raises(BuildStepsRedLineError, match="parameter_value_leak"):
+        PlanAssembler().validate_and_derive_build_steps(
+            drafts,
+            [_mapping("H", value, unit=unit)],
+            [_block_recommendation()],
+        )
+
+
+@pytest.mark.parametrize(
+    ("value", "target", "setting_name"),
+    [
+        ("512", "solver", "StopTime"),
+        ("2026", "solver", "R2026aCompatibilityMode"),
+        ("5", "powergui", "ModelReferenceMinAlgLoopOccurrences"),
+    ],
+)
+def test_config_redline_allows_identifier_like_settings(
+    value: str,
+    target: str,
+    setting_name: str,
+) -> None:
+    drafts = _build_step_drafts(paper_param_name="Rs", model_param_name="Synchronous Machine.Rs")
+    drafts[2] = replace(
+        drafts[2],
+        configuration_hints=[
+            ConfigurationHint(
+                target=target,
+                setting_name=setting_name,
+                instruction="Record the generated current signal.",
+                evidence=[_document_evidence()],
+            )
+        ],
+    )
+
+    PlanAssembler().validate_and_derive_build_steps(
+        drafts,
+        [_mapping("Rs", value, unit=None)],
+        [_block_recommendation()],
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "unit", "target", "setting_name"),
+    [
+        ("512", None, "solver", "512"),
+        ("3", None, "solver", "Rs=3"),
+        ("0.05", "Ω", "0.05 Ω", "StopTime"),
+        ("1e-3", None, "1e-3", None),
+    ],
+)
+def test_config_redline_rejects_values_in_identifier_fields(
+    value: str,
+    unit: str | None,
+    target: str,
+    setting_name: str | None,
+) -> None:
+    drafts = _build_step_drafts(paper_param_name="Rs", model_param_name="Synchronous Machine.Rs")
+    drafts[2] = replace(
+        drafts[2],
+        configuration_hints=[
+            ConfigurationHint(
+                target=target,
+                setting_name=setting_name,
+                instruction="Record the generated current signal.",
+                evidence=[_document_evidence()],
+            )
+        ],
+    )
+
+    with pytest.raises(BuildStepsRedLineError, match="parameter_value_leak"):
+        PlanAssembler().validate_and_derive_build_steps(
+            drafts,
+            [
+                ParameterMapping(
+                    paper_param_name="Rs",
+                    model_param_name="Synchronous Machine.Rs",
+                    value=value,
+                    unit=unit,
+                    source=EvidenceSource.DOCUMENT_EXTRACTED,
+                )
+            ],
+            [_block_recommendation()],
+        )
 
 
 def test_redline_rejects_naked_value_and_config_allowlist_has_reverse_check() -> None:
@@ -882,13 +1019,14 @@ def _mapping(
     paper_param_name: str,
     value: str,
     *,
+    unit: str | None = "s",
     source: EvidenceSource = EvidenceSource.DOCUMENT_EXTRACTED,
 ) -> ParameterMapping:
     return ParameterMapping(
         paper_param_name=paper_param_name,
         model_param_name=f"Synchronous Machine.{paper_param_name}",
         value=value,
-        unit="s",
+        unit=unit,
         source=source,
     )
 
