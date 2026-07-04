@@ -511,11 +511,6 @@ class PlanAssembler:
                 evidence=list(step.evidence),
                 display_text=display_text,
             )
-            self._validate_text_for_redline(
-                display_text,
-                parameter_mapping,
-                allow_config_values=False,
-            )
             build_steps.append(derived)
         return build_steps
 
@@ -701,6 +696,15 @@ class PlanAssembler:
                         allow_config_values=False,
                     )
             for configuration_hint in step.configuration_hints:
+                self._validate_config_text_for_redline(
+                    configuration_hint.target,
+                    parameter_mapping,
+                )
+                if configuration_hint.setting_name is not None:
+                    self._validate_config_text_for_redline(
+                        configuration_hint.setting_name,
+                        parameter_mapping,
+                    )
                 self._validate_text_for_redline(
                     configuration_hint.instruction,
                     parameter_mapping,
@@ -723,13 +727,21 @@ class PlanAssembler:
         for mapping in parameter_mapping:
             if mapping.value == MISSING_VALUE_SENTINEL:
                 continue
-            if _parameter_name_and_value_nearby(text, mapping) and not allow_config_values:
-                _raise_redline("parameter_value_leak")
             if allow_config_values:
                 continue
-            for token in _bare_value_tokens(mapping):
-                if _contains_bare_token(text, token):
-                    _raise_redline("parameter_value_leak")
+            if _text_leaks_mapping_value(text, mapping):
+                _raise_redline("parameter_value_leak")
+
+    def _validate_config_text_for_redline(
+        self,
+        text: str,
+        parameter_mapping: list[ParameterMapping],
+    ) -> None:
+        for mapping in parameter_mapping:
+            if mapping.value == MISSING_VALUE_SENTINEL:
+                continue
+            if _text_leaks_mapping_value(text, mapping):
+                _raise_redline("parameter_value_leak")
 
     def _derive_display_text(self, step: ModelBuildStepDraft) -> str:
         parts = [
@@ -992,34 +1004,95 @@ def _parameter_name_and_value_nearby(text: str, mapping: ParameterMapping) -> bo
         if name.strip()
     ]
     for name in names:
-        start = lowered.find(name)
-        while start != -1:
+        for start in _label_starts(lowered, name):
             window = lowered[max(0, start - 40) : start + len(name) + 40]
-            if value in window:
+            if _contains_value_literal(window, value, allow_short_integer=True):
                 return True
-            start = lowered.find(name, start + 1)
     return False
 
 
-def _bare_value_tokens(mapping: ParameterMapping) -> list[str]:
-    tokens = list(_NUMBER_TOKEN_RE.findall(mapping.value))
-    if mapping.unit is not None:
-        unit = mapping.unit.strip()
-        if unit and unit not in {"—", "-"}:
-            tokens.append(unit)
-    return [token for token in tokens if token]
+def _text_leaks_mapping_value(
+    text: str,
+    mapping: ParameterMapping,
+) -> bool:
+    if _parameter_name_and_value_nearby(text, mapping):
+        return True
+    if _contains_value_literal(text, mapping.value, allow_short_integer=False):
+        return True
+    return _contains_numeric_unit_composite(text, mapping)
 
 
-def _contains_bare_token(text: str, token: str) -> bool:
-    if not token:
+def _contains_value_literal(
+    text: str,
+    value: str,
+    *,
+    allow_short_integer: bool,
+) -> bool:
+    literal = value.strip()
+    if not literal:
         return False
-    if re.fullmatch(r"[A-Za-z]", token):
-        pattern = rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])"
+    if not allow_short_integer and not _is_specific_value_literal(literal):
+        return False
+    return _contains_standalone_literal(text, literal)
+
+
+def _contains_numeric_unit_composite(text: str, mapping: ParameterMapping) -> bool:
+    unit = (mapping.unit or "").strip()
+    if not unit or unit in {"—", "-"}:
+        return False
+    for number in _NUMBER_TOKEN_RE.findall(mapping.value):
+        pattern = (
+            rf"(?<![A-Za-z0-9_.+-]){re.escape(number)}\s*" rf"{re.escape(unit)}(?![A-Za-z0-9_])"
+        )
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return True
+    return False
+
+
+def _is_specific_value_literal(value: str) -> bool:
+    if re.fullmatch(r"[-+]?\d+", value):
+        digits = value.removeprefix("+").removeprefix("-")
+        return len(digits) >= 3
+    if re.fullmatch(r"[-+]?(?:\d+\.\d*|\.\d+)(?:e[-+]?\d+)?", value, flags=re.IGNORECASE):
+        return True
+    if re.fullmatch(r"[-+]?\d+e[-+]?\d+", value, flags=re.IGNORECASE):
+        return True
+    return (
+        len(_NUMBER_TOKEN_RE.findall(value)) >= 2
+        and re.search(
+            r"[*/()]|pi|π",
+            value,
+            flags=re.IGNORECASE,
+        )
+        is not None
+    )
+
+
+def _contains_standalone_literal(text: str, literal: str) -> bool:
+    if re.search(r"[A-Za-z0-9]", literal):
+        if re.fullmatch(
+            r"[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?",
+            literal,
+            flags=re.IGNORECASE,
+        ):
+            pattern = rf"(?<![A-Za-z0-9_.+-]){re.escape(literal)}(?![A-Za-z0-9_+-]|\.\d)"
+        else:
+            pattern = rf"(?<![A-Za-z0-9_.+-]){re.escape(literal)}(?![A-Za-z0-9_.+-])"
         return re.search(pattern, text, flags=re.IGNORECASE) is not None
-    if re.search(r"[A-Za-z0-9]", token):
-        pattern = rf"(?<![A-Za-z0-9_.+-]){re.escape(token)}(?![A-Za-z0-9_.+-])"
-        return re.search(pattern, text, flags=re.IGNORECASE) is not None
-    return token in text
+    return literal in text
+
+
+def _label_starts(text: str, label: str) -> list[int]:
+    if re.search(r"[A-Za-z0-9]", label):
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(label)}(?![A-Za-z0-9_])"
+        return [match.start() for match in re.finditer(pattern, text, flags=re.IGNORECASE)]
+
+    starts: list[int] = []
+    start = text.find(label)
+    while start != -1:
+        starts.append(start)
+        start = text.find(label, start + 1)
+    return starts
 
 
 def _raise_semantic(reason_code: str) -> NoReturn:
