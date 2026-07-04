@@ -1,11 +1,18 @@
-# TASK-311:文档解析 sandbox 大 payload 死锁修复 + 超时兜底补真 · v0.3
+# TASK-311:文档解析 sandbox 大 payload 死锁修复 + 超时兜底补真 · v0.4
 
 > **归属**:MCS 主线基础设施修复(sandbox 由 TASK-202 引入)。**非** paper-to-model 功能卡,占用 311(311-499 缓冲区首位)。
-> **状态**:v0.3 · **R1(GPT)方案审 + R6(Codex)可落核 + Stage 0 基线/Windows 探针均已过** · **环境策略已定(Windows 本地 + Linux 靠 CI)** · **待实现到 staged → 亲核 → push**
+> **状态**:v0.4 · **实现已过亲核 + 真论文验证 + push;CI 逮出 1 个 Linux 边角分类 bug(P0-D)→ 本版收敛改法,待 Codex 改后重跑 CI**
 > **性质**:后端基础设施修复卡(改 `adapters/parser/_sandbox.py` 进程间传输机制 + 补真超时兜底)。**不改对外 schema、不加路由、不碰任何业务逻辑**。走合并前亲核真 diff + 后端真测试(sandbox 有测试框架);**无前端、无截图**。
-> **基线**:R6 @ live `origin/main` `35b89e1` 实证(见 §3);Codex Stage 0 已复核基线全对齐 + Windows 探针全绿(见 §8)。
+> **基线**:R6 @ live `origin/main` `35b89e1` 实证(见 §3);实现分支 `codex/task-311-sandbox-deadlock-fix` commit `7383f0a`(PR #168)。
 >
-> **★ v0.2 → v0.3 环境策略调整(唯一改动,修法本身不变)**:v0.2 的「双环境本地实测」硬门,Codex 本机 Linux 通路打不通(WSL 虚拟化层缺失 vmcompute/hns 服务、需提权重装、不在本卡范围;Docker/gh 均不可用)。改为务实版:
+> **★ v0.3 → v0.4 收敛(P0-D:CI 在 Linux 逮出的 RLIMIT_CPU 分类 bug + 一个真隐患)**:
+> - **CI 结果**:唯一失败 = `test_sandbox_cpu_limit_exit_maps_to_timeout`,断言 `document_parse_failed != document_parse_timeout`(其余 1721 passed)。**这正是留 CI 关卡的价值——Linux 边角行为 Windows 测不到**。
+> - **根因(R6 Linux 实测坐实)**:`_apply_resource_limits` 现把 `RLIMIT_CPU` 设成 `(cpu_seconds, cpu_seconds)`(**软=硬相等**)。Linux 上 soft=hard 的 CPU-spin 子进程**直接被 SIGKILL 杀**(exitcode `-9`),**不是** SIGXCPU(`-24`);`_is_cpu_limit_exit(-9)` 不命中 → 走 `document_parse_failed`。R6 对照实测:soft<hard 时才先发 SIGXCPU(exitcode `-24`)、能被识别成 timeout。
+> - **★ 挖出的真隐患(比测试红更重要)**:soft=hard 意味着「CPU 超时」这层保护**从未按预期温柔触发过**——一到点直接强杀,SIGXCPU 那条路死代码。**与本卡主题一脉相承(把虚设保护补成真的)**。
+> - **改法(§3.3+§4.3,两条一起,治本非迁就测试)**:①**RLIMIT_CPU 软限制设得比硬限制小**(如 soft=ceil(timeout)、hard=soft+1),让 CPU 真耗尽时先发可识别的 SIGXCPU;②**分类兜底加固**:即便被 SIGKILL(-9),若 wall-clock deadline 已到/将到,归 timeout 更合理(它就是跑太久被干掉)。两条使 CPU 超时无论走 SIGXCPU 还是 SIGKILL 都正确归 timeout。
+> - **范围**:仍只改 `_sandbox.py`(资源限制设置 + 分类兜底)+ 那条测试的必要校准;**不碰核心 drain-before-join 修复(真论文已验证有效)、不碰安全语义、不碰对外**。
+>
+> **★ v0.2 → v0.3 环境策略调整**:v0.2 的「双环境本地实测」硬门,Codex 本机 Linux 通路打不通(WSL 虚拟化层缺失 vmcompute/hns 服务、需提权重装、不在本卡范围;Docker/gh 均不可用)。改为务实版:
 > - **Windows 本地充分测**(Codex 已在 Stage 0 复跑全绿:死锁复现 8000 字、修法探针 8000/80000/1000000 全 ok、真超时掐掉、crash 快速失败 0.5s、临时目录无残留、并发无串、empty()-竞态 30 次无误判)。
 > - **Linux 靠 CI 兜**:R6 确认 `.github/workflows/ci.yml` 在 `ubuntu-latest` 跑全量 `pytest -v`(testpaths=["tests"] 含 sandbox 测试),故新增 9 类测试 **push 后 CI 自动在 Linux 执行**。这是 Linux 侧的真实测,只是从「Codex 命令行跑」换成「CI 跑」(CI 每个 PR 本就跑)。
 > - **RLIMIT_CPU vs wall-clock 分类(P0-C)做成 Linux-only 测试**:Windows 无 RLIMIT_CPU、测不了;实现成 pytest skip-on-non-linux,在 CI 的 ubuntu 上验证 CPU-spin→timeout / deadline 前异常退出→failed。
@@ -82,7 +89,7 @@ status, payload = result_queue.get_nowait()   # ← 之后才取结果
 - **cwd 隔离**:`os.chdir(sandbox_dir)`。
 - **env 白名单**:`_sanitize_child_env()` 只留 `_ENV_ALLOWLIST`(COMSPEC/PATH/PATHEXT/SYSTEMDRIVE/SYSTEMROOT/TEMP/TMP/TMPDIR/WINDIR)。
 - **路径 inside 校验**:`_assert_path_inside(file_path, sandbox_dir)`,越界报 `sandbox_path_violation`。
-- **Linux 资源上限**:`_apply_resource_limits` 设 `RLIMIT_AS`(512MB 默认)+ `RLIMIT_CPU`(≈ceil(timeout))。
+- **Linux 资源上限**:`_apply_resource_limits` 设 `RLIMIT_AS`(512MB 默认)+ `RLIMIT_CPU`。**★ v0.4 修正**:原设 `(cpu_seconds, cpu_seconds)`(软=硬)→ Linux 上 CPU 耗尽直接 SIGKILL(-9)、SIGXCPU 那条路死代码;v0.4 改为软<硬(soft=ceil(timeout)、hard=soft+1),让 CPU 超时先发可识别的 SIGXCPU(-24)。**RLIMIT_AS/RLIMIT_CPU 存在这个保护本身不变,只修软硬限制取值**。
 - **错误脱敏**:子进程任何异常 → 父进程统一 `DocumentParseError("document_parse_failed")`,**不泄露堆栈 / 绝对路径 / 原始 filename**(现有测试 `test_parse_error_sanitizes_absolute_path_and_original_filename` 断言 `C:\`、`/home`、`/Users`、原文件名都不在 message)。
 - **PDF/DOCX 自身防护**(在各 parser 内,本卡不碰):`_reject_active_pdf_content`(拒 /JavaScript /JS /OpenAction)、docx 宏/zip-bomb 检查。
 - **默认 30s timeout / 512MB mem**:`04_ENGINEERING_STANDARDS.md §c` 明列,「允许通过配置调整」。**此前 timeout 被死锁吃掉、未真正生效;本卡补真**。
@@ -175,14 +182,22 @@ if process.is_alive() and hasattr(process, "kill"):
 
 ### 4.3 ★ 超时兜底补真 + 错误分类 + 错误回传健壮性(P0-3,含 v0.2 P0-C)
 - **超时补真**:死锁修好后,`document_parse_timeout` 从「几乎必然误触发」变成「仅当解析真的超过 deadline 才触发」。语义:合法但巨慢(超大合法文件)/ 恶意拖时文件 → deadline 到 → `_terminate_then_kill` 子进程 + 报 `document_parse_timeout`。**这是把一层此前虚设的安全兜底补成真的**。
-- **★ timeout vs failed 分类(P0-C,R1+R6)**:Linux `RLIMIT_CPU`(SIGXCPU)与父进程 wall-clock deadline 是**两套超时**,可能任一先触发。子进程死且 grace drain 后仍无结果时,按 `process.exitcode` 分类:
-  ```
-  父进程 wall-clock deadline 到且 child 仍 alive   → document_parse_timeout(§4.1 已在循环顶部拦)
-  child exitcode == -SIGXCPU(CPU 时间上限)         → document_parse_timeout
-  child 在 deadline 前无结果异常退出(OOM/SIGKILL/segfault/os._exit) → document_parse_failed
-  child put("error", ...)(parse 内部 raise,能执行 handler) → document_parse_failed
-  ```
-  实现用 `_is_cpu_limit_exit(exitcode)` 判 `exitcode == -signal.SIGXCPU`。**最低要求(即便不做信号细分)**:deadline 到且还活着一定 timeout;deadline 前死且无结果一定 failed;**绝不傻等**。
+- **★ timeout vs failed 分类(P0-C + v0.4 P0-D 修正)**:Linux `RLIMIT_CPU` 与父进程 wall-clock deadline 是**两套超时**。**v0.3 分类在 Linux 上被 CI 逮出 bug**(soft=hard → CPU 耗尽走 SIGKILL(-9) 而非 SIGXCPU(-24),被误判 failed)。v0.4 **两条一起修**:
+  - **① RLIMIT_CPU 软<硬(§3.3)**:让 CPU 真耗尽时先发可识别的 SIGXCPU(-24),正常场景走「exitcode==-SIGXCPU → timeout」。
+  - **② SIGKILL 兜底归 timeout**:极端情况(装了 SIGXCPU handler 继续耗到硬限制、或 soft=hard 遗留路径)仍可能 SIGKILL(-9)。此时**若 wall-clock deadline 已到或临近(容差内),归 timeout**(它就是跑太久被干掉);只有 deadline 还远、又是 -9/OOM/segfault,才归 failed。
+  - 修正后分类:
+    ```
+    父进程 wall-clock deadline 到且 child 仍 alive        → document_parse_timeout(§4.1 循环顶部拦)
+    child exitcode == -SIGXCPU(-24,CPU 软限制)          → document_parse_timeout
+    child exitcode == -SIGKILL(-9)且 deadline 已到/临近   → document_parse_timeout(P0-D ②)
+    child 在 deadline 前无结果异常退出(-9 且 deadline 远/OOM/segfault/os._exit) → document_parse_failed
+    child put("error", ...)(parse 内部 raise)            → document_parse_failed
+    ```
+  - `_is_cpu_limit_exit(exitcode)` 保留判 `-SIGXCPU`;新增 deadline-临近判断处理 SIGKILL。**最低要求**:deadline 到/临近且无结果一定 timeout;deadline 远且异常退出一定 failed;**绝不傻等**。
+- **crash 快速失败**:子进程异常退出(无结果)→ grace drain(0.2s)后快速判(§4.1),远小于 deadline。
+- **parse 失败仍正确回传**:损坏 PDF / parser 内部 raise → 子进程 `_sandbox_child_main` 捕获后 `put(("error", "document_parse_failed"))` → 父进程 drain 到 error → 报 `document_parse_failed`。error payload 小、drain 顺畅;若子进程在 put error 前就崩了,存活监控 + grace drain 兜住,不变新死锁。
+- **★ 结果状态白名单(R1)**:父进程只接受 `("ok", ParsedDocument)` 和 `("error", "document_parse_failed")`。**未知 status / tuple 形状不对 / payload 类型不对 → 一律 `document_parse_failed`,且绝不把 payload 写日志**。
+- **可选加固(实现自决,R6 评估)**:`_sandbox_child_main` 里 `put` 之后,可在子进程侧对 result_queue 做 `close()` + `join_thread()`(把「等 feeder flush」变显式,可读性加固);父进程已 drain 时不引入新问题。**✗ 不得用 `cancel_join_thread()` 绕过 flush**(丢数据风险,结果是业务 payload——见 §5)。父进程侧可在所有路径 finally 里 `result_queue.close()`(父进程从不 put、不会引入 feeder 等待);**但不得在 get 前 close**。默认按需,除非 R6 判定某平台确需。
 - **crash 快速失败**:子进程异常退出(无结果)→ grace drain(0.2s)后快速判(§4.1),远小于 deadline。
 - **parse 失败仍正确回传**:损坏 PDF / parser 内部 raise → 子进程 `_sandbox_child_main` 捕获后 `put(("error", "document_parse_failed"))` → 父进程 drain 到 error → 报 `document_parse_failed`。error payload 小、drain 顺畅;若子进程在 put error 前就崩了,存活监控 + grace drain 兜住,不变新死锁。
 - **★ 结果状态白名单(R1)**:父进程只接受 `("ok", ParsedDocument)` 和 `("error", "document_parse_failed")`。**未知 status / tuple 形状不对 / payload 类型不对 → 一律 `document_parse_failed`,且绝不把 payload 写日志**。
@@ -283,8 +298,9 @@ Codex 已从 live `origin/main` `35b89e1` 复核以下(实现开工再 `git fetc
 
 ---
 
-**本卡版本**:v0.3(2026-07-03,双审 + Stage 0 基线/Windows 探针均已过、环境策略已定;待实现到 staged → 亲核 → push)
+**本卡版本**:v0.4(2026-07-03,实现已过亲核+真论文验证+push;CI 在 Linux 逮出 RLIMIT_CPU 分类 bug + 一个 soft=hard 真隐患 → 本版收敛 P0-D 改法,待 Codex 改后重跑 CI)
 **作者**:Claude(架构师)
 **归属**:MCS 主线基础设施修复 TASK-311;修 `adapters/parser/_sandbox.py` join-before-drain 死锁(drain-before-join + bounded grace drain,**不用 empty()**)+ 补真 30s 超时兜底 + kill escalation + 两套超时按 exitcode 分类;PdfParser/DocxParser 同受益;中文抽取乱码单独排(§7)。
 **v0.1 → v0.2**:P0-A 把 `empty()` 误判改成 grace drain(R1 挖出、官方文档背书);P0-B kill escalation + 成功不改判;P0-C RLIMIT_CPU vs wall-clock 分类。
-**v0.2 → v0.3**:环境策略从「双环境本地实测」改为「Windows 本地充分测 + Linux 靠 CI 兜 + RLIMIT 分类做成 Linux-only CI 测试」(Codex 本机 Linux 通路虚拟化层缺失、打不通;CI 在 ubuntu 跑全量 pytest 兜底成立)。修法本身 v0.2→v0.3 零改动。
+**v0.2 → v0.3**:环境策略从「双环境本地实测」改为「Windows 本地充分测 + Linux 靠 CI 兜 + RLIMIT 分类做成 Linux-only CI 测试」。
+**v0.3 → v0.4**:P0-D——CI 在 Linux 逮出 RLIMIT_CPU 分类 bug(soft=hard → SIGKILL(-9) 非 SIGXCPU(-24) → 误判 failed)。改法两条:①RLIMIT_CPU 软<硬(让先发可识别的 SIGXCPU)②SIGKILL 且 deadline 临近归 timeout(兜底)。挖出真隐患:soft=hard 使「CPU 超时」保护此前从未温柔触发过(与本卡主题一脉相承)。核心 drain-before-join 修复不动(真论文已验证有效)。
