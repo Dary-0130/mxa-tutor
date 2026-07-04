@@ -390,6 +390,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-521 | Paper 多文件子线(多文档身份 + 多篇上传融合 + 值冲突检测 + 出处标篇 + 前端) | 🔍 | Codex | 多文件子线全部完成;521-A 多文档身份契约 substrate ✅ 合并(#150);521-B1 多篇上传+解析融合 ✅ 合并(#152);521-B2 值冲突检测+冲突展示 ✅ 合并(#154);521-C 出处标到篇(对外)✅ 合并(#156);521-D 前端上传界面(多选+主文献勾选+文件来源展示+部分成功提示)✅ 合并(#158);剩解析纠错四条(排后) |
 | TASK-522 | Paper 解析可信/纠错子线 | 🔍 | Codex | 解析纠错四条(诚实提示/重新解析/用户纠错/局部重跑);522-B 论文重新解析(不重传原地重跑+纯文本解析包临时存+prepared-then-commit 原子替换+失败保旧+24h 固定TTL不续命+per-paper 锁+补论文数据定时清理)✅ 合并(#160);522-C 用户纠错子线 → 522-C1 契约 substrate(出处契约加纠错标记+纠错 overlay 表+惰性 CRUD+清理级联+统一用户证据判定器)✅ 合并(#162);522-C2 纠错行为+端点+撤销+锁+建模步骤简化+消费方接线+前端 ✅ 合并(#164);522-D 局部重跑子线 → 522-D1 纠错后重生成建模步骤(就地重生成 build_steps+m_script 带纠错值+不重解析不清纠错+先锁后读+失败重试仅瞬时类+fail-closed 中性提示+overlay 不篡改抽取表+对外零 drift)✅ 合并(#166);剩 522-A 诚实提示(对内暂缓)/522-D2 消解冲突 |
 | TASK-523 | PDF 中文抽取乱码 pdfplumber fallback | ✅ | Codex | paper-to-model 线修复卡;坏信号命中才启用 pdfplumber fallback,救回中文且坏率下降才采用;不占完工计数,进度维持 21/22 · 52/55 |
+| TASK-524 | Build steps 红线 parameter_value_leak 误报修复 | ✅ | Codex | paper-to-model 线修复卡;普通红线退扫 display_text + context-aware b-unit/b-number + config target/setting_name 窄 profile;冲突守门零改动;真机中文 E2E 通过;不占完工计数,进度维持 21/22 · 52/55 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
