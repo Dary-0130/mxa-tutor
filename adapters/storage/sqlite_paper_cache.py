@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta
 from typing import Any, TypeVar, cast
@@ -35,14 +35,23 @@ from core.domain.paper_reparse_source import (
     PaperReparseSource,
 )
 from core.domain.paper_spec import PaperSpec, ParameterConflict, ParameterEntry
+from core.domain.paper_upload_job import (
+    PaperUploadDocumentState,
+    PaperUploadExecutionMode,
+    PaperUploadJobDocument,
+    PaperUploadJobRecord,
+    PaperUploadJobState,
+    PaperUploadStage,
+)
 from core.interfaces.paper_cache import PaperBundleStore, PaperPlanCache, PaperSpecCache
 from core.interfaces.paper_reparse_store import PaperReparseStore
+from core.interfaces.paper_upload_job_store import PaperUploadJobStore
 
 T = TypeVar("T")
 ConnectionFactory = Callable[[str], AbstractAsyncContextManager[aiosqlite.Connection]]
 
 
-class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
+class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJobStore):
     """SQLite implementation for persisted paper spec and plan bundles."""
 
     _SPEC_ADAPTER = TypeAdapter(PaperSpec)
@@ -59,6 +68,252 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
     ) -> None:
         self._db_path = db_path
         self._connection_factory = connection_factory
+
+    async def create_upload_job(
+        self,
+        *,
+        job_id: str,
+        paper_id: str,
+        execution_mode: PaperUploadExecutionMode,
+        document_ids: list[str],
+        expires_at: datetime,
+    ) -> PaperUploadJobRecord:
+        now = datetime.utcnow()
+        now_iso = now.isoformat()
+        expires_at_iso = expires_at.isoformat()
+        async with self._connect() as conn:
+            try:
+                await conn.execute("BEGIN")
+                await conn.execute(
+                    """
+                    INSERT INTO paper_upload_job(
+                        job_id,
+                        paper_id,
+                        execution_mode,
+                        job_state,
+                        stage,
+                        failed_stage,
+                        last_error_code,
+                        retryable,
+                        attempt_count,
+                        state_version,
+                        created_at,
+                        started_at,
+                        finished_at,
+                        expires_at
+                    ) VALUES (?, ?, ?, 'queued', 'uploading', NULL, NULL, 0, 1, 0, ?, NULL, NULL, ?)
+                    """,
+                    (job_id, paper_id, execution_mode, now_iso, expires_at_iso),
+                )
+                for index, document_id in enumerate(document_ids):
+                    await conn.execute(
+                        """
+                        INSERT INTO paper_upload_job_document(
+                            job_id,
+                            paper_id,
+                            document_id,
+                            upload_index,
+                            status,
+                            error_code,
+                            created_at,
+                            updated_at
+                        ) VALUES (?, ?, ?, ?, 'pending', NULL, ?, ?)
+                        """,
+                        (job_id, paper_id, document_id, index, now_iso, now_iso),
+                    )
+                await conn.commit()
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, paper_id)
+                logger.error(
+                    "SqlitePaperBundleStore.create_upload_job failed: " "paper_id={} exception={}",
+                    paper_id,
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+        record = await self.get_upload_job(paper_id)
+        if record is None:
+            raise StoreError("paper_upload_job_missing")
+        return record
+
+    async def get_upload_job(self, paper_id: str) -> PaperUploadJobRecord | None:
+        async with self._connect() as conn:
+            try:
+                job_cur = await conn.execute(
+                    """
+                    SELECT *
+                    FROM paper_upload_job
+                    WHERE paper_id=?
+                    """,
+                    (paper_id,),
+                )
+                job_row = await job_cur.fetchone()
+                if job_row is None:
+                    return None
+                doc_cur = await conn.execute(
+                    """
+                    SELECT document_id, upload_index, status, error_code, updated_at
+                    FROM paper_upload_job_document
+                    WHERE job_id=?
+                    ORDER BY upload_index ASC
+                    """,
+                    (job_row["job_id"],),
+                )
+                doc_rows = await doc_cur.fetchall()
+            except aiosqlite.Error as exc:
+                logger.error(
+                    "SqlitePaperBundleStore.get_upload_job failed: paper_id={} exception={}",
+                    paper_id,
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+
+        return self._load_upload_job_row(job_row, doc_rows)
+
+    async def update_upload_job_state(
+        self,
+        paper_id: str,
+        *,
+        job_state: PaperUploadJobState,
+        stage: PaperUploadStage,
+        failed_stage: PaperUploadStage | None = None,
+        error_code: str | None = None,
+        retryable: bool,
+        finished_at: datetime | None = None,
+    ) -> PaperUploadJobRecord:
+        now = datetime.utcnow()
+        now_iso = now.isoformat()
+        finished_at_iso = finished_at.isoformat() if finished_at is not None else None
+        async with self._connect() as conn:
+            try:
+                await conn.execute("BEGIN")
+                cur = await conn.execute(
+                    """
+                    UPDATE paper_upload_job
+                    SET job_state=?,
+                        stage=?,
+                        failed_stage=?,
+                        last_error_code=?,
+                        retryable=?,
+                        state_version=state_version + 1,
+                        started_at=COALESCE(started_at, ?),
+                        finished_at=?
+                    WHERE paper_id=?
+                    """,
+                    (
+                        job_state,
+                        stage,
+                        failed_stage,
+                        error_code,
+                        1 if retryable else 0,
+                        now_iso,
+                        finished_at_iso,
+                        paper_id,
+                    ),
+                )
+                if cur.rowcount != 1:
+                    raise StoreError("paper_upload_job_missing")
+                await conn.commit()
+            except StoreError:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, paper_id)
+                logger.error(
+                    "SqlitePaperBundleStore.update_upload_job_state failed: "
+                    "paper_id={} exception={}",
+                    paper_id,
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+        record = await self.get_upload_job(paper_id)
+        if record is None:
+            raise StoreError("paper_upload_job_missing")
+        return record
+
+    async def update_upload_document_state(
+        self,
+        paper_id: str,
+        document_id: str,
+        *,
+        status: PaperUploadDocumentState,
+        error_code: str | None = None,
+    ) -> None:
+        now = datetime.utcnow().isoformat()
+        async with self._connect() as conn:
+            try:
+                cur = await conn.execute(
+                    """
+                    UPDATE paper_upload_job_document
+                    SET status=?, error_code=?, updated_at=?
+                    WHERE paper_id=? AND document_id=?
+                    """,
+                    (status, error_code, now, paper_id, document_id),
+                )
+                if cur.rowcount != 1:
+                    raise StoreError("paper_upload_job_document_missing")
+                await conn.commit()
+            except StoreError:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, paper_id)
+                logger.error(
+                    "SqlitePaperBundleStore.update_upload_document_state failed: "
+                    "paper_id={} exception={}",
+                    paper_id,
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+
+    async def try_start_rerun_plan(self, paper_id: str) -> PaperUploadJobRecord | None:
+        now_iso = datetime.utcnow().isoformat()
+        async with self._connect() as conn:
+            try:
+                await conn.execute("BEGIN")
+                cur = await conn.execute(
+                    """
+                    UPDATE paper_upload_job
+                    SET execution_mode='rerun_plan',
+                        job_state='plan_generating',
+                        stage='generating_plan',
+                        failed_stage=NULL,
+                        last_error_code=NULL,
+                        retryable=0,
+                        attempt_count=attempt_count + 1,
+                        state_version=state_version + 1,
+                        started_at=?,
+                        finished_at=NULL
+                    WHERE paper_id=?
+                        AND job_state IN ('spec_ready', 'plan_failed_retryable')
+                    """,
+                    (now_iso, paper_id),
+                )
+                await conn.commit()
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, paper_id)
+                logger.error(
+                    "SqlitePaperBundleStore.try_start_rerun_plan failed: "
+                    "paper_id={} exception={}",
+                    paper_id,
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+
+        if cur.rowcount != 1:
+            return None
+        return await self.get_upload_job(paper_id)
 
     async def save_ready_bundle(self, record: PaperPlanRecord) -> None:
         await self._save_ready_bundle(record, source=None)
@@ -131,6 +386,10 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                     raise StoreError("paper_reparse_bundle_incomplete")
                 await conn.execute(
                     "DELETE FROM paper_parameter_correction WHERE paper_id=?",
+                    (record.paper_id,),
+                )
+                await conn.execute(
+                    "DELETE FROM paper_upload_job WHERE paper_id=?",
                     (record.paper_id,),
                 )
                 await conn.commit()
@@ -358,6 +617,7 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                     "DELETE FROM paper_parameter_correction WHERE paper_id=?",
                     (paper_id,),
                 )
+                await conn.execute("DELETE FROM paper_upload_job WHERE paper_id=?", (paper_id,))
                 await conn.commit()
             except aiosqlite.Error as exc:
                 await self._rollback_preserving_error(conn, paper_id)
@@ -417,6 +677,7 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                     "DELETE FROM paper_reparse_source_cache WHERE paper_id=?",
                     (paper_id,),
                 )
+                await conn.execute("DELETE FROM paper_upload_job WHERE paper_id=?", (paper_id,))
                 await conn.commit()
             except aiosqlite.Error as exc:
                 await self._rollback_preserving_error(conn, paper_id)
@@ -510,15 +771,22 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
             try:
                 cur = await conn.execute(
                     """
-                    SELECT DISTINCT s.paper_id
-                    FROM paper_spec_cache AS s
-                    LEFT JOIN paper_reparse_source_cache AS r
-                        ON r.paper_id = s.paper_id
-                    WHERE s.created_at <= ?
-                        OR (r.expires_at IS NOT NULL AND r.expires_at <= ?)
-                    ORDER BY s.paper_id
+                    SELECT DISTINCT paper_id
+                    FROM (
+                        SELECT s.paper_id AS paper_id
+                        FROM paper_spec_cache AS s
+                        LEFT JOIN paper_reparse_source_cache AS r
+                            ON r.paper_id = s.paper_id
+                        WHERE s.created_at <= ?
+                            OR (r.expires_at IS NOT NULL AND r.expires_at <= ?)
+                        UNION
+                        SELECT paper_id
+                        FROM paper_upload_job
+                        WHERE expires_at <= ?
+                    )
+                    ORDER BY paper_id
                     """,
-                    (cutoff, current_iso),
+                    (cutoff, current_iso, current_iso),
                 )
                 paper_ids = [row["paper_id"] for row in await cur.fetchall()]
                 if not paper_ids:
@@ -539,6 +807,13 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                             SELECT paper_id FROM paper_spec_cache
                         )
                         """,
+                    )
+                    await conn.execute(
+                        """
+                        DELETE FROM paper_upload_job
+                        WHERE expires_at <= ?
+                        """,
+                        (current_iso,),
                     )
                     await conn.commit()
                     return 0
@@ -561,6 +836,10 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                         "DELETE FROM paper_parameter_correction WHERE paper_id=?",
                         (paper_id,),
                     )
+                    await conn.execute(
+                        "DELETE FROM paper_upload_job WHERE paper_id=?",
+                        (paper_id,),
+                    )
                 await conn.execute(
                     """
                     DELETE FROM paper_reparse_source_cache
@@ -576,6 +855,13 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
                         SELECT paper_id FROM paper_spec_cache
                     )
                     """,
+                )
+                await conn.execute(
+                    """
+                    DELETE FROM paper_upload_job
+                    WHERE expires_at <= ?
+                    """,
+                    (current_iso,),
                 )
                 await conn.commit()
                 return len(paper_ids)
@@ -1048,6 +1334,45 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore):
             )
             raise StoreError("paper_parameter_correction_deserialize_failed") from None
 
+    def _load_upload_job_row(
+        self,
+        row: aiosqlite.Row,
+        doc_rows: Iterable[aiosqlite.Row],
+    ) -> PaperUploadJobRecord:
+        try:
+            return PaperUploadJobRecord(
+                job_id=str(row["job_id"]),
+                paper_id=str(row["paper_id"]),
+                execution_mode=cast(PaperUploadExecutionMode, row["execution_mode"]),
+                job_state=cast(PaperUploadJobState, row["job_state"]),
+                stage=cast(PaperUploadStage, row["stage"]),
+                failed_stage=cast(PaperUploadStage | None, row["failed_stage"]),
+                last_error_code=cast(str | None, row["last_error_code"]),
+                retryable=bool(row["retryable"]),
+                attempt_count=int(row["attempt_count"]),
+                state_version=int(row["state_version"]),
+                created_at=datetime.fromisoformat(row["created_at"]),
+                started_at=_parse_optional_datetime(row["started_at"]),
+                finished_at=_parse_optional_datetime(row["finished_at"]),
+                expires_at=datetime.fromisoformat(row["expires_at"]),
+                documents=[
+                    PaperUploadJobDocument(
+                        document_id=str(doc_row["document_id"]),
+                        upload_index=int(doc_row["upload_index"]),
+                        status=cast(PaperUploadDocumentState, doc_row["status"]),
+                        error_code=cast(str | None, doc_row["error_code"]),
+                        updated_at=datetime.fromisoformat(doc_row["updated_at"]),
+                    )
+                    for doc_row in doc_rows
+                ],
+            )
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "SqlitePaperBundleStore upload job deserialize failed: exception={}",
+                type(exc).__name__,
+            )
+            raise StoreError("paper_upload_job_deserialize_failed") from None
+
     async def _rollback_preserving_error(
         self,
         conn: aiosqlite.Connection,
@@ -1220,6 +1545,12 @@ def _document_id_for_source(source: object) -> str | None | object:
     if source == "user_supplied":
         return None
     return _MISSING
+
+
+def _parse_optional_datetime(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    return datetime.fromisoformat(value)
 
 
 class SqlitePaperSpecCacheView(PaperSpecCache):

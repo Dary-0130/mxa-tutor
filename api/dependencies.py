@@ -39,6 +39,7 @@ from core.interfaces.llm_provider import TextProvider
 from core.interfaces.matlab_engine_provider import MatlabEngineProvider
 from core.interfaces.paper_cache import PaperBundleStore
 from core.interfaces.paper_reparse_store import PaperReparseStore
+from core.interfaces.paper_upload_job_store import PaperUploadJobStore
 from core.interfaces.project_store import ProjectStore
 from core.interfaces.project_type_resolver import ProjectTypeResolver
 from core.interfaces.teaching_unit_store import TeachingUnitStore
@@ -257,6 +258,14 @@ def get_paper_reparse_store(request: Request) -> PaperReparseStore:
     if store is None:
         raise RuntimeError("PaperReparseStore not initialized; lifespan misconfigured")
     return cast(PaperReparseStore, store)
+
+
+def get_paper_upload_job_store(request: Request) -> PaperUploadJobStore:
+    """Return the app-managed paper upload job store."""
+    store = getattr(request.app.state, "paper_bundle_store", None)
+    if store is None:
+        raise RuntimeError("PaperUploadJobStore not initialized; lifespan misconfigured")
+    return cast(PaperUploadJobStore, store)
 
 
 def get_paper_reparse_lock_registry(request: Request) -> PaperReparseLockRegistry:

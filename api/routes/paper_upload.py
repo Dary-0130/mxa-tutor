@@ -7,30 +7,55 @@ import hashlib
 import shutil
 import tempfile
 import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, UploadFile
+from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from api.dependencies import (
+    get_paper_bundle_store,
     get_paper_plan_service,
+    get_paper_reparse_lock_registry,
     get_paper_reparse_store,
     get_paper_spec_service,
+    get_paper_upload_job_store,
     get_settings,
 )
 from app.config import AppSettings
-from core.domain.exceptions import DocumentParseError, PaperSpecGenerationError
+from core.domain.exceptions import (
+    DocumentParseError,
+    LLMAuthError,
+    LLMError,
+    LLMQuotaError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMTimeoutError,
+    PaperNotFoundError,
+    PaperPlanGenerationError,
+    PaperReparseInProgressError,
+    PaperSpecGenerationError,
+    StoreError,
+)
+from core.domain.paper_plan import PaperPlanRecord
+from core.domain.paper_reparse_source import PaperReparseSource
+from core.domain.paper_spec import PaperSpec
+from core.interfaces.paper_cache import PaperBundleStore
 from core.interfaces.paper_reparse_store import PaperReparseStore
+from core.interfaces.paper_upload_job_store import PaperUploadJobStore
 from features.paper.paper_document_identity import sanitize_paper_display_filename
 from features.paper.paper_fusion import (
     SuccessfulPaperSpec,
     document_id_for_upload_index,
     fuse_successful_specs,
 )
-from features.paper.paper_plan_cache import PaperPlanRecord
+from features.paper.paper_plan_helpers import resolved_prompt_ids
 from features.paper.paper_plan_service import PaperPlanService
+from features.paper.paper_reparse_service import PaperReparseLockRegistry
 from features.paper.paper_reparse_source import (
     SuccessfulParsedDocument,
     build_reparse_source,
@@ -41,6 +66,11 @@ from features.paper.paper_schemas import (
     PaperSpecModel,
 )
 from features.paper.paper_spec_service import PaperSpecService
+from features.paper.paper_upload_job_schemas import (
+    PaperStatusResponse,
+    RerunPlanRequest,
+    RerunPlanResponse,
+)
 
 PDF_MAGIC = b"%PDF-"
 DOCX_MAGIC = b"PK\x03\x04"
@@ -71,15 +101,31 @@ class UploadDocumentResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+@dataclass(frozen=True)
+class _PlanGenerationResult:
+    record: PaperPlanRecord
+
+
+@dataclass(frozen=True)
+class _UploadFailure:
+    status_code: int
+    error_code: str
+    message: str
+    paper_id: str
+    job_id: str
+
+
 @router.post("/api/v1/upload-document", response_model=UploadDocumentResponse)
 async def upload_document(
     file: Annotated[list[UploadFile], File(...)],
     service: Annotated[PaperSpecService, Depends(get_paper_spec_service)],
     plan_service: Annotated[PaperPlanService, Depends(get_paper_plan_service)],
+    bundle_store: Annotated[PaperBundleStore, Depends(get_paper_bundle_store)],
     reparse_store: Annotated[PaperReparseStore, Depends(get_paper_reparse_store)],
+    job_store: Annotated[PaperUploadJobStore, Depends(get_paper_upload_job_store)],
     settings: Annotated[AppSettings, Depends(get_settings)],
     primary_index: Annotated[int | None, Form()] = None,
-) -> UploadDocumentResponse:
+) -> UploadDocumentResponse | JSONResponse:
     """Upload a PDF/docx paper and return generated PaperSpec + baseline plan."""
     max_upload_bytes = settings.max_upload_size_mb * 1024 * 1024
     files = list(file)
@@ -87,110 +133,586 @@ async def upload_document(
     _validate_primary_index(primary_index, len(files))
     sandbox_dir = await asyncio.to_thread(_create_sandbox_dir_sync)
     paper_id = str(uuid.uuid4())
+    job_id = f"PUJ-{uuid.uuid4()}"
+    await job_store.create_upload_job(
+        job_id=job_id,
+        paper_id=paper_id,
+        execution_mode="sync",
+        document_ids=[document_id_for_upload_index(index) for index in range(len(files))],
+        expires_at=datetime.utcnow() + timedelta(hours=settings.upload_ttl_hours),
+    )
+    failure: _UploadFailure | None = None
+    try:
+        result = await _run_upload_job(
+            files=files,
+            paper_id=paper_id,
+            job_id=job_id,
+            sandbox_dir=sandbox_dir,
+            max_upload_bytes=max_upload_bytes,
+            primary_index=primary_index,
+            service=service,
+            plan_service=plan_service,
+            bundle_store=bundle_store,
+            reparse_store=reparse_store,
+            job_store=job_store,
+        )
+        if isinstance(result, _UploadFailure):
+            failure = result
+            return _upload_failure_response(result)
+        return result
+    finally:
+        if failure is not None:
+            logger.info(
+                "paper_upload_failed: paper_id={} job_id={} error_code={} failed_stage={}",
+                failure.paper_id,
+                failure.job_id,
+                failure.error_code,
+                "recorded",
+            )
+        await asyncio.to_thread(_cleanup_sandbox_dir_sync, sandbox_dir)
+
+
+async def _run_upload_job(
+    *,
+    files: list[UploadFile],
+    paper_id: str,
+    job_id: str,
+    sandbox_dir: Path,
+    max_upload_bytes: int,
+    primary_index: int | None,
+    service: PaperSpecService,
+    plan_service: PaperPlanService,
+    bundle_store: PaperBundleStore,
+    reparse_store: PaperReparseStore,
+    job_store: PaperUploadJobStore,
+) -> UploadDocumentResponse | _UploadFailure:
     successes: list[SuccessfulPaperSpec] = []
     source_documents: list[SuccessfulParsedDocument] = []
     document_statuses: list[UploadDocumentStatusModel] = []
     first_error: Exception | None = None
-    try:
-        for upload_index, upload_file in enumerate(files):
-            document_id = document_id_for_upload_index(upload_index)
-            display_filename = sanitize_paper_display_filename(upload_file.filename)
-            try:
-                _validate_declared_size(upload_file.size, max_upload_bytes)
-                header = await upload_file.read(8192)
-                extension = _validate_magic_and_extension(header, upload_file.filename)
-                await upload_file.seek(0)
-                saved_path = await asyncio.to_thread(
-                    _save_upload_sync,
-                    upload_file,
-                    sandbox_dir,
-                    extension,
-                    max_upload_bytes,
-                    document_id,
-                )
-                file_hash = await asyncio.to_thread(_compute_sha256_sync, saved_path)
-                file_size = saved_path.stat().st_size
-                logger.info(
-                    "paper_document_upload_accepted: document_id={} file_size={} "
-                    "file_hash={} extension={}",
-                    document_id,
-                    file_size,
-                    file_hash,
-                    extension,
-                )
-                parsed = await service.parse_uncached(saved_path)
-                spec = await service.extract_parsed_uncached(
-                    parsed,
-                    paper_id,
-                    display_filename=display_filename,
-                    document_id=document_id,
-                )
-            except (DocumentParseError, PaperSpecGenerationError) as exc:
-                first_error = first_error or exc
-                document_statuses.append(
-                    UploadDocumentStatusModel(
-                        document_id=document_id,
-                        filename=display_filename,
-                        status="failed",
-                        error_code=_per_document_error_code(exc),
-                    )
-                )
-                if primary_index == upload_index:
-                    raise
-                continue
-
-            successes.append(
-                SuccessfulPaperSpec(
-                    upload_index=upload_index,
-                    document_id=document_id,
-                    filename=display_filename,
-                    spec=spec,
-                )
+    await job_store.update_upload_job_state(
+        paper_id,
+        job_state="running",
+        stage="uploading",
+        retryable=False,
+    )
+    for upload_index, upload_file in enumerate(files):
+        document_id = document_id_for_upload_index(upload_index)
+        display_filename = sanitize_paper_display_filename(upload_file.filename)
+        try:
+            await job_store.update_upload_job_state(
+                paper_id,
+                job_state="running",
+                stage="parsing",
+                retryable=False,
             )
-            source_documents.append(
-                SuccessfulParsedDocument(
-                    upload_index=upload_index,
-                    document_id=document_id,
-                    filename=display_filename,
-                    parsed=parsed,
-                )
+            await job_store.update_upload_document_state(
+                paper_id,
+                document_id,
+                status="parsing",
             )
+            _validate_declared_size(upload_file.size, max_upload_bytes)
+            header = await upload_file.read(8192)
+            extension = _validate_magic_and_extension(header, upload_file.filename)
+            await upload_file.seek(0)
+            saved_path = await asyncio.to_thread(
+                _save_upload_sync,
+                upload_file,
+                sandbox_dir,
+                extension,
+                max_upload_bytes,
+                document_id,
+            )
+            file_hash = await asyncio.to_thread(_compute_sha256_sync, saved_path)
+            file_size = saved_path.stat().st_size
+            logger.info(
+                "paper_document_upload_accepted: document_id={} file_size={} "
+                "file_hash={} extension={}",
+                document_id,
+                file_size,
+                file_hash,
+                extension,
+            )
+            parsed = await service.parse_uncached(saved_path)
+            await job_store.update_upload_document_state(
+                paper_id,
+                document_id,
+                status="parsed",
+            )
+            await job_store.update_upload_job_state(
+                paper_id,
+                job_state="running",
+                stage="extracting_spec",
+                retryable=False,
+            )
+            await job_store.update_upload_document_state(
+                paper_id,
+                document_id,
+                status="extracting",
+            )
+            spec = await service.extract_parsed_uncached(
+                parsed,
+                paper_id,
+                display_filename=display_filename,
+                document_id=document_id,
+            )
+        except (DocumentParseError, PaperSpecGenerationError) as exc:
+            first_error = first_error or exc
             document_statuses.append(
                 UploadDocumentStatusModel(
                     document_id=document_id,
                     filename=display_filename,
-                    status="succeeded",
-                    error_code=None,
+                    status="failed",
+                    error_code=_per_document_error_code(exc),
                 )
             )
+            await job_store.update_upload_document_state(
+                paper_id,
+                document_id,
+                status="failed",
+                error_code=_per_document_error_code(exc),
+            )
+            if primary_index == upload_index:
+                return await _mark_upload_failed_no_usable_spec(
+                    job_store,
+                    paper_id,
+                    job_id,
+                    exc,
+                    failed_stage="extracting_spec",
+                )
+            continue
 
-        if not successes:
-            if first_error is not None:
-                raise first_error
-            raise DocumentParseError("document_parse_failed") from None
+        successes.append(
+            SuccessfulPaperSpec(
+                upload_index=upload_index,
+                document_id=document_id,
+                filename=display_filename,
+                spec=spec,
+            )
+        )
+        source_documents.append(
+            SuccessfulParsedDocument(
+                upload_index=upload_index,
+                document_id=document_id,
+                filename=display_filename,
+                parsed=parsed,
+            )
+        )
+        await job_store.update_upload_document_state(
+            paper_id,
+            document_id,
+            status="succeeded",
+        )
+        document_statuses.append(
+            UploadDocumentStatusModel(
+                document_id=document_id,
+                filename=display_filename,
+                status="succeeded",
+                error_code=None,
+            )
+        )
 
+    if not successes:
+        return await _mark_upload_failed_no_usable_spec(
+            job_store,
+            paper_id,
+            job_id,
+            first_error or DocumentParseError("document_parse_failed"),
+            failed_stage="extracting_spec",
+        )
+
+    try:
+        await job_store.update_upload_job_state(
+            paper_id,
+            job_state="running",
+            stage="fusing",
+            retryable=False,
+        )
         spec = fuse_successful_specs(successes, primary_index)
+    except DocumentParseError as exc:
+        return await _mark_upload_failed_no_usable_spec(
+            job_store,
+            paper_id,
+            job_id,
+            exc,
+            failed_stage="fusing",
+        )
+
+    try:
+        await job_store.update_upload_job_state(
+            paper_id,
+            job_state="running",
+            stage="persisting_spec",
+            retryable=False,
+        )
+        await bundle_store.put_spec(paper_id, spec)
+        await job_store.update_upload_job_state(
+            paper_id,
+            job_state="spec_ready",
+            stage="persisting_spec",
+            retryable=True,
+        )
+    except StoreError as exc:
+        return await _mark_upload_failed_no_usable_spec(
+            job_store,
+            paper_id,
+            job_id,
+            exc,
+            failed_stage="persisting_spec",
+            force_error_code="store_error",
+            status_code=500,
+        )
+
+    source = build_reparse_source(paper_id, source_documents, primary_index)
+    plan_result = await _run_plan_generation(
+        paper_id=paper_id,
+        job_id=job_id,
+        spec=spec,
+        plan_service=plan_service,
+        bundle_store=bundle_store,
+        reparse_store=reparse_store,
+        job_store=job_store,
+        source=source,
+    )
+    if isinstance(plan_result, _UploadFailure):
+        return plan_result
+    record = plan_result.record
+    return UploadDocumentResponse(
+        paper_id=paper_id,
+        spec=PaperSpecModel.from_domain(record.spec),
+        plan=ModelGenerationPlanModel.from_domain(record.plan),
+        missing_prompts=[
+            MissingParameterPromptModel.from_domain(prompt) for prompt in record.missing_prompts
+        ],
+        document_statuses=document_statuses,
+    )
+
+
+@router.get(
+    "/api/v1/papers/{paper_id}/status",
+    response_model=PaperStatusResponse,
+)
+async def get_paper_status(
+    paper_id: str,
+    job_store: Annotated[PaperUploadJobStore, Depends(get_paper_upload_job_store)],
+) -> PaperStatusResponse | JSONResponse:
+    """Return persisted upload/rerun state for a paper."""
+    record = await job_store.get_upload_job(paper_id)
+    if record is None:
+        raise PaperNotFoundError("paper_not_found") from None
+    if _is_expired(record.expires_at):
+        return _paper_error_response(
+            status_code=410,
+            error_code="paper_expired",
+            message="这份资料已过期,请重新上传",
+            paper_id=paper_id,
+            job_id=record.job_id,
+        )
+    return PaperStatusResponse.from_domain(record)
+
+
+@router.post(
+    "/api/v1/papers/{paper_id}/rerun-plan",
+    response_model=RerunPlanResponse,
+)
+async def rerun_paper_plan(
+    paper_id: str,
+    request: Annotated[RerunPlanRequest, Body(default_factory=RerunPlanRequest)],
+    bundle_store: Annotated[PaperBundleStore, Depends(get_paper_bundle_store)],
+    job_store: Annotated[PaperUploadJobStore, Depends(get_paper_upload_job_store)],
+    plan_service: Annotated[PaperPlanService, Depends(get_paper_plan_service)],
+    lock_registry: Annotated[
+        PaperReparseLockRegistry,
+        Depends(get_paper_reparse_lock_registry),
+    ],
+) -> RerunPlanResponse | JSONResponse:
+    """Regenerate a plan from a persisted spec-only or retryable-failed state."""
+    _ = request
+    record = await job_store.get_upload_job(paper_id)
+    if record is None:
+        raise PaperNotFoundError("paper_not_found") from None
+    if _is_expired(record.expires_at):
+        return _paper_error_response(
+            status_code=410,
+            error_code="paper_expired",
+            message="这份资料已过期,请重新上传",
+            paper_id=paper_id,
+            job_id=record.job_id,
+        )
+
+    try:
+        async with await lock_registry.acquire(paper_id):
+            started = await job_store.try_start_rerun_plan(paper_id)
+            if started is None:
+                current = await job_store.get_upload_job(paper_id)
+                return _paper_error_response(
+                    status_code=409,
+                    error_code="rerun_plan_unavailable",
+                    message="当前状态不能重跑建模计划",
+                    paper_id=paper_id,
+                    job_id=current.job_id if current is not None else record.job_id,
+                )
+            spec = await bundle_store.get_spec(paper_id)
+            if spec is None:
+                await job_store.update_upload_job_state(
+                    paper_id,
+                    job_state="failed_no_usable_spec",
+                    stage="generating_plan",
+                    failed_stage="generating_plan",
+                    error_code="paper_not_found",
+                    retryable=False,
+                    finished_at=datetime.utcnow(),
+                )
+                raise PaperNotFoundError("paper_not_found") from None
+            result = await _run_plan_generation(
+                paper_id=paper_id,
+                job_id=started.job_id,
+                spec=spec,
+                plan_service=plan_service,
+                bundle_store=bundle_store,
+                reparse_store=None,
+                job_store=job_store,
+                source=None,
+            )
+    except PaperReparseInProgressError:
+        return _paper_error_response(
+            status_code=409,
+            error_code="rerun_plan_in_progress",
+            message="这份结果正在更新,请稍后重试",
+            paper_id=paper_id,
+            job_id=record.job_id,
+        )
+
+    if isinstance(result, _UploadFailure):
+        return _upload_failure_response(result)
+
+    resolved_ids = resolved_prompt_ids(result.record)
+    remaining_prompts = [
+        prompt for prompt in result.record.missing_prompts if prompt.prompt_id not in resolved_ids
+    ]
+    return RerunPlanResponse(
+        paper_id=paper_id,
+        job_id=record.job_id,
+        job_state="ready",
+        plan=ModelGenerationPlanModel.from_domain(result.record.plan),
+        missing_prompts=[
+            MissingParameterPromptModel.from_domain(prompt)
+            for prompt in result.record.missing_prompts
+        ],
+        remaining_missing_prompts=[
+            MissingParameterPromptModel.from_domain(prompt) for prompt in remaining_prompts
+        ],
+    )
+
+
+async def _run_plan_generation(
+    *,
+    paper_id: str,
+    job_id: str,
+    spec: PaperSpec,
+    plan_service: PaperPlanService,
+    bundle_store: PaperBundleStore,
+    reparse_store: PaperReparseStore | None,
+    job_store: PaperUploadJobStore,
+    source: PaperReparseSource | None,
+) -> _PlanGenerationResult | _UploadFailure:
+    try:
+        await job_store.update_upload_job_state(
+            paper_id,
+            job_state="plan_generating",
+            stage="generating_plan",
+            retryable=False,
+        )
         plan, missing_prompts, missing_bindings = await plan_service.generate(spec, paper_id)
-        record = PaperPlanRecord(
-            paper_id=paper_id,
-            spec=spec,
-            plan=plan,
-            missing_prompts=missing_prompts,
-            missing_bindings=missing_bindings,
+    except Exception as exc:
+        return await _mark_plan_failed(
+            job_store,
+            paper_id,
+            job_id,
+            exc,
+            failed_stage="generating_plan",
         )
-        source = build_reparse_source(paper_id, source_documents, primary_index)
-        await reparse_store.save_ready_bundle_with_source(record, source)
-        return UploadDocumentResponse(
-            paper_id=paper_id,
-            spec=PaperSpecModel.from_domain(spec),
-            plan=ModelGenerationPlanModel.from_domain(plan),
-            missing_prompts=[
-                MissingParameterPromptModel.from_domain(prompt) for prompt in missing_prompts
-            ],
-            document_statuses=document_statuses,
+
+    record = PaperPlanRecord(
+        paper_id=paper_id,
+        spec=spec,
+        plan=plan,
+        missing_prompts=missing_prompts,
+        missing_bindings=missing_bindings,
+    )
+    try:
+        await job_store.update_upload_job_state(
+            paper_id,
+            job_state="plan_generating",
+            stage="persisting_plan",
+            retryable=False,
         )
-    finally:
-        await asyncio.to_thread(_cleanup_sandbox_dir_sync, sandbox_dir)
+        if source is None:
+            await bundle_store.set_plan(paper_id, record)
+        else:
+            if reparse_store is None:
+                raise StoreError("paper_reparse_store_missing")
+            await reparse_store.save_ready_bundle_with_source(record, source)
+        await job_store.update_upload_job_state(
+            paper_id,
+            job_state="ready",
+            stage="done",
+            retryable=False,
+            finished_at=datetime.utcnow(),
+        )
+        return _PlanGenerationResult(record=record)
+    except Exception as exc:
+        return await _mark_plan_failed(
+            job_store,
+            paper_id,
+            job_id,
+            exc,
+            failed_stage="persisting_plan",
+            force_retryable=True,
+            force_error_code="store_error" if isinstance(exc, StoreError) else None,
+            status_code=500 if isinstance(exc, StoreError) else None,
+        )
+
+
+async def _mark_upload_failed_no_usable_spec(
+    job_store: PaperUploadJobStore,
+    paper_id: str,
+    job_id: str,
+    exc: Exception,
+    *,
+    failed_stage: Literal[
+        "parsing",
+        "extracting_spec",
+        "fusing",
+        "persisting_spec",
+    ],
+    force_error_code: str | None = None,
+    status_code: int | None = None,
+) -> _UploadFailure:
+    status, error_code, message = _error_contract_for_exception(exc)
+    await job_store.update_upload_job_state(
+        paper_id,
+        job_state="failed_no_usable_spec",
+        stage=failed_stage,
+        failed_stage=failed_stage,
+        error_code=force_error_code or error_code,
+        retryable=False,
+        finished_at=datetime.utcnow(),
+    )
+    return _UploadFailure(
+        status_code=status_code or status,
+        error_code=force_error_code or error_code,
+        message=message,
+        paper_id=paper_id,
+        job_id=job_id,
+    )
+
+
+async def _mark_plan_failed(
+    job_store: PaperUploadJobStore,
+    paper_id: str,
+    job_id: str,
+    exc: Exception,
+    *,
+    failed_stage: Literal["generating_plan", "persisting_plan"],
+    force_retryable: bool | None = None,
+    force_error_code: str | None = None,
+    status_code: int | None = None,
+) -> _UploadFailure:
+    status, error_code, message = _error_contract_for_exception(exc)
+    retryable = force_retryable if force_retryable is not None else _is_retryable_plan_error(exc)
+    job_state: Literal["plan_failed_retryable", "plan_failed_permanent"] = (
+        "plan_failed_retryable" if retryable else "plan_failed_permanent"
+    )
+    await job_store.update_upload_job_state(
+        paper_id,
+        job_state=job_state,
+        stage=failed_stage,
+        failed_stage=failed_stage,
+        error_code=force_error_code or error_code,
+        retryable=retryable,
+        finished_at=datetime.utcnow(),
+    )
+    return _UploadFailure(
+        status_code=status_code or status,
+        error_code=force_error_code or error_code,
+        message=message,
+        paper_id=paper_id,
+        job_id=job_id,
+    )
+
+
+def _is_retryable_plan_error(exc: Exception) -> bool:
+    if isinstance(exc, LLMAuthError):
+        return False
+    if isinstance(exc, StoreError):
+        return True
+    if isinstance(
+        exc,
+        PaperPlanGenerationError
+        | LLMQuotaError
+        | LLMRateLimitError
+        | LLMServerError
+        | LLMTimeoutError
+        | LLMError,
+    ):
+        return True
+    return True
+
+
+def _error_contract_for_exception(exc: Exception) -> tuple[int, str, str]:
+    if isinstance(exc, DocumentParseError):
+        return 400, "document_parse_failed", "文档解析失败,请检查文件是否损坏或超过 512MB"
+    if isinstance(exc, PaperSpecGenerationError):
+        return 502, "paper_spec_generation_failed", "资料理解失败,请刷新重试"
+    if isinstance(exc, PaperPlanGenerationError):
+        return 502, "paper_plan_generation_failed", "建模计划生成失败,请刷新重试"
+    if isinstance(exc, LLMAuthError):
+        return 503, "llm_auth", "服务暂时不可用,请稍后重试"
+    if isinstance(exc, LLMQuotaError):
+        return 503, "llm_quota", "服务繁忙,请稍后"
+    if isinstance(exc, LLMRateLimitError):
+        return 429, "llm_rate_limit", "请求太频繁,稍等一下"
+    if isinstance(exc, LLMTimeoutError):
+        return 504, "llm_timeout", "网络较慢,正在重试..."
+    if isinstance(exc, LLMServerError):
+        return 502, "llm_server", "AI 服务暂不稳定,请刷新重试"
+    if isinstance(exc, StoreError):
+        return 500, "store_error", "系统暂时不可用,请稍后重试"
+    return 500, "internal_error", "出了点问题,我们已经记录,稍后再试"
+
+
+def _upload_failure_response(failure: _UploadFailure) -> JSONResponse:
+    return _paper_error_response(
+        status_code=failure.status_code,
+        error_code=failure.error_code,
+        message=failure.message,
+        paper_id=failure.paper_id,
+        job_id=failure.job_id,
+    )
+
+
+def _paper_error_response(
+    *,
+    status_code: int,
+    error_code: str,
+    message: str,
+    paper_id: str,
+    job_id: str,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": error_code,
+            "message": message,
+            "paper_id": paper_id,
+            "job_id": job_id,
+        },
+    )
+
+
+def _is_expired(expires_at: datetime) -> bool:
+    return expires_at <= datetime.utcnow()
 
 
 def _validate_declared_size(size: int | None, max_upload_bytes: int) -> None:

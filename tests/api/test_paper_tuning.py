@@ -44,6 +44,13 @@ class FakeBundleStore(PaperBundleStore):
         _ = paper_id
         return self.record
 
+    async def put_spec(self, paper_id: str, spec: PaperSpec) -> None:
+        _ = paper_id, spec
+
+    async def set_plan(self, paper_id: str, record: PaperPlanRecord) -> None:
+        _ = paper_id
+        self.record = record
+
     async def delete_bundle(self, paper_id: str) -> None:
         _ = paper_id
         self.record = None

@@ -14,6 +14,41 @@ export type PaperAskFallbackReason =
   | "invalid_or_missing_citations"
   | "citation_target_unresolved"
   | "out_of_scope";
+export type PaperUploadExecutionMode = "sync" | "async" | "rerun_plan";
+export type PaperUploadJobState =
+  | "queued"
+  | "running"
+  | "spec_ready"
+  | "plan_generating"
+  | "ready"
+  | "plan_failed_retryable"
+  | "plan_failed_permanent"
+  | "failed_no_usable_spec"
+  | "abandoned_plan_retryable"
+  | "abandoned_reupload_required";
+export type PaperUploadStage =
+  | "uploading"
+  | "parsing"
+  | "extracting_spec"
+  | "fusing"
+  | "persisting_spec"
+  | "generating_plan"
+  | "persisting_plan"
+  | "done";
+export type PaperUploadDocumentState =
+  | "pending"
+  | "parsing"
+  | "parsed"
+  | "extracting"
+  | "succeeded"
+  | "failed";
+export type PaperUploadNextAction =
+  | "wait"
+  | "rerun_plan"
+  | "reupload"
+  | "open_result"
+  | "none"
+  | "contact_support";
 
 export type PaperCitationTarget =
   | SectionTarget
@@ -257,6 +292,37 @@ export interface UploadDocumentStatus {
   filename: string;
   status: "succeeded" | "failed";
   error_code: string | null;
+}
+
+export interface PaperJobDocumentStatus {
+  document_id: string;
+  status: PaperUploadDocumentState;
+  error_code: string | null;
+}
+
+export interface PaperStatusResponse {
+  paper_id: string;
+  job_id: string;
+  execution_mode: PaperUploadExecutionMode;
+  job_state: PaperUploadJobState;
+  stage: PaperUploadStage;
+  failed_stage: PaperUploadStage | null;
+  error_code: string | null;
+  retryable: boolean;
+  next_action: PaperUploadNextAction;
+  expires_at: string;
+  documents: PaperJobDocumentStatus[];
+}
+
+export interface RerunPlanRequest {}
+
+export interface RerunPlanResponse {
+  paper_id: string;
+  job_id: string;
+  job_state: PaperUploadJobState;
+  plan: ModelGenerationPlan;
+  missing_prompts: MissingParameterPrompt[];
+  remaining_missing_prompts: MissingParameterPrompt[];
 }
 
 export interface PaperSpecResponse {

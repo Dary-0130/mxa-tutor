@@ -10,7 +10,7 @@ from loguru import logger
 
 from core.domain.exceptions import StoreError
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 _SCHEMA_VERSION_DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -189,11 +189,96 @@ _PAPER_PARAMETER_CORRECTION_STATEMENTS = (
     """,
 )
 
+_PAPER_UPLOAD_JOB_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS paper_upload_job (
+        job_id          TEXT PRIMARY KEY,
+        paper_id        TEXT NOT NULL UNIQUE,
+        execution_mode  TEXT NOT NULL CHECK (
+            execution_mode IN ('sync', 'async', 'rerun_plan')
+        ),
+        job_state       TEXT NOT NULL CHECK (
+            job_state IN (
+                'queued',
+                'running',
+                'spec_ready',
+                'plan_generating',
+                'ready',
+                'plan_failed_retryable',
+                'plan_failed_permanent',
+                'failed_no_usable_spec',
+                'abandoned_plan_retryable',
+                'abandoned_reupload_required'
+            )
+        ),
+        stage           TEXT NOT NULL CHECK (
+            stage IN (
+                'uploading',
+                'parsing',
+                'extracting_spec',
+                'fusing',
+                'persisting_spec',
+                'generating_plan',
+                'persisting_plan',
+                'done'
+            )
+        ),
+        failed_stage    TEXT CHECK (
+            failed_stage IS NULL OR failed_stage IN (
+                'uploading',
+                'parsing',
+                'extracting_spec',
+                'fusing',
+                'persisting_spec',
+                'generating_plan',
+                'persisting_plan',
+                'done'
+            )
+        ),
+        last_error_code TEXT,
+        retryable       INTEGER NOT NULL CHECK (retryable IN (0, 1)),
+        attempt_count   INTEGER NOT NULL DEFAULT 1 CHECK (attempt_count >= 1),
+        state_version   INTEGER NOT NULL DEFAULT 0 CHECK (state_version >= 0),
+        created_at      TEXT NOT NULL,
+        started_at      TEXT,
+        finished_at     TEXT,
+        expires_at      TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_paper_upload_job_expires
+        ON paper_upload_job(expires_at)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS paper_upload_job_document (
+        job_id       TEXT NOT NULL,
+        paper_id     TEXT NOT NULL,
+        document_id  TEXT NOT NULL,
+        upload_index INTEGER NOT NULL,
+        status       TEXT NOT NULL CHECK (
+            status IN ('pending', 'parsing', 'parsed', 'extracting', 'succeeded', 'failed')
+        ),
+        error_code   TEXT,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        PRIMARY KEY (job_id, document_id),
+        FOREIGN KEY (job_id)
+            REFERENCES paper_upload_job(job_id)
+            ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_paper_upload_job_document_paper
+        ON paper_upload_job_document(paper_id, upload_index)
+    """,
+)
+
 _CHUNKS_DDL = ";\n".join(_CHUNKS_STATEMENTS) + ";"
 _TEACHING_UNITS_DDL = ";\n".join(_TEACHING_UNITS_STATEMENTS) + ";"
 _PAPER_CACHE_DDL = ";\n".join(_PAPER_CACHE_STATEMENTS) + ";"
 _PAPER_REPARSE_SOURCE_DDL = ";\n".join(_PAPER_REPARSE_SOURCE_STATEMENTS) + ";"
 _PAPER_PARAMETER_CORRECTION_DDL = ";\n".join(_PAPER_PARAMETER_CORRECTION_STATEMENTS) + ";"
+_PAPER_UPLOAD_JOB_DDL = ";\n".join(_PAPER_UPLOAD_JOB_STATEMENTS) + ";"
 
 _RUN_STATE_STATEMENTS = (
     """
@@ -297,6 +382,7 @@ _DDL = "\n".join(
         _PAPER_CACHE_DDL,
         _PAPER_REPARSE_SOURCE_DDL,
         _PAPER_PARAMETER_CORRECTION_DDL,
+        _PAPER_UPLOAD_JOB_DDL,
         _RUN_STATE_DDL,
     )
 )
@@ -345,6 +431,12 @@ async def _migrate_v6_to_v7(conn: aiosqlite.Connection) -> None:
     await _execute_all(conn, _PAPER_PARAMETER_CORRECTION_STATEMENTS)
 
 
+async def _migrate_v7_to_v8(conn: aiosqlite.Connection) -> None:
+    """Add paper upload job state tables."""
+
+    await _execute_all(conn, _PAPER_UPLOAD_JOB_STATEMENTS)
+
+
 _MIGRATIONS: dict[int, Migration] = {
     1: _migrate_v1_to_v2,
     2: _migrate_v2_to_v3,
@@ -352,6 +444,7 @@ _MIGRATIONS: dict[int, Migration] = {
     4: _migrate_v4_to_v5,
     5: _migrate_v5_to_v6,
     6: _migrate_v6_to_v7,
+    7: _migrate_v7_to_v8,
 }
 
 

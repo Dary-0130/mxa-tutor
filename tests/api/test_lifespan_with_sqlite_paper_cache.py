@@ -34,6 +34,8 @@ def test_lifespan_wires_sqlite_paper_bundle_store_and_views(
             "paper_spec_cache",
             "paper_plan_cache",
             "paper_reparse_source_cache",
+            "paper_upload_job",
+            "paper_upload_job_document",
         }
 
 

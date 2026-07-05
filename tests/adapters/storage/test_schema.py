@@ -21,6 +21,8 @@ async def test_init_schema_creates_tables_and_version(db_path: str) -> None:
         "chat_session",
         "project_status_record",
         "paper_parameter_correction",
+        "paper_upload_job",
+        "paper_upload_job_document",
         "schema_version",
     }.issubset(tables)
     assert dict(version) == {"id": 1, "version": CURRENT_SCHEMA_VERSION}

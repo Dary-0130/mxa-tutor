@@ -17,6 +17,8 @@ async def test_new_database_latest_schema_includes_paper_tables(db_path: str) ->
         "paper_plan_cache",
         "paper_reparse_source_cache",
         "paper_parameter_correction",
+        "paper_upload_job",
+        "paper_upload_job_document",
         "teaching_units",
         "chunks",
     }.issubset(tables)
@@ -63,6 +65,8 @@ async def test_migrates_v1_to_latest_and_preserves_project_and_chat(db_path: str
         "paper_plan_cache",
         "paper_reparse_source_cache",
         "paper_parameter_correction",
+        "paper_upload_job",
+        "paper_upload_job_document",
     }.issubset(tables)
     assert project["project_id"] == "p1"
     assert session["session_id"] == "s1"
@@ -91,6 +95,8 @@ async def test_migrates_v2_to_latest_and_preserves_chunks(db_path: str) -> None:
         "paper_plan_cache",
         "paper_reparse_source_cache",
         "paper_parameter_correction",
+        "paper_upload_job",
+        "paper_upload_job_document",
     }.issubset(tables)
 
 
@@ -119,6 +125,8 @@ async def test_migrates_v3_to_latest_and_preserves_teaching_units(db_path: str) 
         "paper_plan_cache",
         "paper_reparse_source_cache",
         "paper_parameter_correction",
+        "paper_upload_job",
+        "paper_upload_job_document",
     }.issubset(tables)
 
 
@@ -137,6 +145,8 @@ async def test_migrates_v5_to_latest_and_preserves_run_state_tables(db_path: str
         "bridge_run_state_run",
         "paper_reparse_source_cache",
         "paper_parameter_correction",
+        "paper_upload_job",
+        "paper_upload_job_document",
     }.issubset(tables)
 
 
@@ -155,6 +165,27 @@ async def test_migrates_v6_to_latest_and_adds_parameter_correction_table(
     assert version == schema.CURRENT_SCHEMA_VERSION
     assert "paper_parameter_correction" in tables
     assert "idx_paper_parameter_correction_paper" in indexes
+
+
+async def test_migrates_v7_to_latest_and_adds_upload_job_tables(db_path: str) -> None:
+    async with open_connection(db_path) as conn:
+        await schema.init_schema(conn)
+        await conn.execute("DROP TABLE paper_upload_job_document")
+        await conn.execute("DROP TABLE paper_upload_job")
+        await conn.execute("UPDATE schema_version SET version=7 WHERE id=1")
+        await conn.commit()
+
+    async with open_connection(db_path) as conn:
+        await schema.init_schema(conn)
+        version = await _schema_version(conn)
+        tables = await _tables(conn)
+        indexes = await _indexes(conn)
+
+    assert version == schema.CURRENT_SCHEMA_VERSION
+    assert "paper_upload_job" in tables
+    assert "paper_upload_job_document" in tables
+    assert "idx_paper_upload_job_expires" in indexes
+    assert "idx_paper_upload_job_document_paper" in indexes
 
 
 async def test_target_latest_schema_is_idempotent(db_path: str) -> None:

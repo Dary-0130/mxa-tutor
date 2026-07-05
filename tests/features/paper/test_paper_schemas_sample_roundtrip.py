@@ -7,6 +7,11 @@ from features.paper.paper_schemas import (
     ModelGenerationPlanModel,
     PaperSpecModel,
 )
+from features.paper.paper_upload_job_schemas import (
+    PaperStatusResponse,
+    RerunPlanRequest,
+    RerunPlanResponse,
+)
 
 ROOT = Path("eval/cases/paper_to_model")
 PAPER_SPEC_PATH = (
@@ -192,3 +197,44 @@ def test_paper_ask_fallback_reasons_roundtrip_match_sample_json() -> None:
         model = PaperAskResponseModel.model_validate(data)
 
         assert _json_dump(PaperAskResponseModel.from_domain(model.to_domain())) == data
+
+
+def test_paper_status_response_roundtrip_matches_sample_json() -> None:
+    data = {
+        "paper_id": "paper-1",
+        "job_id": "PUJ-1",
+        "execution_mode": "sync",
+        "job_state": "plan_failed_retryable",
+        "stage": "generating_plan",
+        "failed_stage": "generating_plan",
+        "error_code": "paper_plan_generation_failed",
+        "retryable": True,
+        "next_action": "rerun_plan",
+        "expires_at": "2026-07-06T12:00:00",
+        "documents": [
+            {
+                "document_id": "DOC-001",
+                "status": "succeeded",
+                "error_code": None,
+            }
+        ],
+    }
+
+    model = PaperStatusResponse.model_validate(data)
+
+    assert _json_dump(model) == data
+
+
+def test_rerun_plan_contracts_roundtrip_match_sample_json() -> None:
+    request = {}
+    response = {
+        "paper_id": "paper-1",
+        "job_id": "PUJ-1",
+        "job_state": "ready",
+        "plan": _load(PLAN_PATH),
+        "missing_prompts": _load(MISSING_PATH)["missing_prompts"],
+        "remaining_missing_prompts": [],
+    }
+
+    assert _json_dump(RerunPlanRequest.model_validate(request)) == request
+    assert _json_dump(RerunPlanResponse.model_validate(response)) == response

@@ -147,19 +147,73 @@ async def test_delete_plan_leaves_spec_only_state(initialized_db_path: str) -> N
     assert await store.get_plan_record(record.paper_id) is None
 
 
+async def test_upload_job_state_round_trips_and_cas_starts_rerun(
+    initialized_db_path: str,
+) -> None:
+    store = SqlitePaperBundleStore(initialized_db_path)
+    expires_at = datetime(2026, 7, 6, 12, 0, 0)
+    await store.create_upload_job(
+        job_id="PUJ-1",
+        paper_id="paper-job",
+        execution_mode="sync",
+        document_ids=["DOC-001", "DOC-002"],
+        expires_at=expires_at,
+    )
+    await store.update_upload_document_state(
+        "paper-job",
+        "DOC-001",
+        status="succeeded",
+    )
+    await store.update_upload_job_state(
+        "paper-job",
+        job_state="plan_failed_retryable",
+        stage="generating_plan",
+        failed_stage="generating_plan",
+        error_code="paper_plan_generation_failed",
+        retryable=True,
+        finished_at=datetime(2026, 7, 5, 12, 0, 0),
+    )
+
+    started = await store.try_start_rerun_plan("paper-job")
+    assert started is not None
+    assert started.execution_mode == "rerun_plan"
+    assert started.job_state == "plan_generating"
+    assert started.attempt_count == 2
+    assert started.state_version >= 2
+
+    assert await store.try_start_rerun_plan("paper-job") is None
+    record = await store.get_upload_job("paper-job")
+    assert record is not None
+    assert record.expires_at == expires_at
+    assert [(doc.document_id, doc.status) for doc in record.documents] == [
+        ("DOC-001", "succeeded"),
+        ("DOC-002", "pending"),
+    ]
+
+
 async def test_delete_bundle_deletes_reparse_source(initialized_db_path: str) -> None:
     record = _record()
     store = SqlitePaperBundleStore(initialized_db_path)
     await store.save_ready_bundle_with_source(record, _source(record.paper_id))
     await store.insert_parameter_correction(_correction(record.paper_id))
+    await store.create_upload_job(
+        job_id="PUJ-1",
+        paper_id=record.paper_id,
+        execution_mode="sync",
+        document_ids=["DOC-001"],
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+    )
 
     await store.delete_bundle(record.paper_id)
 
     assert await store.get_spec(record.paper_id) is None
     assert await store.get_plan_record(record.paper_id) is None
+    assert await store.get_upload_job(record.paper_id) is None
     async with open_connection(initialized_db_path) as conn:
         assert await _count(conn, "paper_reparse_source_cache") == 0
         assert await _count(conn, "paper_parameter_correction") == 0
+        assert await _count(conn, "paper_upload_job") == 0
+        assert await _count(conn, "paper_upload_job_document") == 0
 
 
 async def test_invalidate_spec_deletes_both_rows(initialized_db_path: str) -> None:
@@ -234,6 +288,13 @@ async def test_replace_ready_bundle_with_source_clears_parameter_corrections(
     store = SqlitePaperBundleStore(initialized_db_path)
     await store.save_ready_bundle_with_source(old_record, _source(old_record.paper_id))
     await store.insert_parameter_correction(_correction(old_record.paper_id))
+    await store.create_upload_job(
+        job_id="PUJ-replace",
+        paper_id=old_record.paper_id,
+        execution_mode="sync",
+        document_ids=["DOC-001"],
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+    )
 
     await store.replace_ready_bundle_with_source(
         _record(title="Reparsed report"),
@@ -241,6 +302,7 @@ async def test_replace_ready_bundle_with_source_clears_parameter_corrections(
     )
 
     assert await store.list_parameter_corrections(old_record.paper_id) == []
+    assert await store.get_upload_job(old_record.paper_id) is None
 
 
 async def test_delete_expired_paper_bundles_cascades_plan_spec_source(
@@ -251,6 +313,13 @@ async def test_delete_expired_paper_bundles_cascades_plan_spec_source(
     await store.save_ready_bundle_with_source(record, _source(record.paper_id))
     await store.insert_parameter_correction(_correction(record.paper_id))
     expired = datetime(2026, 7, 2, 12, 0, 0)
+    await store.create_upload_job(
+        job_id="PUJ-expired",
+        paper_id=record.paper_id,
+        execution_mode="sync",
+        document_ids=["DOC-001"],
+        expires_at=expired - timedelta(hours=1),
+    )
     async with open_connection(initialized_db_path) as conn:
         await conn.execute(
             "UPDATE paper_spec_cache SET created_at=? WHERE paper_id=?",
@@ -266,6 +335,8 @@ async def test_delete_expired_paper_bundles_cascades_plan_spec_source(
         assert await _count(conn, "paper_spec_cache") == 0
         assert await _count(conn, "paper_reparse_source_cache") == 0
         assert await _count(conn, "paper_parameter_correction") == 0
+        assert await _count(conn, "paper_upload_job") == 0
+        assert await _count(conn, "paper_upload_job_document") == 0
 
 
 async def test_delete_expired_paper_bundles_cleans_orphan_parameter_corrections(
@@ -279,6 +350,25 @@ async def test_delete_expired_paper_bundles_cleans_orphan_parameter_corrections(
     assert deleted == 0
     async with open_connection(initialized_db_path) as conn:
         assert await _count(conn, "paper_parameter_correction") == 0
+
+
+async def test_delete_expired_paper_bundles_deletes_expired_job_without_spec(
+    initialized_db_path: str,
+) -> None:
+    store = SqlitePaperBundleStore(initialized_db_path)
+    now = datetime(2026, 7, 2, 12, 0, 0)
+    await store.create_upload_job(
+        job_id="PUJ-expired-only",
+        paper_id="paper-expired-only",
+        execution_mode="sync",
+        document_ids=["DOC-001"],
+        expires_at=now - timedelta(seconds=1),
+    )
+
+    deleted = await store.delete_expired_paper_bundles(now=now)
+
+    assert deleted == 1
+    assert await store.get_upload_job("paper-expired-only") is None
 
 
 async def test_parameter_correction_crud_round_trips_and_preserves_original(
