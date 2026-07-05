@@ -50,7 +50,12 @@ from api.routes.paper_query import router as paper_query_router
 from api.routes.paper_reparse import router as paper_reparse_router
 from api.routes.paper_step_regeneration import router as paper_step_regeneration_router
 from api.routes.paper_tuning import router as paper_tuning_router
-from api.routes.paper_upload import router as paper_upload_router
+from api.routes.paper_upload import (
+    router as paper_upload_router,
+)
+from api.routes.paper_upload import (
+    sweep_stale_paper_upload_jobs,
+)
 from api.routes.paper_user_supply import router as paper_user_supply_router
 from api.routes.teaching_unit import router as teaching_unit_router
 from api.routes.upload import router as upload_router
@@ -251,6 +256,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.paper_spec_cache = SqlitePaperSpecCacheView(paper_bundle_store)
         app.state.paper_plan_cache = SqlitePaperPlanCacheView(paper_bundle_store)
         app.state.paper_reparse_lock_registry = PaperReparseLockRegistry()
+        await sweep_stale_paper_upload_jobs(
+            upload_dir=upload_dir,
+            bundle_store=paper_bundle_store,
+            job_store=paper_bundle_store,
+        )
         try:
             embedder: EmbeddingProvider = await asyncio.to_thread(_build_embedder, settings)
         except Exception as exc:
@@ -308,6 +318,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             upload_dir=upload_dir,
             ttl_hours=settings.upload_ttl_hours,
             paper_store=paper_bundle_store,
+            paper_job_store=paper_bundle_store,
         )
         cleanup_task = asyncio.create_task(worker.run_forever())
         run_state_worker = RunStateCleanupWorker(bridge_run_state_store)

@@ -74,6 +74,7 @@ from features.paper.paper_upload_job_schemas import (
     PaperStatusResponse,
     RerunPlanRequest,
     RerunPlanResponse,
+    UploadAsyncResponse,
 )
 
 TOP_LEVEL_MODELS = (
@@ -86,6 +87,7 @@ TOP_LEVEL_MODELS = (
     PaperAskResponseModel,
     PaperJobDocumentStatus,
     PaperStatusResponse,
+    UploadAsyncResponse,
     RerunPlanRequest,
     RerunPlanResponse,
 )
@@ -194,6 +196,7 @@ def test_top_level_model_count_and_names_are_frozen() -> None:
         "PaperAskResponseModel",
         "PaperJobDocumentStatus",
         "PaperStatusResponse",
+        "UploadAsyncResponse",
         "RerunPlanRequest",
         "RerunPlanResponse",
     ]
@@ -602,6 +605,7 @@ def test_paper_upload_job_status_literals_and_fields_are_frozen() -> None:
         "expires_at",
         "documents",
     )
+    assert tuple(UploadAsyncResponse.model_fields) == ("paper_id", "job_id")
     assert tuple(RerunPlanRequest.model_fields) == ()
     assert tuple(RerunPlanResponse.model_fields) == (
         "paper_id",

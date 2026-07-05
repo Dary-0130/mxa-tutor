@@ -191,6 +191,110 @@ async def test_upload_job_state_round_trips_and_cas_starts_rerun(
     ]
 
 
+async def test_initial_plan_cas_only_starts_from_spec_ready(initialized_db_path: str) -> None:
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.create_upload_job(
+        job_id="PUJ-initial",
+        paper_id="paper-initial",
+        execution_mode="async",
+        document_ids=["DOC-001"],
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+    )
+
+    assert await store.try_start_initial_plan("paper-initial") is None
+
+    await store.update_upload_job_state(
+        "paper-initial",
+        job_state="spec_ready",
+        stage="persisting_spec",
+        retryable=True,
+    )
+    started = await store.try_start_initial_plan("paper-initial")
+
+    assert started is not None
+    assert started.execution_mode == "async"
+    assert started.job_state == "plan_generating"
+    assert started.stage == "generating_plan"
+    assert started.attempt_count == 1
+
+
+async def test_rerun_plan_cas_accepts_abandoned_plan_retryable(
+    initialized_db_path: str,
+) -> None:
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.create_upload_job(
+        job_id="PUJ-abandoned",
+        paper_id="paper-abandoned",
+        execution_mode="async",
+        document_ids=["DOC-001"],
+        expires_at=datetime.utcnow() + timedelta(hours=24),
+    )
+    await store.mark_upload_job_terminal(
+        "paper-abandoned",
+        job_state="abandoned_plan_retryable",
+        stage=None,
+        failed_stage="generating_plan",
+        error_code="upload_job_abandoned",
+        retryable=True,
+    )
+
+    started = await store.try_start_rerun_plan("paper-abandoned")
+
+    assert started is not None
+    assert started.execution_mode == "rerun_plan"
+    assert started.job_state == "plan_generating"
+    assert started.attempt_count == 2
+
+
+async def test_list_stale_and_mark_terminal_preserves_stage_and_sets_finished_at(
+    initialized_db_path: str,
+) -> None:
+    store = SqlitePaperBundleStore(initialized_db_path)
+    for job_id, paper_id in [
+        ("PUJ-queued", "paper-queued"),
+        ("PUJ-running", "paper-running"),
+        ("PUJ-ready", "paper-ready"),
+    ]:
+        await store.create_upload_job(
+            job_id=job_id,
+            paper_id=paper_id,
+            execution_mode="async",
+            document_ids=["DOC-001"],
+            expires_at=datetime.utcnow() + timedelta(hours=24),
+        )
+    await store.update_upload_job_state(
+        "paper-running",
+        job_state="plan_generating",
+        stage="persisting_plan",
+        retryable=False,
+    )
+    await store.update_upload_job_state(
+        "paper-ready",
+        job_state="ready",
+        stage="done",
+        retryable=False,
+        finished_at=datetime.utcnow(),
+    )
+
+    stale = await store.list_stale_upload_jobs()
+    marked = await store.mark_upload_job_terminal(
+        "paper-running",
+        job_state="abandoned_plan_retryable",
+        stage=None,
+        failed_stage="persisting_plan",
+        error_code="upload_job_abandoned",
+        retryable=True,
+    )
+    by_job_id = await store.get_upload_job_by_job_id("PUJ-running")
+
+    assert [record.paper_id for record in stale] == ["paper-queued", "paper-running"]
+    assert marked.stage == "persisting_plan"
+    assert marked.failed_stage == "persisting_plan"
+    assert marked.finished_at is not None
+    assert marked.state_version >= 2
+    assert by_job_id == marked
+
+
 async def test_delete_bundle_deletes_reparse_source(initialized_db_path: str) -> None:
     record = _record()
     store = SqlitePaperBundleStore(initialized_db_path)

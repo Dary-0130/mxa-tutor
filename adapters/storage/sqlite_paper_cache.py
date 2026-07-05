@@ -172,6 +172,136 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJob
 
         return self._load_upload_job_row(job_row, doc_rows)
 
+    async def get_upload_job_by_job_id(self, job_id: str) -> PaperUploadJobRecord | None:
+        async with self._connect() as conn:
+            try:
+                job_cur = await conn.execute(
+                    """
+                    SELECT *
+                    FROM paper_upload_job
+                    WHERE job_id=?
+                    """,
+                    (job_id,),
+                )
+                job_row = await job_cur.fetchone()
+                if job_row is None:
+                    return None
+                doc_cur = await conn.execute(
+                    """
+                    SELECT document_id, upload_index, status, error_code, updated_at
+                    FROM paper_upload_job_document
+                    WHERE job_id=?
+                    ORDER BY upload_index ASC
+                    """,
+                    (job_row["job_id"],),
+                )
+                doc_rows = await doc_cur.fetchall()
+            except aiosqlite.Error as exc:
+                logger.error(
+                    "SqlitePaperBundleStore.get_upload_job_by_job_id failed: " "exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+
+        return self._load_upload_job_row(job_row, doc_rows)
+
+    async def list_stale_upload_jobs(self) -> list[PaperUploadJobRecord]:
+        async with self._connect() as conn:
+            try:
+                cur = await conn.execute(
+                    """
+                    SELECT *
+                    FROM paper_upload_job
+                    WHERE job_state IN ('queued', 'running', 'plan_generating')
+                    ORDER BY created_at ASC
+                    """
+                )
+                job_rows = await cur.fetchall()
+                records: list[PaperUploadJobRecord] = []
+                for job_row in job_rows:
+                    doc_cur = await conn.execute(
+                        """
+                        SELECT document_id, upload_index, status, error_code, updated_at
+                        FROM paper_upload_job_document
+                        WHERE job_id=?
+                        ORDER BY upload_index ASC
+                        """,
+                        (job_row["job_id"],),
+                    )
+                    records.append(self._load_upload_job_row(job_row, await doc_cur.fetchall()))
+            except aiosqlite.Error as exc:
+                logger.error(
+                    "SqlitePaperBundleStore.list_stale_upload_jobs failed: exception={}",
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+
+        return records
+
+    async def mark_upload_job_terminal(
+        self,
+        paper_id: str,
+        *,
+        job_state: PaperUploadJobState,
+        stage: PaperUploadStage | None = None,
+        failed_stage: PaperUploadStage | None = None,
+        error_code: str | None = None,
+        retryable: bool,
+        finished_at: datetime | None = None,
+    ) -> PaperUploadJobRecord:
+        now = datetime.utcnow()
+        now_iso = now.isoformat()
+        finished_at_iso = (finished_at or now).isoformat()
+        async with self._connect() as conn:
+            try:
+                await conn.execute("BEGIN")
+                cur = await conn.execute(
+                    """
+                    UPDATE paper_upload_job
+                    SET job_state=?,
+                        stage=COALESCE(?, stage),
+                        failed_stage=?,
+                        last_error_code=?,
+                        retryable=?,
+                        state_version=state_version + 1,
+                        started_at=COALESCE(started_at, ?),
+                        finished_at=?
+                    WHERE paper_id=?
+                    """,
+                    (
+                        job_state,
+                        stage,
+                        failed_stage,
+                        error_code,
+                        1 if retryable else 0,
+                        now_iso,
+                        finished_at_iso,
+                        paper_id,
+                    ),
+                )
+                if cur.rowcount != 1:
+                    raise StoreError("paper_upload_job_missing")
+                await conn.commit()
+            except StoreError:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, paper_id)
+                logger.error(
+                    "SqlitePaperBundleStore.mark_upload_job_terminal failed: "
+                    "paper_id={} exception={}",
+                    paper_id,
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+        record = await self.get_upload_job(paper_id)
+        if record is None:
+            raise StoreError("paper_upload_job_missing")
+        return record
+
     async def update_upload_job_state(
         self,
         paper_id: str,
@@ -293,7 +423,11 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJob
                         started_at=?,
                         finished_at=NULL
                     WHERE paper_id=?
-                        AND job_state IN ('spec_ready', 'plan_failed_retryable')
+                        AND job_state IN (
+                            'spec_ready',
+                            'plan_failed_retryable',
+                            'abandoned_plan_retryable'
+                        )
                     """,
                     (now_iso, paper_id),
                 )
@@ -302,6 +436,45 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJob
                 await self._rollback_preserving_error(conn, paper_id)
                 logger.error(
                     "SqlitePaperBundleStore.try_start_rerun_plan failed: "
+                    "paper_id={} exception={}",
+                    paper_id,
+                    type(exc).__name__,
+                )
+                raise StoreError("sqlite_operation_failed") from None
+            except Exception:
+                await self._rollback_preserving_error(conn, paper_id)
+                raise
+
+        if cur.rowcount != 1:
+            return None
+        return await self.get_upload_job(paper_id)
+
+    async def try_start_initial_plan(self, paper_id: str) -> PaperUploadJobRecord | None:
+        now_iso = datetime.utcnow().isoformat()
+        async with self._connect() as conn:
+            try:
+                await conn.execute("BEGIN")
+                cur = await conn.execute(
+                    """
+                    UPDATE paper_upload_job
+                    SET job_state='plan_generating',
+                        stage='generating_plan',
+                        failed_stage=NULL,
+                        last_error_code=NULL,
+                        retryable=0,
+                        state_version=state_version + 1,
+                        started_at=COALESCE(started_at, ?),
+                        finished_at=NULL
+                    WHERE paper_id=?
+                        AND job_state='spec_ready'
+                    """,
+                    (now_iso, paper_id),
+                )
+                await conn.commit()
+            except aiosqlite.Error as exc:
+                await self._rollback_preserving_error(conn, paper_id)
+                logger.error(
+                    "SqlitePaperBundleStore.try_start_initial_plan failed: "
                     "paper_id={} exception={}",
                     paper_id,
                     type(exc).__name__,

@@ -287,6 +287,11 @@ export interface UploadDocumentResponse {
   document_statuses: UploadDocumentStatus[];
 }
 
+export interface UploadAsyncResponse {
+  paper_id: string;
+  job_id: string;
+}
+
 export interface UploadDocumentStatus {
   document_id: string;
   filename: string;
