@@ -392,6 +392,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-523 | PDF 中文抽取乱码 pdfplumber fallback | ✅ | Codex | paper-to-model 线修复卡;坏信号命中才启用 pdfplumber fallback,救回中文且坏率下降才采用;不占完工计数,进度维持 21/22 · 52/55 |
 | TASK-524 | Build steps 红线 parameter_value_leak 误报修复 | ✅ | Codex | paper-to-model 线修复卡;普通红线退扫 display_text + context-aware b-unit/b-number + config target/setting_name 窄 profile;冲突守门零改动;真机中文 E2E 通过;不占完工计数,进度维持 21/22 · 52/55 |
 | TASK-525-A | 论文上传作业化后端状态基座 | ✅ | Codex | 已合并;上传 job 状态基座 + spec 提前落盘 + rerun-plan 恢复;同一篇身份/C 覆盖顺延 TASK-527 |
+| TASK-525-B | 论文上传作业化:异步执行 + 文件生命周期收口 + 僵尸恢复 | ✅ | Codex | 已合并;异步上传 + 文件生命周期收口 + 僵尸三段恢复 + rerun CAS 扩源;两 PR:B1 #176 / B2 #177 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
