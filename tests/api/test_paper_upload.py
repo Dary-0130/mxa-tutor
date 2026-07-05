@@ -809,6 +809,8 @@ def test_upload_document_temp_path_does_not_include_original_filename(
 
     assert response.status_code == 200
     assert "secret_user_filename" not in str(service.paths[0])
+    assert service.paths[0].parent.name.startswith("PUJ-")
+    assert service.paths[0].parent.parent.name == "paper_staging"
 
 
 def test_upload_document_preserves_magic_prefix_after_sniffing(
@@ -823,6 +825,90 @@ def test_upload_document_preserves_magic_prefix_after_sniffing(
 
     assert response.status_code == 200
     assert service.bytes_seen[0].startswith(b"%PDF-")
+
+
+def test_upload_removes_staging_before_plan_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = FakePaperSpecService()
+
+    class StagingAwarePlanService(FakePaperPlanService):
+        async def generate(self, spec: PaperSpec, paper_id: str):
+            assert service.paths
+            assert not service.paths[0].parent.exists()
+            return await super().generate(spec, paper_id)
+
+    app = _create_app(
+        tmp_path,
+        monkeypatch,
+        service,
+        plan_service=StagingAwarePlanService(),
+    )
+
+    with TestClient(app) as client:
+        response = _post_document(client, b"%PDF-1.7\n", "paper.pdf")
+
+    assert response.status_code == 200
+
+
+def test_upload_request_bail_removes_created_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _create_app(tmp_path, monkeypatch, FakePaperSpecService())
+
+    def fail_after_creating_staging(
+        _file: object,
+        staging_dir: Path,
+        _extension: str,
+        _max_upload_bytes: int,
+        _document_id: str,
+    ) -> Path:
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "leftover.tmp").write_text("temporary", encoding="utf-8")
+        raise DocumentParseError("document_too_large") from None
+
+    monkeypatch.setattr(paper_upload_module, "_save_upload_sync", fail_after_creating_staging)
+
+    with TestClient(app) as client:
+        response = _post_document(client, b"%PDF-1.7\n", "paper.pdf")
+
+    staging_root = tmp_path / "uploads" / "paper_staging"
+    assert response.status_code == 400
+    assert response.json()["error"] == "document_parse_failed"
+    assert not any(staging_root.iterdir())
+
+
+def test_upload_staging_cleanup_failure_does_not_mask_ready_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mocker,
+) -> None:
+    service = FakePaperSpecService()
+    app = _create_app(tmp_path, monkeypatch, service)
+    logged_errors: list[tuple[str, tuple[object, ...]]] = []
+
+    def fail_cleanup(_staging_dir: Path) -> None:
+        raise RuntimeError("secret path should not appear") from None
+
+    def capture_error(message: str, *args: object, **_kwargs: object) -> None:
+        logged_errors.append((message, args))
+
+    monkeypatch.setattr(paper_upload_module, "_cleanup_staging_dir_sync", fail_cleanup)
+    mocker.patch.object(paper_upload_module.logger, "error", side_effect=capture_error)
+
+    with TestClient(app) as client:
+        response = _post_document(client, b"%PDF-1.7\n", "paper.pdf")
+
+    assert response.status_code == 200
+    assert response.json()["plan"]["plan_id"] == f"PLAN-{response.json()['paper_id']}"
+    assert logged_errors == [
+        (
+            "paper_staging_cleanup_failed: reason={} exception={}",
+            ("orchestrator_documents_done", "RuntimeError"),
+        )
+    ]
 
 
 def test_upload_document_uses_to_thread_for_save_hash_cleanup(
@@ -845,7 +931,7 @@ def test_upload_document_uses_to_thread_for_save_hash_cleanup(
     assert response.status_code == 200
     assert "_save_upload_sync" in calls
     assert "_compute_sha256_sync" in calls
-    assert "_cleanup_sandbox_dir_sync" in calls
+    assert "_cleanup_staging_dir_sync" in calls
 
 
 def _create_app(

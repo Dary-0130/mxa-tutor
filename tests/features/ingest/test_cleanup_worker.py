@@ -117,6 +117,16 @@ async def test_run_once_skips_disk_when_dir_not_exist(tmp_path: Path, mocker) ->
     assert rmtree.call_count == 0
 
 
+async def test_run_once_never_deletes_paper_staging_namespace(tmp_path: Path) -> None:
+    staging_root = tmp_path / "paper_staging"
+    staging_root.mkdir()
+    store = FakeStore(["paper_staging"])
+
+    assert await CleanupWorker(store, tmp_path, 24).run_once() == 0
+    assert store.deleted == []
+    assert staging_root.exists()
+
+
 def test_run_once_logger_never_uses_exception_method() -> None:
     src = Path("features/ingest/cleanup_worker.py").read_text(encoding="utf-8")
     assert "logger.exception" not in src

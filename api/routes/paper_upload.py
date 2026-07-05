@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import shutil
-import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -76,6 +75,7 @@ PDF_MAGIC = b"%PDF-"
 DOCX_MAGIC = b"PK\x03\x04"
 SAVE_CHUNK_SIZE = 1024 * 1024
 MAX_PAPER_UPLOAD_FILES = 5
+PAPER_STAGING_DIRNAME = "paper_staging"
 
 router = APIRouter(tags=["paper"])
 
@@ -115,6 +115,21 @@ class _UploadFailure:
     job_id: str
 
 
+@dataclass(frozen=True)
+class _StagedUploadDocument:
+    upload_index: int
+    document_id: str
+    display_filename: str
+    saved_path: Path
+
+
+@dataclass(frozen=True)
+class _PreparedUpload:
+    staged_documents: list[_StagedUploadDocument]
+    document_statuses: list[UploadDocumentStatusModel]
+    first_error: Exception | None
+
+
 @router.post("/api/v1/upload-document", response_model=UploadDocumentResponse)
 async def upload_document(
     file: Annotated[list[UploadFile], File(...)],
@@ -131,24 +146,45 @@ async def upload_document(
     files = list(file)
     _validate_file_count(files)
     _validate_primary_index(primary_index, len(files))
-    sandbox_dir = await asyncio.to_thread(_create_sandbox_dir_sync)
     paper_id = str(uuid.uuid4())
     job_id = f"PUJ-{uuid.uuid4()}"
-    await job_store.create_upload_job(
-        job_id=job_id,
-        paper_id=paper_id,
-        execution_mode="sync",
-        document_ids=[document_id_for_upload_index(index) for index in range(len(files))],
-        expires_at=datetime.utcnow() + timedelta(hours=settings.upload_ttl_hours),
-    )
+    staging_dir = _paper_staging_job_dir(settings.upload_dir, job_id)
     failure: _UploadFailure | None = None
+    staging_handed_to_orchestrator = False
     try:
-        result = await _run_upload_job(
+        await job_store.create_upload_job(
+            job_id=job_id,
+            paper_id=paper_id,
+            execution_mode="sync",
+            document_ids=[document_id_for_upload_index(index) for index in range(len(files))],
+            expires_at=datetime.utcnow() + timedelta(hours=settings.upload_ttl_hours),
+        )
+        prepared = await _prepare_upload_staging(
             files=files,
             paper_id=paper_id,
-            job_id=job_id,
-            sandbox_dir=sandbox_dir,
+            staging_dir=staging_dir,
             max_upload_bytes=max_upload_bytes,
+            primary_index=primary_index,
+            job_store=job_store,
+        )
+        if not prepared.staged_documents:
+            failure = await _mark_upload_failed_no_usable_spec(
+                job_store,
+                paper_id,
+                job_id,
+                prepared.first_error or DocumentParseError("document_parse_failed"),
+                failed_stage="extracting_spec",
+            )
+            return _upload_failure_response(failure)
+
+        staging_handed_to_orchestrator = True
+        result = await _run_upload_job(
+            staged_documents=prepared.staged_documents,
+            initial_document_statuses=prepared.document_statuses,
+            first_error=prepared.first_error,
+            paper_id=paper_id,
+            job_id=job_id,
+            staging_dir=staging_dir,
             primary_index=primary_index,
             service=service,
             plan_service=plan_service,
@@ -169,25 +205,20 @@ async def upload_document(
                 failure.error_code,
                 "recorded",
             )
-        await asyncio.to_thread(_cleanup_sandbox_dir_sync, sandbox_dir)
+        if not staging_handed_to_orchestrator:
+            await _cleanup_staging_dir(staging_dir, reason="request_bail")
 
 
-async def _run_upload_job(
+async def _prepare_upload_staging(
     *,
     files: list[UploadFile],
     paper_id: str,
-    job_id: str,
-    sandbox_dir: Path,
+    staging_dir: Path,
     max_upload_bytes: int,
     primary_index: int | None,
-    service: PaperSpecService,
-    plan_service: PaperPlanService,
-    bundle_store: PaperBundleStore,
-    reparse_store: PaperReparseStore,
     job_store: PaperUploadJobStore,
-) -> UploadDocumentResponse | _UploadFailure:
-    successes: list[SuccessfulPaperSpec] = []
-    source_documents: list[SuccessfulParsedDocument] = []
+) -> _PreparedUpload:
+    staged_documents: list[_StagedUploadDocument] = []
     document_statuses: list[UploadDocumentStatusModel] = []
     first_error: Exception | None = None
     await job_store.update_upload_job_state(
@@ -218,45 +249,12 @@ async def _run_upload_job(
             saved_path = await asyncio.to_thread(
                 _save_upload_sync,
                 upload_file,
-                sandbox_dir,
+                staging_dir,
                 extension,
                 max_upload_bytes,
                 document_id,
             )
-            file_hash = await asyncio.to_thread(_compute_sha256_sync, saved_path)
-            file_size = saved_path.stat().st_size
-            logger.info(
-                "paper_document_upload_accepted: document_id={} file_size={} "
-                "file_hash={} extension={}",
-                document_id,
-                file_size,
-                file_hash,
-                extension,
-            )
-            parsed = await service.parse_uncached(saved_path)
-            await job_store.update_upload_document_state(
-                paper_id,
-                document_id,
-                status="parsed",
-            )
-            await job_store.update_upload_job_state(
-                paper_id,
-                job_state="running",
-                stage="extracting_spec",
-                retryable=False,
-            )
-            await job_store.update_upload_document_state(
-                paper_id,
-                document_id,
-                status="extracting",
-            )
-            spec = await service.extract_parsed_uncached(
-                parsed,
-                paper_id,
-                display_filename=display_filename,
-                document_id=document_id,
-            )
-        except (DocumentParseError, PaperSpecGenerationError) as exc:
+        except DocumentParseError as exc:
             first_error = first_error or exc
             document_statuses.append(
                 UploadDocumentStatusModel(
@@ -273,44 +271,144 @@ async def _run_upload_job(
                 error_code=_per_document_error_code(exc),
             )
             if primary_index == upload_index:
-                return await _mark_upload_failed_no_usable_spec(
-                    job_store,
-                    paper_id,
-                    job_id,
-                    exc,
-                    failed_stage="extracting_spec",
+                return _PreparedUpload(
+                    staged_documents=staged_documents,
+                    document_statuses=document_statuses,
+                    first_error=exc,
                 )
             continue
 
-        successes.append(
-            SuccessfulPaperSpec(
+        staged_documents.append(
+            _StagedUploadDocument(
                 upload_index=upload_index,
                 document_id=document_id,
-                filename=display_filename,
-                spec=spec,
+                display_filename=display_filename,
+                saved_path=saved_path,
             )
         )
-        source_documents.append(
-            SuccessfulParsedDocument(
-                upload_index=upload_index,
-                document_id=document_id,
-                filename=display_filename,
-                parsed=parsed,
+
+    return _PreparedUpload(
+        staged_documents=staged_documents,
+        document_statuses=document_statuses,
+        first_error=first_error,
+    )
+
+
+async def _run_upload_job(
+    *,
+    staged_documents: list[_StagedUploadDocument],
+    initial_document_statuses: list[UploadDocumentStatusModel],
+    first_error: Exception | None,
+    paper_id: str,
+    job_id: str,
+    staging_dir: Path,
+    primary_index: int | None,
+    service: PaperSpecService,
+    plan_service: PaperPlanService,
+    bundle_store: PaperBundleStore,
+    reparse_store: PaperReparseStore,
+    job_store: PaperUploadJobStore,
+) -> UploadDocumentResponse | _UploadFailure:
+    successes: list[SuccessfulPaperSpec] = []
+    source_documents: list[SuccessfulParsedDocument] = []
+    document_statuses = list(initial_document_statuses)
+    try:
+        for staged_document in staged_documents:
+            upload_index = staged_document.upload_index
+            document_id = staged_document.document_id
+            display_filename = staged_document.display_filename
+            saved_path = staged_document.saved_path
+            try:
+                file_hash = await asyncio.to_thread(_compute_sha256_sync, saved_path)
+                file_size = saved_path.stat().st_size
+                logger.info(
+                    "paper_document_upload_accepted: document_id={} file_size={} "
+                    "file_hash={} extension={}",
+                    document_id,
+                    file_size,
+                    file_hash,
+                    saved_path.suffix.lower(),
+                )
+                parsed = await service.parse_uncached(saved_path)
+                await job_store.update_upload_document_state(
+                    paper_id,
+                    document_id,
+                    status="parsed",
+                )
+                await job_store.update_upload_job_state(
+                    paper_id,
+                    job_state="running",
+                    stage="extracting_spec",
+                    retryable=False,
+                )
+                await job_store.update_upload_document_state(
+                    paper_id,
+                    document_id,
+                    status="extracting",
+                )
+                spec = await service.extract_parsed_uncached(
+                    parsed,
+                    paper_id,
+                    display_filename=display_filename,
+                    document_id=document_id,
+                )
+            except (DocumentParseError, PaperSpecGenerationError) as exc:
+                first_error = first_error or exc
+                document_statuses.append(
+                    UploadDocumentStatusModel(
+                        document_id=document_id,
+                        filename=display_filename,
+                        status="failed",
+                        error_code=_per_document_error_code(exc),
+                    )
+                )
+                await job_store.update_upload_document_state(
+                    paper_id,
+                    document_id,
+                    status="failed",
+                    error_code=_per_document_error_code(exc),
+                )
+                if primary_index == upload_index:
+                    return await _mark_upload_failed_no_usable_spec(
+                        job_store,
+                        paper_id,
+                        job_id,
+                        exc,
+                        failed_stage="extracting_spec",
+                    )
+                continue
+
+            successes.append(
+                SuccessfulPaperSpec(
+                    upload_index=upload_index,
+                    document_id=document_id,
+                    filename=display_filename,
+                    spec=spec,
+                )
             )
-        )
-        await job_store.update_upload_document_state(
-            paper_id,
-            document_id,
-            status="succeeded",
-        )
-        document_statuses.append(
-            UploadDocumentStatusModel(
-                document_id=document_id,
-                filename=display_filename,
+            source_documents.append(
+                SuccessfulParsedDocument(
+                    upload_index=upload_index,
+                    document_id=document_id,
+                    filename=display_filename,
+                    parsed=parsed,
+                )
+            )
+            await job_store.update_upload_document_state(
+                paper_id,
+                document_id,
                 status="succeeded",
-                error_code=None,
             )
-        )
+            document_statuses.append(
+                UploadDocumentStatusModel(
+                    document_id=document_id,
+                    filename=display_filename,
+                    status="succeeded",
+                    error_code=None,
+                )
+            )
+    finally:
+        await _cleanup_staging_dir(staging_dir, reason="orchestrator_documents_done")
 
     if not successes:
         return await _mark_upload_failed_no_usable_spec(
@@ -743,19 +841,28 @@ def _validate_magic_and_extension(header: bytes, filename: str | None) -> str:
     raise DocumentParseError("unsupported_document_format") from None
 
 
-def _create_sandbox_dir_sync() -> Path:
-    return Path(tempfile.mkdtemp(prefix="mxa_paper_sandbox_")).resolve()
+def _paper_staging_root(upload_dir: str | Path) -> Path:
+    return (Path(upload_dir) / PAPER_STAGING_DIRNAME).resolve()
+
+
+def _paper_staging_job_dir(upload_dir: str | Path, job_id: str) -> Path:
+    root = _paper_staging_root(upload_dir)
+    staging_dir = (root / job_id).resolve()
+    if staging_dir.parent != root:
+        raise ValueError("invalid_paper_staging_job_dir")
+    return staging_dir
 
 
 def _save_upload_sync(
     file: UploadFile,
-    sandbox_dir: Path,
+    staging_dir: Path,
     extension: str,
     max_upload_bytes: int,
     document_id: str,
 ) -> Path:
-    sandbox_dir.mkdir(parents=True, exist_ok=True)
-    saved_path = sandbox_dir / f"{document_id.lower()}{extension}"
+    _assert_paper_staging_job_dir(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    saved_path = staging_dir / f"{document_id.lower()}{extension}"
     total = 0
     with saved_path.open("wb") as target:
         while True:
@@ -777,8 +884,31 @@ def _compute_sha256_sync(file_path: Path) -> str:
     return digest.hexdigest()
 
 
-def _cleanup_sandbox_dir_sync(sandbox_dir: Path) -> None:
-    shutil.rmtree(sandbox_dir, ignore_errors=True)
+async def _cleanup_staging_dir(staging_dir: Path, *, reason: str) -> None:
+    try:
+        await asyncio.to_thread(_cleanup_staging_dir_sync, staging_dir)
+    except Exception as exc:
+        logger.error(
+            "paper_staging_cleanup_failed: reason={} exception={}",
+            reason,
+            type(exc).__name__,
+        )
+
+
+def _cleanup_staging_dir_sync(staging_dir: Path) -> None:
+    resolved = _assert_paper_staging_job_dir(staging_dir)
+    if not resolved.exists():
+        return
+    if not resolved.is_dir():
+        raise ValueError("invalid_paper_staging_job_dir")
+    shutil.rmtree(resolved, ignore_errors=False)
+
+
+def _assert_paper_staging_job_dir(staging_dir: Path) -> Path:
+    resolved = staging_dir.resolve()
+    if resolved.parent.name != PAPER_STAGING_DIRNAME or not resolved.name:
+        raise ValueError("invalid_paper_staging_job_dir")
+    return resolved
 
 
 def _per_document_error_code(exc: Exception) -> str:
