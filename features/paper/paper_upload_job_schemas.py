@@ -67,6 +67,14 @@ class PaperStatusResponse(BaseModel):
         )
 
 
+class UploadAsyncResponse(BaseModel):
+    """POST /api/v1/upload-async accepted response."""
+
+    paper_id: str
+    job_id: str
+    model_config = ConfigDict(extra="forbid")
+
+
 class RerunPlanRequest(BaseModel):
     """POST /api/v1/papers/{paper_id}/rerun-plan request."""
 
@@ -87,5 +95,6 @@ class RerunPlanResponse(BaseModel):
 
 PaperStatusResponseSchema = PaperStatusResponse
 PaperJobDocumentStatusSchema = PaperJobDocumentStatus
+UploadAsyncResponseSchema = UploadAsyncResponse
 RerunPlanRequestSchema = RerunPlanRequest
 RerunPlanResponseSchema = RerunPlanResponse

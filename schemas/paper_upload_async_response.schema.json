@@ -1,0 +1,20 @@
+{
+  "additionalProperties": false,
+  "description": "POST /api/v1/upload-async accepted response.",
+  "properties": {
+    "paper_id": {
+      "title": "Paper Id",
+      "type": "string"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "paper_id",
+    "job_id"
+  ],
+  "title": "UploadAsyncResponse",
+  "type": "object"
+}

@@ -36,6 +36,31 @@ class PaperUploadJobStore(ABC):
         ...
 
     @abstractmethod
+    async def get_upload_job_by_job_id(self, job_id: str) -> PaperUploadJobRecord | None:
+        """Return one job by its job id for staging cleanup decisions."""
+        ...
+
+    @abstractmethod
+    async def list_stale_upload_jobs(self) -> list[PaperUploadJobRecord]:
+        """Return jobs that were in non-durable startup states."""
+        ...
+
+    @abstractmethod
+    async def mark_upload_job_terminal(
+        self,
+        paper_id: str,
+        *,
+        job_state: PaperUploadJobState,
+        stage: PaperUploadStage | None = None,
+        failed_stage: PaperUploadStage | None = None,
+        error_code: str | None = None,
+        retryable: bool,
+        finished_at: datetime | None = None,
+    ) -> PaperUploadJobRecord:
+        """Mark a stale job terminal while preserving stage when omitted."""
+        ...
+
+    @abstractmethod
     async def update_upload_job_state(
         self,
         paper_id: str,
@@ -65,4 +90,9 @@ class PaperUploadJobStore(ABC):
     @abstractmethod
     async def try_start_rerun_plan(self, paper_id: str) -> PaperUploadJobRecord | None:
         """CAS transition spec-ready or retryable plan-failed jobs to plan generation."""
+        ...
+
+    @abstractmethod
+    async def try_start_initial_plan(self, paper_id: str) -> PaperUploadJobRecord | None:
+        """CAS transition the initial spec-ready job to plan generation."""
         ...

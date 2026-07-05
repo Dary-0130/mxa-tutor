@@ -14,6 +14,7 @@ import type {
   TuningSuggestRequest,
   TuningSuggestResponse,
   UpdatedPlanResponse,
+  UploadAsyncResponse,
   UploadDocumentResponse,
   UserSuppliedResponseBatch,
 } from "./paperTypes";
@@ -35,6 +36,21 @@ export function uploadDocument(
     formData.append("primary_index", String(primaryIndex));
   }
   return apiUploadFormTask<UploadDocumentResponse>("/api/v1/upload-document", formData, onProgress);
+}
+
+export function uploadDocumentAsync(
+  files: File[],
+  primaryIndex: number | null,
+  onProgress?: (percent: number) => void,
+): UploadTask<UploadAsyncResponse> {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("file", file);
+  }
+  if (primaryIndex !== null) {
+    formData.append("primary_index", String(primaryIndex));
+  }
+  return apiUploadFormTask<UploadAsyncResponse>("/api/v1/upload-async", formData, onProgress);
 }
 
 export function getPaperSpec(paperId: string): Promise<PaperSpecResponse> {

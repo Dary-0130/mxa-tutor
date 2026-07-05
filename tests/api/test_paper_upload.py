@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -43,6 +45,7 @@ from core.domain.paper_upload_job import (
     PaperUploadJobRecord,
     PaperUploadJobState,
     PaperUploadStage,
+    next_action_for_job,
 )
 from core.interfaces.document_parser import ParsedDocument, ParsedLocatorIndex
 from core.interfaces.paper_cache import PaperBundleStore
@@ -287,6 +290,45 @@ class FakePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJobSt
     async def get_upload_job(self, paper_id: str) -> PaperUploadJobRecord | None:
         return self.jobs.get(paper_id)
 
+    async def get_upload_job_by_job_id(self, job_id: str) -> PaperUploadJobRecord | None:
+        for record in self.jobs.values():
+            if record.job_id == job_id:
+                return record
+        return None
+
+    async def list_stale_upload_jobs(self) -> list[PaperUploadJobRecord]:
+        return [
+            record
+            for record in self.jobs.values()
+            if record.job_state in {"queued", "running", "plan_generating"}
+        ]
+
+    async def mark_upload_job_terminal(
+        self,
+        paper_id: str,
+        *,
+        job_state: PaperUploadJobState,
+        stage: PaperUploadStage | None = None,
+        failed_stage: PaperUploadStage | None = None,
+        error_code: str | None = None,
+        retryable: bool,
+        finished_at: datetime | None = None,
+    ) -> PaperUploadJobRecord:
+        record = self.jobs[paper_id]
+        updated = replace(
+            record,
+            job_state=job_state,
+            stage=stage or record.stage,
+            failed_stage=failed_stage,
+            last_error_code=error_code,
+            retryable=retryable,
+            state_version=record.state_version + 1,
+            started_at=record.started_at or datetime.utcnow(),
+            finished_at=finished_at or datetime.utcnow(),
+        )
+        self.jobs[paper_id] = updated
+        return updated
+
     async def update_upload_job_state(
         self,
         paper_id: str,
@@ -360,7 +402,11 @@ class FakePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJobSt
 
     async def try_start_rerun_plan(self, paper_id: str) -> PaperUploadJobRecord | None:
         record = self.jobs.get(paper_id)
-        if record is None or record.job_state not in {"spec_ready", "plan_failed_retryable"}:
+        if record is None or record.job_state not in {
+            "spec_ready",
+            "plan_failed_retryable",
+            "abandoned_plan_retryable",
+        }:
             return None
         updated = PaperUploadJobRecord(
             job_id=record.job_id,
@@ -378,6 +424,24 @@ class FakePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJobSt
             finished_at=None,
             expires_at=record.expires_at,
             documents=record.documents,
+        )
+        self.jobs[paper_id] = updated
+        return updated
+
+    async def try_start_initial_plan(self, paper_id: str) -> PaperUploadJobRecord | None:
+        record = self.jobs.get(paper_id)
+        if record is None or record.job_state != "spec_ready":
+            return None
+        updated = replace(
+            record,
+            job_state="plan_generating",
+            stage="generating_plan",
+            failed_stage=None,
+            last_error_code=None,
+            retryable=False,
+            state_version=record.state_version + 1,
+            started_at=record.started_at or datetime.utcnow(),
+            finished_at=None,
         )
         self.jobs[paper_id] = updated
         return updated
@@ -667,6 +731,201 @@ def test_rerun_plan_recovers_from_spec_only_failure(
     assert bundle_store.jobs[paper_id].attempt_count == 2
 
 
+def test_upload_async_returns_202_and_background_reaches_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    app = _create_app(
+        tmp_path,
+        monkeypatch,
+        FakePaperSpecService(),
+        bundle_store=bundle_store,
+    )
+
+    with TestClient(app) as client:
+        response = _post_document_async(client, b"%PDF-1.7\n", "paper.pdf")
+        body = response.json()
+        status_response = client.get(f"/api/v1/papers/{body['paper_id']}/status")
+
+    assert response.status_code == 202
+    assert uuid.UUID(body["paper_id"]).version == 4
+    assert body["job_id"].startswith("PUJ-")
+    status_body = status_response.json()
+    assert status_body["execution_mode"] == "async"
+    assert status_body["job_state"] == "ready"
+    assert status_body["stage"] == "done"
+    assert status_body["next_action"] == "open_result"
+    assert status_body["job_id"] == body["job_id"]
+
+
+def test_startup_sweep_repairs_plan_persisted_ready_mark_crash(
+    tmp_path: Path,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    upload_dir = tmp_path / "uploads"
+    paper_id = "paper-ready-crash"
+    job_id = "PUJ-ready-crash"
+    bundle_store.records[paper_id] = PaperPlanRecord(
+        paper_id=paper_id,
+        spec=_paper_spec("paper.pdf"),
+        plan=_plan(paper_id),
+        missing_prompts=[_missing_prompt()],
+        missing_bindings=[_missing_binding()],
+    )
+    bundle_store.specs[paper_id] = bundle_store.records[paper_id].spec
+    bundle_store.jobs[paper_id] = _job_record(
+        paper_id=paper_id,
+        job_id=job_id,
+        job_state="plan_generating",
+        stage="persisting_plan",
+    )
+    staging_dir = upload_dir / "paper_staging" / job_id
+    staging_dir.mkdir(parents=True)
+    (staging_dir / "doc.pdf").write_bytes(b"%PDF-1.7\n")
+
+    swept = asyncio.run(
+        paper_upload_module.sweep_stale_paper_upload_jobs(
+            upload_dir=upload_dir,
+            bundle_store=bundle_store,
+            job_store=bundle_store,
+        )
+    )
+
+    record = bundle_store.jobs[paper_id]
+    assert swept == 1
+    assert record.job_state == "ready"
+    assert record.stage == "done"
+    assert record.finished_at is not None
+    assert not staging_dir.exists()
+
+
+def test_startup_sweep_spec_only_abandoned_can_rerun(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    upload_dir = tmp_path / "uploads"
+    paper_id = str(uuid.uuid4())
+    job_id = "PUJ-spec-only"
+    bundle_store.specs[paper_id] = _paper_spec("paper.pdf")
+    bundle_store.jobs[paper_id] = _job_record(
+        paper_id=paper_id,
+        job_id=job_id,
+        job_state="plan_generating",
+        stage="generating_plan",
+    )
+    staging_dir = upload_dir / "paper_staging" / job_id
+    staging_dir.mkdir(parents=True)
+    (staging_dir / "doc.pdf").write_bytes(b"%PDF-1.7\n")
+
+    asyncio.run(
+        paper_upload_module.sweep_stale_paper_upload_jobs(
+            upload_dir=upload_dir,
+            bundle_store=bundle_store,
+            job_store=bundle_store,
+        )
+    )
+
+    swept_record = bundle_store.jobs[paper_id]
+    assert swept_record.job_state == "abandoned_plan_retryable"
+    assert swept_record.stage == "generating_plan"
+    assert next_action_for_job(swept_record) == "rerun_plan"
+    assert not staging_dir.exists()
+
+    app = _create_app(
+        tmp_path,
+        monkeypatch,
+        FakePaperSpecService(),
+        bundle_store=bundle_store,
+    )
+    with TestClient(app) as client:
+        status_before = client.get(f"/api/v1/papers/{paper_id}/status")
+        rerun_response = client.post(f"/api/v1/papers/{paper_id}/rerun-plan", json={})
+        status_after = client.get(f"/api/v1/papers/{paper_id}/status")
+
+    assert status_before.json()["next_action"] == "rerun_plan"
+    assert rerun_response.status_code == 200
+    assert status_after.json()["job_state"] == "ready"
+    assert bundle_store.jobs[paper_id].attempt_count == 2
+
+
+def test_startup_sweep_queued_without_spec_requires_reupload_and_cleans_staging(
+    tmp_path: Path,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    upload_dir = tmp_path / "uploads"
+    paper_id = "paper-queued-crash"
+    job_id = "PUJ-queued-crash"
+    bundle_store.jobs[paper_id] = _job_record(
+        paper_id=paper_id,
+        job_id=job_id,
+        job_state="queued",
+        stage="uploading",
+    )
+    staging_dir = upload_dir / "paper_staging" / job_id
+    staging_dir.mkdir(parents=True)
+    (staging_dir / "doc.pdf").write_bytes(b"%PDF-1.7\n")
+
+    asyncio.run(
+        paper_upload_module.sweep_stale_paper_upload_jobs(
+            upload_dir=upload_dir,
+            bundle_store=bundle_store,
+            job_store=bundle_store,
+        )
+    )
+
+    record = bundle_store.jobs[paper_id]
+    assert record.job_state == "abandoned_reupload_required"
+    assert record.stage == "uploading"
+    assert record.retryable is False
+    assert next_action_for_job(record) == "reupload"
+    assert not staging_dir.exists()
+
+
+def test_initial_plan_generation_uses_same_lock_as_rerun(
+    tmp_path: Path,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    plan_service = FakePaperPlanService()
+    paper_id = "paper-lock-busy"
+    job_id = "PUJ-lock-busy"
+    spec = _paper_spec("paper.pdf")
+    bundle_store.specs[paper_id] = spec
+    bundle_store.jobs[paper_id] = _job_record(
+        paper_id=paper_id,
+        job_id=job_id,
+        job_state="spec_ready",
+        stage="persisting_spec",
+        retryable=True,
+    )
+
+    async def run_busy_lock_case():
+        registry = paper_upload_module.PaperReparseLockRegistry()
+        token = await registry.acquire(paper_id)
+        try:
+            return await paper_upload_module._run_initial_plan_generation(
+                paper_id=paper_id,
+                job_id=job_id,
+                spec=spec,
+                plan_service=plan_service,
+                bundle_store=bundle_store,
+                reparse_store=bundle_store,
+                job_store=bundle_store,
+                lock_registry=registry,
+                source=None,
+            )
+        finally:
+            await token.__aexit__(None, None, None)
+
+    result = asyncio.run(run_busy_lock_case())
+
+    assert isinstance(result, paper_upload_module._UploadFailure)
+    assert result.error_code == "plan_generation_in_progress"
+    assert plan_service.calls == []
+    assert bundle_store.jobs[paper_id].job_state == "plan_failed_retryable"
+
+
 def test_rerun_plan_rejects_ready_state_with_cas_conflict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -945,6 +1204,7 @@ def _create_app(
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     get_settings.cache_clear()
     app = create_app()
+    app.router.lifespan_context = _noop_lifespan
     app.dependency_overrides[get_paper_spec_service] = lambda: service
     app.dependency_overrides[get_paper_plan_service] = (
         lambda: plan_service or FakePaperPlanService()
@@ -961,9 +1221,21 @@ def _create_app(
     return app
 
 
+@asynccontextmanager
+async def _noop_lifespan(_app: Any):
+    yield
+
+
 def _post_document(client: TestClient, content: bytes, filename: str):
     return client.post(
         "/api/v1/upload-document",
+        files={"file": (filename, content, "application/octet-stream")},
+    )
+
+
+def _post_document_async(client: TestClient, content: bytes, filename: str):
+    return client.post(
+        "/api/v1/upload-async",
         files={"file": (filename, content, "application/octet-stream")},
     )
 
@@ -983,6 +1255,45 @@ def _post_documents(
         files=[
             ("file", (filename, content, "application/octet-stream"))
             for content, filename in documents
+        ],
+    )
+
+
+def _job_record(
+    *,
+    paper_id: str,
+    job_id: str,
+    job_state: PaperUploadJobState,
+    stage: PaperUploadStage,
+    execution_mode: PaperUploadExecutionMode = "async",
+    failed_stage: PaperUploadStage | None = None,
+    error_code: str | None = None,
+    retryable: bool = False,
+) -> PaperUploadJobRecord:
+    now = datetime.utcnow()
+    return PaperUploadJobRecord(
+        job_id=job_id,
+        paper_id=paper_id,
+        execution_mode=execution_mode,
+        job_state=job_state,
+        stage=stage,
+        failed_stage=failed_stage,
+        last_error_code=error_code,
+        retryable=retryable,
+        attempt_count=1,
+        state_version=0,
+        created_at=now,
+        started_at=now if job_state != "queued" else None,
+        finished_at=None,
+        expires_at=now.replace(year=now.year + 1),
+        documents=[
+            PaperUploadJobDocument(
+                document_id="DOC-001",
+                upload_index=0,
+                status="pending",
+                error_code=None,
+                updated_at=now,
+            )
         ],
     )
 

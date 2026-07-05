@@ -23,6 +23,7 @@ from features.paper.paper_upload_job_schemas import (
     PaperStatusResponseSchema,
     RerunPlanRequestSchema,
     RerunPlanResponseSchema,
+    UploadAsyncResponseSchema,
 )
 
 OUTPUTS = {
@@ -35,6 +36,7 @@ OUTPUTS = {
     Path("schemas/paper_ask_response.schema.json"): PaperAskResponseSchema,
     Path("schemas/paper_parameter_corrections.schema.json"): PaperParameterCorrectionsSchema,
     Path("schemas/paper_status_response.schema.json"): PaperStatusResponseSchema,
+    Path("schemas/paper_upload_async_response.schema.json"): UploadAsyncResponseSchema,
     Path("schemas/paper_rerun_plan_request.schema.json"): RerunPlanRequestSchema,
     Path("schemas/paper_rerun_plan_response.schema.json"): RerunPlanResponseSchema,
 }

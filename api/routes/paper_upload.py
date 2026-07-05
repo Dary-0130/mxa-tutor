@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Body, Depends, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, UploadFile, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
@@ -43,6 +43,7 @@ from core.domain.exceptions import (
 from core.domain.paper_plan import PaperPlanRecord
 from core.domain.paper_reparse_source import PaperReparseSource
 from core.domain.paper_spec import PaperSpec
+from core.domain.paper_upload_job import PaperUploadJobRecord, PaperUploadStage
 from core.interfaces.paper_cache import PaperBundleStore
 from core.interfaces.paper_reparse_store import PaperReparseStore
 from core.interfaces.paper_upload_job_store import PaperUploadJobStore
@@ -69,6 +70,7 @@ from features.paper.paper_upload_job_schemas import (
     PaperStatusResponse,
     RerunPlanRequest,
     RerunPlanResponse,
+    UploadAsyncResponse,
 )
 
 PDF_MAGIC = b"%PDF-"
@@ -138,6 +140,10 @@ async def upload_document(
     bundle_store: Annotated[PaperBundleStore, Depends(get_paper_bundle_store)],
     reparse_store: Annotated[PaperReparseStore, Depends(get_paper_reparse_store)],
     job_store: Annotated[PaperUploadJobStore, Depends(get_paper_upload_job_store)],
+    lock_registry: Annotated[
+        PaperReparseLockRegistry,
+        Depends(get_paper_reparse_lock_registry),
+    ],
     settings: Annotated[AppSettings, Depends(get_settings)],
     primary_index: Annotated[int | None, Form()] = None,
 ) -> UploadDocumentResponse | JSONResponse:
@@ -191,11 +197,99 @@ async def upload_document(
             bundle_store=bundle_store,
             reparse_store=reparse_store,
             job_store=job_store,
+            lock_registry=lock_registry,
         )
         if isinstance(result, _UploadFailure):
             failure = result
             return _upload_failure_response(result)
         return result
+    finally:
+        if failure is not None:
+            logger.info(
+                "paper_upload_failed: paper_id={} job_id={} error_code={} failed_stage={}",
+                failure.paper_id,
+                failure.job_id,
+                failure.error_code,
+                "recorded",
+            )
+        if not staging_handed_to_orchestrator:
+            await _cleanup_staging_dir(staging_dir, reason="request_bail")
+
+
+@router.post(
+    "/api/v1/upload-async",
+    response_model=UploadAsyncResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def upload_document_async(
+    background_tasks: BackgroundTasks,
+    file: Annotated[list[UploadFile], File(...)],
+    service: Annotated[PaperSpecService, Depends(get_paper_spec_service)],
+    plan_service: Annotated[PaperPlanService, Depends(get_paper_plan_service)],
+    bundle_store: Annotated[PaperBundleStore, Depends(get_paper_bundle_store)],
+    reparse_store: Annotated[PaperReparseStore, Depends(get_paper_reparse_store)],
+    job_store: Annotated[PaperUploadJobStore, Depends(get_paper_upload_job_store)],
+    lock_registry: Annotated[
+        PaperReparseLockRegistry,
+        Depends(get_paper_reparse_lock_registry),
+    ],
+    settings: Annotated[AppSettings, Depends(get_settings)],
+    primary_index: Annotated[int | None, Form()] = None,
+) -> UploadAsyncResponse:
+    """Accept a paper upload and process it after the response."""
+    max_upload_bytes = settings.max_upload_size_mb * 1024 * 1024
+    files = list(file)
+    _validate_file_count(files)
+    _validate_primary_index(primary_index, len(files))
+    paper_id = str(uuid.uuid4())
+    job_id = f"PUJ-{uuid.uuid4()}"
+    staging_dir = _paper_staging_job_dir(settings.upload_dir, job_id)
+    failure: _UploadFailure | None = None
+    staging_handed_to_orchestrator = False
+    try:
+        await job_store.create_upload_job(
+            job_id=job_id,
+            paper_id=paper_id,
+            execution_mode="async",
+            document_ids=[document_id_for_upload_index(index) for index in range(len(files))],
+            expires_at=datetime.utcnow() + timedelta(hours=settings.upload_ttl_hours),
+        )
+        prepared = await _prepare_upload_staging(
+            files=files,
+            paper_id=paper_id,
+            staging_dir=staging_dir,
+            max_upload_bytes=max_upload_bytes,
+            primary_index=primary_index,
+            job_store=job_store,
+        )
+        if not prepared.staged_documents:
+            failure = await _mark_upload_failed_no_usable_spec(
+                job_store,
+                paper_id,
+                job_id,
+                prepared.first_error or DocumentParseError("document_parse_failed"),
+                failed_stage="extracting_spec",
+            )
+            return UploadAsyncResponse(paper_id=paper_id, job_id=job_id)
+
+        staging_handed_to_orchestrator = True
+        background_tasks.add_task(
+            _run_upload_job_background,
+            staged_documents=prepared.staged_documents,
+            initial_document_statuses=prepared.document_statuses,
+            first_error=prepared.first_error,
+            paper_id=paper_id,
+            job_id=job_id,
+            staging_dir=staging_dir,
+            primary_index=primary_index,
+            service=service,
+            plan_service=plan_service,
+            bundle_store=bundle_store,
+            reparse_store=reparse_store,
+            job_store=job_store,
+            lock_registry=lock_registry,
+        )
+        return UploadAsyncResponse(paper_id=paper_id, job_id=job_id)
     finally:
         if failure is not None:
             logger.info(
@@ -308,6 +402,7 @@ async def _run_upload_job(
     bundle_store: PaperBundleStore,
     reparse_store: PaperReparseStore,
     job_store: PaperUploadJobStore,
+    lock_registry: PaperReparseLockRegistry,
 ) -> UploadDocumentResponse | _UploadFailure:
     successes: list[SuccessfulPaperSpec] = []
     source_documents: list[SuccessfulParsedDocument] = []
@@ -319,16 +414,8 @@ async def _run_upload_job(
             display_filename = staged_document.display_filename
             saved_path = staged_document.saved_path
             try:
-                file_hash = await asyncio.to_thread(_compute_sha256_sync, saved_path)
-                file_size = saved_path.stat().st_size
-                logger.info(
-                    "paper_document_upload_accepted: document_id={} file_size={} "
-                    "file_hash={} extension={}",
-                    document_id,
-                    file_size,
-                    file_hash,
-                    saved_path.suffix.lower(),
-                )
+                await asyncio.to_thread(_compute_sha256_sync, saved_path)
+                logger.info("paper_document_upload_accepted: document_id={}", document_id)
                 parsed = await service.parse_uncached(saved_path)
                 await job_store.update_upload_document_state(
                     paper_id,
@@ -462,7 +549,7 @@ async def _run_upload_job(
         )
 
     source = build_reparse_source(paper_id, source_documents, primary_index)
-    plan_result = await _run_plan_generation(
+    plan_result = await _run_initial_plan_generation(
         paper_id=paper_id,
         job_id=job_id,
         spec=spec,
@@ -470,6 +557,7 @@ async def _run_upload_job(
         bundle_store=bundle_store,
         reparse_store=reparse_store,
         job_store=job_store,
+        lock_registry=lock_registry,
         source=source,
     )
     if isinstance(plan_result, _UploadFailure):
@@ -483,6 +571,158 @@ async def _run_upload_job(
             MissingParameterPromptModel.from_domain(prompt) for prompt in record.missing_prompts
         ],
         document_statuses=document_statuses,
+    )
+
+
+async def _run_upload_job_background(
+    *,
+    staged_documents: list[_StagedUploadDocument],
+    initial_document_statuses: list[UploadDocumentStatusModel],
+    first_error: Exception | None,
+    paper_id: str,
+    job_id: str,
+    staging_dir: Path,
+    primary_index: int | None,
+    service: PaperSpecService,
+    plan_service: PaperPlanService,
+    bundle_store: PaperBundleStore,
+    reparse_store: PaperReparseStore,
+    job_store: PaperUploadJobStore,
+    lock_registry: PaperReparseLockRegistry,
+) -> None:
+    try:
+        result = await _run_upload_job(
+            staged_documents=staged_documents,
+            initial_document_statuses=initial_document_statuses,
+            first_error=first_error,
+            paper_id=paper_id,
+            job_id=job_id,
+            staging_dir=staging_dir,
+            primary_index=primary_index,
+            service=service,
+            plan_service=plan_service,
+            bundle_store=bundle_store,
+            reparse_store=reparse_store,
+            job_store=job_store,
+            lock_registry=lock_registry,
+        )
+        if isinstance(result, _UploadFailure):
+            logger.info(
+                "paper_upload_failed: paper_id={} job_id={} error_code={} failed_stage={}",
+                result.paper_id,
+                result.job_id,
+                result.error_code,
+                "recorded",
+            )
+    except Exception as exc:
+        logger.error(
+            "paper_upload_background_failed: paper_id={} job_id={} exception={}",
+            paper_id,
+            job_id,
+            type(exc).__name__,
+        )
+        await _mark_unhandled_background_failure(job_store, paper_id, job_id)
+
+
+async def sweep_stale_paper_upload_jobs(
+    *,
+    upload_dir: str | Path,
+    bundle_store: PaperBundleStore,
+    job_store: PaperUploadJobStore,
+) -> int:
+    """Classify non-durable paper upload jobs left by a prior process."""
+    try:
+        stale_jobs = await job_store.list_stale_upload_jobs()
+    except Exception as exc:
+        logger.error("paper_upload_startup_sweep_list_failed: exception={}", type(exc).__name__)
+        return 0
+
+    swept = 0
+    for record in stale_jobs:
+        try:
+            await _sweep_one_stale_upload_job(
+                upload_dir=upload_dir,
+                bundle_store=bundle_store,
+                job_store=job_store,
+                record=record,
+            )
+            swept += 1
+        except Exception as exc:
+            logger.error(
+                "paper_upload_startup_sweep_job_failed: paper_id={} job_id={} exception={}",
+                record.paper_id,
+                record.job_id,
+                type(exc).__name__,
+            )
+    if swept:
+        logger.info("paper_upload_startup_sweep_completed: count={}", swept)
+    return swept
+
+
+async def _sweep_one_stale_upload_job(
+    *,
+    upload_dir: str | Path,
+    bundle_store: PaperBundleStore,
+    job_store: PaperUploadJobStore,
+    record: PaperUploadJobRecord,
+) -> None:
+    plan_record: PaperPlanRecord | None
+    try:
+        plan_record = await bundle_store.get_plan_record(record.paper_id)
+    except StoreError as exc:
+        logger.error(
+            "paper_upload_startup_sweep_plan_read_failed: paper_id={} job_id={} exception={}",
+            record.paper_id,
+            record.job_id,
+            type(exc).__name__,
+        )
+        plan_record = None
+
+    if plan_record is not None:
+        await job_store.mark_upload_job_terminal(
+            record.paper_id,
+            job_state="ready",
+            stage="done",
+            failed_stage=None,
+            error_code=None,
+            retryable=False,
+            finished_at=datetime.utcnow(),
+        )
+        await _cleanup_staging_dir(
+            _paper_staging_job_dir(upload_dir, record.job_id),
+            reason="startup_ready_repair",
+        )
+        return
+
+    spec = await bundle_store.get_spec(record.paper_id)
+    if spec is not None:
+        await job_store.mark_upload_job_terminal(
+            record.paper_id,
+            job_state="abandoned_plan_retryable",
+            stage=None,
+            failed_stage=record.stage,
+            error_code="upload_job_abandoned",
+            retryable=True,
+            finished_at=datetime.utcnow(),
+        )
+        await _cleanup_staging_dir(
+            _paper_staging_job_dir(upload_dir, record.job_id),
+            reason="startup_abandoned_plan_retryable",
+        )
+        return
+
+    await job_store.mark_upload_job_terminal(
+        record.paper_id,
+        job_state="abandoned_reupload_required",
+        stage=None,
+        failed_stage=record.stage,
+        error_code="upload_job_abandoned",
+        retryable=False,
+        finished_at=datetime.utcnow(),
+    )
+    await _cleanup_staging_dir(
+        _paper_staging_job_dir(upload_dir, record.job_id),
+        reason="startup_abandoned_reupload_required",
     )
 
 
@@ -603,6 +843,59 @@ async def rerun_paper_plan(
     )
 
 
+async def _run_initial_plan_generation(
+    *,
+    paper_id: str,
+    job_id: str,
+    spec: PaperSpec,
+    plan_service: PaperPlanService,
+    bundle_store: PaperBundleStore,
+    reparse_store: PaperReparseStore | None,
+    job_store: PaperUploadJobStore,
+    lock_registry: PaperReparseLockRegistry,
+    source: PaperReparseSource | None,
+) -> _PlanGenerationResult | _UploadFailure:
+    try:
+        async with await lock_registry.acquire(paper_id):
+            started = await job_store.try_start_initial_plan(paper_id)
+            if started is None:
+                current = await job_store.get_upload_job(paper_id)
+                return _UploadFailure(
+                    status_code=409,
+                    error_code="plan_generation_unavailable",
+                    message="当前状态不能生成建模计划",
+                    paper_id=paper_id,
+                    job_id=current.job_id if current is not None else job_id,
+                )
+            return await _run_plan_generation(
+                paper_id=paper_id,
+                job_id=started.job_id,
+                spec=spec,
+                plan_service=plan_service,
+                bundle_store=bundle_store,
+                reparse_store=reparse_store,
+                job_store=job_store,
+                source=source,
+            )
+    except PaperReparseInProgressError:
+        await job_store.update_upload_job_state(
+            paper_id,
+            job_state="plan_failed_retryable",
+            stage="generating_plan",
+            failed_stage="generating_plan",
+            error_code="plan_generation_in_progress",
+            retryable=True,
+            finished_at=datetime.utcnow(),
+        )
+        return _UploadFailure(
+            status_code=409,
+            error_code="plan_generation_in_progress",
+            message="这份结果正在更新,请稍后重试",
+            paper_id=paper_id,
+            job_id=job_id,
+        )
+
+
 async def _run_plan_generation(
     *,
     paper_id: str,
@@ -615,12 +908,6 @@ async def _run_plan_generation(
     source: PaperReparseSource | None,
 ) -> _PlanGenerationResult | _UploadFailure:
     try:
-        await job_store.update_upload_job_state(
-            paper_id,
-            job_state="plan_generating",
-            stage="generating_plan",
-            retryable=False,
-        )
         plan, missing_prompts, missing_bindings = await plan_service.generate(spec, paper_id)
     except Exception as exc:
         return await _mark_plan_failed(
@@ -670,6 +957,72 @@ async def _run_plan_generation(
             force_error_code="store_error" if isinstance(exc, StoreError) else None,
             status_code=500 if isinstance(exc, StoreError) else None,
         )
+
+
+async def _mark_unhandled_background_failure(
+    job_store: PaperUploadJobStore,
+    paper_id: str,
+    job_id: str,
+) -> None:
+    try:
+        record = await job_store.get_upload_job(paper_id)
+        if record is None:
+            return
+        if record.job_state in {"queued", "running"}:
+            spec_failed_stage = _spec_failure_stage(record.stage)
+            await job_store.update_upload_job_state(
+                paper_id,
+                job_state="failed_no_usable_spec",
+                stage=spec_failed_stage,
+                failed_stage=spec_failed_stage,
+                error_code="internal_error",
+                retryable=False,
+                finished_at=datetime.utcnow(),
+            )
+            return
+        if record.job_state in {"spec_ready", "plan_generating"}:
+            plan_failed_stage = _plan_failure_stage(record.stage)
+            await job_store.update_upload_job_state(
+                paper_id,
+                job_state="plan_failed_retryable",
+                stage=plan_failed_stage,
+                failed_stage=plan_failed_stage,
+                error_code="internal_error",
+                retryable=True,
+                finished_at=datetime.utcnow(),
+            )
+    except Exception as exc:
+        logger.error(
+            "paper_upload_background_mark_failed: paper_id={} job_id={} exception={}",
+            paper_id,
+            job_id,
+            type(exc).__name__,
+        )
+
+
+def _spec_failure_stage(
+    stage: PaperUploadStage,
+) -> Literal[
+    "parsing",
+    "extracting_spec",
+    "fusing",
+    "persisting_spec",
+]:
+    if stage == "parsing":
+        return "parsing"
+    if stage == "fusing":
+        return "fusing"
+    if stage == "persisting_spec":
+        return "persisting_spec"
+    if stage == "extracting_spec":
+        return stage
+    return "extracting_spec"
+
+
+def _plan_failure_stage(stage: PaperUploadStage) -> Literal["generating_plan", "persisting_plan"]:
+    if stage == "persisting_plan":
+        return "persisting_plan"
+    return "generating_plan"
 
 
 async def _mark_upload_failed_no_usable_spec(

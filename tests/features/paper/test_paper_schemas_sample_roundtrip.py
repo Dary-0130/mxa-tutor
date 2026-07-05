@@ -11,6 +11,7 @@ from features.paper.paper_upload_job_schemas import (
     PaperStatusResponse,
     RerunPlanRequest,
     RerunPlanResponse,
+    UploadAsyncResponse,
 )
 
 ROOT = Path("eval/cases/paper_to_model")
@@ -223,6 +224,15 @@ def test_paper_status_response_roundtrip_matches_sample_json() -> None:
     model = PaperStatusResponse.model_validate(data)
 
     assert _json_dump(model) == data
+
+
+def test_upload_async_response_roundtrip_matches_sample_json() -> None:
+    data = {
+        "paper_id": "paper-1",
+        "job_id": "PUJ-1",
+    }
+
+    assert _json_dump(UploadAsyncResponse.model_validate(data)) == data
 
 
 def test_rerun_plan_contracts_roundtrip_match_sample_json() -> None:

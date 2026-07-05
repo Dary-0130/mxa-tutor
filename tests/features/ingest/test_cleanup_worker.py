@@ -1,8 +1,10 @@
 import asyncio
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from core.domain.paper_upload_job import PaperUploadJobDocument, PaperUploadJobRecord
 from features.ingest.cleanup_worker import CleanupWorker
 
 
@@ -42,6 +44,14 @@ class FakePaperStore:
         if self.error is not None:
             raise self.error
         return self.deleted
+
+
+class FakePaperJobStore:
+    def __init__(self, records: dict[str, PaperUploadJobRecord]) -> None:
+        self.records = records
+
+    async def get_upload_job_by_job_id(self, job_id: str) -> PaperUploadJobRecord | None:
+        return self.records.get(job_id)
 
 
 async def test_run_once_deletes_expired_projects(tmp_path: Path) -> None:
@@ -127,6 +137,57 @@ async def test_run_once_never_deletes_paper_staging_namespace(tmp_path: Path) ->
     assert staging_root.exists()
 
 
+async def test_run_once_deletes_orphan_terminal_and_abandoned_paper_staging(
+    tmp_path: Path,
+) -> None:
+    staging_root = tmp_path / "paper_staging"
+    for job_id in ["PUJ-orphan", "PUJ-ready", "PUJ-abandoned"]:
+        job_dir = staging_root / job_id
+        job_dir.mkdir(parents=True)
+        (job_dir / "doc.pdf").write_bytes(b"%PDF-1.7\n")
+    job_store = FakePaperJobStore(
+        {
+            "PUJ-ready": _paper_job_record("PUJ-ready", "ready"),
+            "PUJ-abandoned": _paper_job_record(
+                "PUJ-abandoned",
+                "abandoned_reupload_required",
+            ),
+        }
+    )
+
+    deleted = await CleanupWorker(
+        FakeStore([]),
+        tmp_path,
+        ttl_hours=24,
+        paper_job_store=job_store,
+    ).run_once()
+
+    assert deleted == 3
+    assert not (staging_root / "PUJ-orphan").exists()
+    assert not (staging_root / "PUJ-ready").exists()
+    assert not (staging_root / "PUJ-abandoned").exists()
+
+
+async def test_run_once_keeps_active_paper_staging(
+    tmp_path: Path,
+) -> None:
+    staging_root = tmp_path / "paper_staging"
+    active_dir = staging_root / "PUJ-running"
+    active_dir.mkdir(parents=True)
+    (active_dir / "doc.pdf").write_bytes(b"%PDF-1.7\n")
+    job_store = FakePaperJobStore({"PUJ-running": _paper_job_record("PUJ-running", "running")})
+
+    deleted = await CleanupWorker(
+        FakeStore([]),
+        tmp_path,
+        ttl_hours=24,
+        paper_job_store=job_store,
+    ).run_once()
+
+    assert deleted == 0
+    assert active_dir.exists()
+
+
 def test_run_once_logger_never_uses_exception_method() -> None:
     src = Path("features/ingest/cleanup_worker.py").read_text(encoding="utf-8")
     assert "logger.exception" not in src
@@ -154,3 +215,32 @@ async def test_run_forever_interval_respected(tmp_path: Path, mocker) -> None:
         await CleanupWorker(FakeStore([]), tmp_path, 24, interval_minutes=2).run_forever()
 
     assert sleeps == [120]
+
+
+def _paper_job_record(job_id: str, job_state: str) -> PaperUploadJobRecord:
+    now = datetime.utcnow()
+    return PaperUploadJobRecord(
+        job_id=job_id,
+        paper_id=f"paper-{job_id}",
+        execution_mode="async",
+        job_state=job_state,  # type: ignore[arg-type]
+        stage="done" if job_state == "ready" else "uploading",
+        failed_stage=None,
+        last_error_code=None,
+        retryable=False,
+        attempt_count=1,
+        state_version=0,
+        created_at=now,
+        started_at=now,
+        finished_at=now if job_state != "running" else None,
+        expires_at=now + timedelta(hours=24),
+        documents=[
+            PaperUploadJobDocument(
+                document_id="DOC-001",
+                upload_index=0,
+                status="pending",
+                error_code=None,
+                updated_at=now,
+            )
+        ],
+    )
