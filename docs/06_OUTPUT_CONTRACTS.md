@@ -685,7 +685,70 @@ POST 纠错请求只接受 `target` / `corrected_value` / `corrected_unit`;`sour
 `original.document_id` / `document_label` 只有按抽取表唯一命中时填写;不得用 primary document
 兜底。错误响应只返回稳定错误码和文案,不得包含原值、新值、单位、参数名或 `param_key`。
 
-### 12.10 反模式
+### 12.10 PaperUploadJob status / rerun-plan schema
+
+`PaperUploadJob` 描述资料上传与计划重跑的持久状态。它用于同步上传失败后的恢复入口,
+不会暴露原文件名、原文、参数值、单位、异常 message 或 traceback。
+
+同步项:
+
+| 层 | 路径 |
+|---|---|
+| Domain | `core/domain/paper_upload_job.py` |
+| Pydantic wrapper | `features/paper/paper_upload_job_schemas.py` |
+| JSON Schema | `schemas/paper_status_response.schema.json` / `schemas/paper_rerun_plan_request.schema.json` / `schemas/paper_rerun_plan_response.schema.json` |
+| Store | `core/interfaces/paper_upload_job_store.py` / `adapters/storage/sqlite_paper_cache.py` |
+| TS mirror | `web/src/lib/paperTypes.ts` |
+
+`GET /api/v1/papers/{paper_id}/status` 成功返回 `PaperStatusResponse`:
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `paper_id` | string | 必填 | 资料 ID |
+| `job_id` | string | 必填 | 后端生成的上传/重跑 job ID |
+| `execution_mode` | `sync` / `async` / `rerun_plan` | 必填 | 当前执行模式 |
+| `job_state` | enum | 必填;不含 `expired` | 持久状态;过期由 status 派生 410 |
+| `stage` | enum | 必填 | 当前或最后阶段 |
+| `failed_stage` | enum/null | 可空 | 失败发生阶段,含 `persisting_spec` / `persisting_plan` |
+| `error_code` | string/null | 可空 | 稳定机器码,不含异常 message |
+| `retryable` | bool | 必填 | 是否可由后端重跑计划恢复 |
+| `next_action` | `wait` / `rerun_plan` / `reupload` / `open_result` / `none` / `contact_support` | 必填 | 前端下一步动作 |
+| `expires_at` | datetime | 必填 | 内容过期时间 |
+| `documents` | array[`PaperJobDocumentStatus`] | 必填 | 每个文档的处理状态 |
+
+`job_state` 取值:
+`queued` / `running` / `spec_ready` / `plan_generating` / `ready` /
+`plan_failed_retryable` / `plan_failed_permanent` / `failed_no_usable_spec` /
+`abandoned_plan_retryable` / `abandoned_reupload_required`。
+
+`stage` 取值:
+`uploading` / `parsing` / `extracting_spec` / `fusing` / `persisting_spec` /
+`generating_plan` / `persisting_plan` / `done`。
+
+`PaperJobDocumentStatus` 字段:
+
+| 字段 | 类型 | 约束 | 语义 |
+|---|---|---|---|
+| `document_id` | string | `^DOC-\d{3}$` | 后端分配的文档 ID |
+| `status` | enum | pending/parsing/parsed/extracting/succeeded/failed | 文档处理状态 |
+| `error_code` | string/null | 可空 | 文档级稳定错误码 |
+
+`POST /api/v1/papers/{paper_id}/rerun-plan` 请求体 `RerunPlanRequest` 为空对象且
+`extra=forbid`。成功返回 `RerunPlanResponse`:
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `paper_id` | string | 资料 ID |
+| `job_id` | string | 关联 job ID |
+| `job_state` | enum | 成功时为 `ready` |
+| `plan` | `ModelGenerationPlan` | 新生成的计划 |
+| `missing_prompts` | array[`MissingParameterPrompt`] | 当前计划的全部缺参提示 |
+| `remaining_missing_prompts` | array[`MissingParameterPrompt`] | 未被用户补齐的提示 |
+
+rerun-plan 只读取已持久化的 `PaperSpec`,不重读原始文件、不重抽 spec、不修改
+`PaperSpec.parameter_table` / `parameter_conflicts`。失败时保留 spec-only 或旧状态,不写半个 plan。
+
+### 12.11 反模式
 
 反模式 1:资料入口使用 `general`:
 

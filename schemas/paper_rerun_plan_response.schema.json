@@ -1,0 +1,690 @@
+{
+  "$defs": {
+    "BlockRecommendationModel": {
+      "additionalProperties": false,
+      "properties": {
+        "block_type": {
+          "minLength": 1,
+          "title": "Block Type",
+          "type": "string"
+        },
+        "purpose": {
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "paper_reference": {
+          "$ref": "#/$defs/PaperEvidenceEntryModel"
+        }
+      },
+      "required": [
+        "block_type",
+        "purpose",
+        "paper_reference"
+      ],
+      "title": "BlockRecommendationModel",
+      "type": "object"
+    },
+    "ConfigurationHintModel": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "setting_name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Setting Name"
+        },
+        "instruction": {
+          "minLength": 1,
+          "title": "Instruction",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/PaperEvidenceEntryModel"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "target",
+        "setting_name",
+        "instruction",
+        "evidence"
+      ],
+      "title": "ConfigurationHintModel",
+      "type": "object"
+    },
+    "ConnectionHintModel": {
+      "additionalProperties": false,
+      "properties": {
+        "from_block_ref": {
+          "minLength": 1,
+          "title": "From Block Ref",
+          "type": "string"
+        },
+        "from_port": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "From Port"
+        },
+        "to_block_ref": {
+          "minLength": 1,
+          "title": "To Block Ref",
+          "type": "string"
+        },
+        "to_port": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "To Port"
+        },
+        "signal_meaning": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Signal Meaning"
+        }
+      },
+      "required": [
+        "from_block_ref",
+        "from_port",
+        "to_block_ref",
+        "to_port",
+        "signal_meaning"
+      ],
+      "title": "ConnectionHintModel",
+      "type": "object"
+    },
+    "EvidenceSource": {
+      "description": "Source marker for paper-to-model evidence.",
+      "enum": [
+        "document_extracted",
+        "user_supplied"
+      ],
+      "title": "EvidenceSource",
+      "type": "string"
+    },
+    "MissingParameterPromptModel": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt_id": {
+          "minLength": 1,
+          "title": "Prompt Id",
+          "type": "string"
+        },
+        "parameter_name": {
+          "minLength": 1,
+          "title": "Parameter Name",
+          "type": "string"
+        },
+        "paper_reference": {
+          "$ref": "#/$defs/PaperEvidenceEntryModel"
+        },
+        "suggested_unit": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Suggested Unit"
+        },
+        "user_supplied_value": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Supplied Value"
+        },
+        "user_supplied_unit": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Supplied Unit"
+        },
+        "source": {
+          "const": "user_supplied",
+          "default": "user_supplied",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt_id",
+        "parameter_name",
+        "paper_reference"
+      ],
+      "title": "MissingParameterPromptModel",
+      "type": "object"
+    },
+    "ModelBuildStepModel": {
+      "additionalProperties": false,
+      "properties": {
+        "step_id": {
+          "minLength": 1,
+          "title": "Step Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "intent": {
+          "minLength": 1,
+          "title": "Intent",
+          "type": "string"
+        },
+        "block_refs": {
+          "items": {
+            "$ref": "#/$defs/StepBlockRefModel"
+          },
+          "title": "Block Refs",
+          "type": "array"
+        },
+        "parameter_refs": {
+          "items": {
+            "$ref": "#/$defs/ParameterMappingRefModel"
+          },
+          "title": "Parameter Refs",
+          "type": "array"
+        },
+        "connection_hints": {
+          "items": {
+            "$ref": "#/$defs/ConnectionHintModel"
+          },
+          "title": "Connection Hints",
+          "type": "array"
+        },
+        "configuration_hints": {
+          "items": {
+            "$ref": "#/$defs/ConfigurationHintModel"
+          },
+          "title": "Configuration Hints",
+          "type": "array"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/PaperEvidenceEntryModel"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "display_text": {
+          "minLength": 1,
+          "title": "Display Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_id",
+        "title",
+        "intent",
+        "block_refs",
+        "parameter_refs",
+        "connection_hints",
+        "configuration_hints",
+        "depends_on",
+        "evidence",
+        "display_text"
+      ],
+      "title": "ModelBuildStepModel",
+      "type": "object"
+    },
+    "ModelGenerationPlanModel": {
+      "additionalProperties": false,
+      "properties": {
+        "plan_id": {
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "paper_spec_id": {
+          "minLength": 1,
+          "title": "Paper Spec Id",
+          "type": "string"
+        },
+        "library_choice": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Library Choice",
+          "type": "string"
+        },
+        "block_recommendations": {
+          "items": {
+            "$ref": "#/$defs/BlockRecommendationModel"
+          },
+          "title": "Block Recommendations",
+          "type": "array"
+        },
+        "parameter_mapping": {
+          "items": {
+            "$ref": "#/$defs/ParameterMappingModel"
+          },
+          "title": "Parameter Mapping",
+          "type": "array"
+        },
+        "subsystem_breakdown": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "minItems": 3,
+          "title": "Subsystem Breakdown",
+          "type": "array"
+        },
+        "m_script_skeleton": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "M Script Skeleton"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/PaperEvidenceEntryModel"
+          },
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "build_steps": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ModelBuildStepModel"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Build Steps"
+        }
+      },
+      "required": [
+        "plan_id",
+        "paper_spec_id",
+        "library_choice",
+        "subsystem_breakdown",
+        "evidence"
+      ],
+      "title": "ModelGenerationPlanModel",
+      "type": "object"
+    },
+    "PaperEvidenceEntryModel": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/EvidenceSource"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^DOC-\\d{3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Document Id"
+        },
+        "paper_section_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paper Section Id"
+        },
+        "equation_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Equation Id"
+        },
+        "figure_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Figure Id"
+        },
+        "excerpt": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Excerpt"
+        },
+        "missing_param_prompt_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Missing Param Prompt Id"
+        },
+        "user_action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserEvidenceAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "parameter_correction_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parameter Correction Id"
+        },
+        "correction_param_key": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Correction Param Key"
+        }
+      },
+      "required": [
+        "source",
+        "document_id"
+      ],
+      "title": "PaperEvidenceEntryModel",
+      "type": "object"
+    },
+    "ParameterMappingModel": {
+      "additionalProperties": false,
+      "properties": {
+        "paper_param_name": {
+          "minLength": 1,
+          "title": "Paper Param Name",
+          "type": "string"
+        },
+        "model_param_name": {
+          "minLength": 1,
+          "title": "Model Param Name",
+          "type": "string"
+        },
+        "value": {
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "source": {
+          "$ref": "#/$defs/EvidenceSource"
+        }
+      },
+      "required": [
+        "paper_param_name",
+        "model_param_name",
+        "value",
+        "source"
+      ],
+      "title": "ParameterMappingModel",
+      "type": "object"
+    },
+    "ParameterMappingRefModel": {
+      "additionalProperties": false,
+      "properties": {
+        "paper_param_name": {
+          "minLength": 1,
+          "title": "Paper Param Name",
+          "type": "string"
+        },
+        "model_param_name": {
+          "minLength": 1,
+          "title": "Model Param Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "paper_param_name",
+        "model_param_name"
+      ],
+      "title": "ParameterMappingRefModel",
+      "type": "object"
+    },
+    "StepBlockRefModel": {
+      "additionalProperties": false,
+      "properties": {
+        "block_ref_id": {
+          "minLength": 1,
+          "title": "Block Ref Id",
+          "type": "string"
+        },
+        "block_type": {
+          "minLength": 1,
+          "title": "Block Type",
+          "type": "string"
+        },
+        "library_path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Library Path"
+        },
+        "purpose": {
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        },
+        "paper_reference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PaperEvidenceEntryModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "block_ref_id",
+        "block_type",
+        "library_path",
+        "purpose",
+        "paper_reference"
+      ],
+      "title": "StepBlockRefModel",
+      "type": "object"
+    },
+    "UserEvidenceAction": {
+      "description": "Action represented by a user-supplied evidence entry.",
+      "enum": [
+        "fill_missing",
+        "correct_extracted"
+      ],
+      "title": "UserEvidenceAction",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "POST /api/v1/papers/{paper_id}/rerun-plan response.",
+  "properties": {
+    "paper_id": {
+      "title": "Paper Id",
+      "type": "string"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "job_state": {
+      "enum": [
+        "queued",
+        "running",
+        "spec_ready",
+        "plan_generating",
+        "ready",
+        "plan_failed_retryable",
+        "plan_failed_permanent",
+        "failed_no_usable_spec",
+        "abandoned_plan_retryable",
+        "abandoned_reupload_required"
+      ],
+      "title": "Job State",
+      "type": "string"
+    },
+    "plan": {
+      "$ref": "#/$defs/ModelGenerationPlanModel"
+    },
+    "missing_prompts": {
+      "items": {
+        "$ref": "#/$defs/MissingParameterPromptModel"
+      },
+      "title": "Missing Prompts",
+      "type": "array"
+    },
+    "remaining_missing_prompts": {
+      "items": {
+        "$ref": "#/$defs/MissingParameterPromptModel"
+      },
+      "title": "Remaining Missing Prompts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "paper_id",
+    "job_id",
+    "job_state",
+    "plan",
+    "missing_prompts",
+    "remaining_missing_prompts"
+  ],
+  "title": "RerunPlanResponse",
+  "type": "object"
+}

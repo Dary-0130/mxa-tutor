@@ -28,6 +28,16 @@ class PaperBundleStore(ABC):
         ...
 
     @abstractmethod
+    async def put_spec(self, paper_id: str, spec: PaperSpec) -> None:
+        """Store or replace a spec only when no plan row exists."""
+        ...
+
+    @abstractmethod
+    async def set_plan(self, paper_id: str, record: PaperPlanRecord) -> None:
+        """Store a plan row for an existing spec."""
+        ...
+
+    @abstractmethod
     async def delete_bundle(self, paper_id: str) -> None:
         """Delete both spec and plan rows for ``paper_id``."""
         ...

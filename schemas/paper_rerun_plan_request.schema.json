@@ -1,0 +1,7 @@
+{
+  "additionalProperties": false,
+  "description": "POST /api/v1/papers/{paper_id}/rerun-plan request.",
+  "properties": {},
+  "title": "RerunPlanRequest",
+  "type": "object"
+}

@@ -7,6 +7,9 @@ import type {
   ParameterCorrectionsResponse,
   PaperPlanResponse,
   PaperReparseResponse,
+  PaperStatusResponse,
+  RerunPlanRequest,
+  RerunPlanResponse,
   PaperSpecResponse,
   TuningSuggestRequest,
   TuningSuggestResponse,
@@ -40,6 +43,17 @@ export function getPaperSpec(paperId: string): Promise<PaperSpecResponse> {
 
 export function getPaperPlan(paperId: string): Promise<PaperPlanResponse> {
   return apiGet<PaperPlanResponse>(paperPath(paperId, "/plan"));
+}
+
+export function getPaperStatus(paperId: string): Promise<PaperStatusResponse> {
+  return apiGet<PaperStatusResponse>(paperPath(paperId, "/status"));
+}
+
+export function postRerunPlan(
+  paperId: string,
+  request: RerunPlanRequest = {},
+): Promise<RerunPlanResponse> {
+  return apiPost<RerunPlanResponse>(paperPath(paperId, "/rerun-plan"), request);
 }
 
 export function postPaperReparse(paperId: string): Promise<PaperReparseResponse> {

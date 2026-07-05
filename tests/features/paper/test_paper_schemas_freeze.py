@@ -69,6 +69,12 @@ from features.paper.paper_schemas import (
     StepBlockRefModel,
     TuningSuggestionModel,
 )
+from features.paper.paper_upload_job_schemas import (
+    PaperJobDocumentStatus,
+    PaperStatusResponse,
+    RerunPlanRequest,
+    RerunPlanResponse,
+)
 
 TOP_LEVEL_MODELS = (
     PaperEvidenceEntryModel,
@@ -78,6 +84,10 @@ TOP_LEVEL_MODELS = (
     MissingParameterPromptModel,
     PaperAskRequestModel,
     PaperAskResponseModel,
+    PaperJobDocumentStatus,
+    PaperStatusResponse,
+    RerunPlanRequest,
+    RerunPlanResponse,
 )
 
 NESTED_MODELS = (
@@ -182,6 +192,10 @@ def test_top_level_model_count_and_names_are_frozen() -> None:
         "MissingParameterPromptModel",
         "PaperAskRequestModel",
         "PaperAskResponseModel",
+        "PaperJobDocumentStatus",
+        "PaperStatusResponse",
+        "RerunPlanRequest",
+        "RerunPlanResponse",
     ]
 
 
@@ -567,6 +581,50 @@ def test_paper_ask_question_blank_rejected_without_trimming_value() -> None:
 def test_answer_kind_is_internal_and_not_exported_in_public_response_schema() -> None:
     schema_text = str(PaperAskResponseModel.model_json_schema())
     assert "answer_kind" not in schema_text
+
+
+def test_paper_upload_job_status_literals_and_fields_are_frozen() -> None:
+    assert tuple(PaperJobDocumentStatus.model_fields) == (
+        "document_id",
+        "status",
+        "error_code",
+    )
+    assert tuple(PaperStatusResponse.model_fields) == (
+        "paper_id",
+        "job_id",
+        "execution_mode",
+        "job_state",
+        "stage",
+        "failed_stage",
+        "error_code",
+        "retryable",
+        "next_action",
+        "expires_at",
+        "documents",
+    )
+    assert tuple(RerunPlanRequest.model_fields) == ()
+    assert tuple(RerunPlanResponse.model_fields) == (
+        "paper_id",
+        "job_id",
+        "job_state",
+        "plan",
+        "missing_prompts",
+        "remaining_missing_prompts",
+    )
+    assert get_args(PaperStatusResponse.model_fields["execution_mode"].annotation) == (
+        "sync",
+        "async",
+        "rerun_plan",
+    )
+    assert "expired" not in get_args(PaperStatusResponse.model_fields["job_state"].annotation)
+    assert get_args(PaperStatusResponse.model_fields["next_action"].annotation) == (
+        "wait",
+        "rerun_plan",
+        "reupload",
+        "open_result",
+        "none",
+        "contact_support",
+    )
 
 
 def test_new_build_step_submodel_extra_forbid_is_enforced() -> None:

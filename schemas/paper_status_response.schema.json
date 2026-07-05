@@ -1,0 +1,171 @@
+{
+  "$defs": {
+    "PaperJobDocumentStatus": {
+      "additionalProperties": false,
+      "description": "Per-document status exposed by GET paper status.",
+      "properties": {
+        "document_id": {
+          "pattern": "^DOC-[0-9]{3}$",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "parsing",
+            "parsed",
+            "extracting",
+            "succeeded",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        }
+      },
+      "required": [
+        "document_id",
+        "status"
+      ],
+      "title": "PaperJobDocumentStatus",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "GET /api/v1/papers/{paper_id}/status response.",
+  "properties": {
+    "paper_id": {
+      "title": "Paper Id",
+      "type": "string"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "execution_mode": {
+      "enum": [
+        "sync",
+        "async",
+        "rerun_plan"
+      ],
+      "title": "Execution Mode",
+      "type": "string"
+    },
+    "job_state": {
+      "enum": [
+        "queued",
+        "running",
+        "spec_ready",
+        "plan_generating",
+        "ready",
+        "plan_failed_retryable",
+        "plan_failed_permanent",
+        "failed_no_usable_spec",
+        "abandoned_plan_retryable",
+        "abandoned_reupload_required"
+      ],
+      "title": "Job State",
+      "type": "string"
+    },
+    "stage": {
+      "enum": [
+        "uploading",
+        "parsing",
+        "extracting_spec",
+        "fusing",
+        "persisting_spec",
+        "generating_plan",
+        "persisting_plan",
+        "done"
+      ],
+      "title": "Stage",
+      "type": "string"
+    },
+    "failed_stage": {
+      "anyOf": [
+        {
+          "enum": [
+            "uploading",
+            "parsing",
+            "extracting_spec",
+            "fusing",
+            "persisting_spec",
+            "generating_plan",
+            "persisting_plan",
+            "done"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Failed Stage"
+    },
+    "error_code": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error Code"
+    },
+    "retryable": {
+      "title": "Retryable",
+      "type": "boolean"
+    },
+    "next_action": {
+      "enum": [
+        "wait",
+        "rerun_plan",
+        "reupload",
+        "open_result",
+        "none",
+        "contact_support"
+      ],
+      "title": "Next Action",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "documents": {
+      "items": {
+        "$ref": "#/$defs/PaperJobDocumentStatus"
+      },
+      "title": "Documents",
+      "type": "array"
+    }
+  },
+  "required": [
+    "paper_id",
+    "job_id",
+    "execution_mode",
+    "job_state",
+    "stage",
+    "retryable",
+    "next_action",
+    "expires_at",
+    "documents"
+  ],
+  "title": "PaperStatusResponse",
+  "type": "object"
+}

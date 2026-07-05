@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,16 @@ from api.dependencies import (
     get_paper_plan_service,
     get_paper_reparse_store,
     get_paper_spec_service,
+    get_paper_upload_job_store,
     get_settings,
 )
 from api.main import create_app
-from core.domain.exceptions import DocumentParseError, PaperSpecGenerationError, StoreError
+from core.domain.exceptions import (
+    DocumentParseError,
+    PaperPlanGenerationError,
+    PaperSpecGenerationError,
+    StoreError,
+)
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_parameter_correction import PaperParameterCorrection
@@ -29,9 +36,18 @@ from core.domain.paper_plan import (
 )
 from core.domain.paper_reparse_source import PaperReparseSource
 from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec, ParameterEntry
+from core.domain.paper_upload_job import (
+    PaperUploadDocumentState,
+    PaperUploadExecutionMode,
+    PaperUploadJobDocument,
+    PaperUploadJobRecord,
+    PaperUploadJobState,
+    PaperUploadStage,
+)
 from core.interfaces.document_parser import ParsedDocument, ParsedLocatorIndex
 from core.interfaces.paper_cache import PaperBundleStore
 from core.interfaces.paper_reparse_store import PaperReparseStore
+from core.interfaces.paper_upload_job_store import PaperUploadJobStore
 from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL, MissingBindingModel
 
 
@@ -89,7 +105,8 @@ class FakePaperSpecService:
 
 
 class FakePaperPlanService:
-    def __init__(self) -> None:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
         self.calls: list[tuple[PaperSpec, str]] = []
 
     async def generate(
@@ -99,20 +116,25 @@ class FakePaperPlanService:
     ) -> tuple[ModelGenerationPlan, list[MissingParameterPrompt], list[MissingBindingModel]]:
         uuid.UUID(paper_id)
         self.calls.append((spec, paper_id))
+        if self.error is not None:
+            raise self.error
         return _plan(paper_id), [_missing_prompt()], [_missing_binding()]
 
 
-class FakePaperBundleStore(PaperBundleStore, PaperReparseStore):
+class FakePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJobStore):
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
         self.records: dict[str, PaperPlanRecord] = {}
+        self.specs: dict[str, PaperSpec] = {}
         self.sources: dict[str, PaperReparseSource] = {}
         self.deleted_ids: list[str] = []
+        self.jobs: dict[str, PaperUploadJobRecord] = {}
 
     async def save_ready_bundle(self, record: PaperPlanRecord) -> None:
         if self.error is not None:
             raise self.error
         self.records[record.paper_id] = record
+        self.specs[record.paper_id] = record.spec
 
     async def save_ready_bundle_with_source(
         self,
@@ -122,6 +144,7 @@ class FakePaperBundleStore(PaperBundleStore, PaperReparseStore):
         if self.error is not None:
             raise self.error
         self.records[record.paper_id] = record
+        self.specs[record.paper_id] = record.spec
         self.sources[record.paper_id] = source
 
     async def replace_ready_bundle_with_source(
@@ -145,15 +168,31 @@ class FakePaperBundleStore(PaperBundleStore, PaperReparseStore):
 
     async def get_spec(self, paper_id: str) -> PaperSpec | None:
         record = self.records.get(paper_id)
-        return record.spec if record is not None else None
+        return record.spec if record is not None else self.specs.get(paper_id)
 
     async def get_plan_record(self, paper_id: str) -> PaperPlanRecord | None:
         return self.records.get(paper_id)
 
+    async def put_spec(self, paper_id: str, spec: PaperSpec) -> None:
+        if self.error is not None:
+            raise self.error
+        if paper_id in self.records:
+            raise StoreError("paper_spec_overwrite_for_existing_plan")
+        self.specs[paper_id] = spec
+
+    async def set_plan(self, paper_id: str, record: PaperPlanRecord) -> None:
+        if self.error is not None:
+            raise self.error
+        if paper_id not in self.specs:
+            raise StoreError("paper_spec_missing_for_plan")
+        self.records[paper_id] = record
+
     async def delete_bundle(self, paper_id: str) -> None:
         self.deleted_ids.append(paper_id)
         self.records.pop(paper_id, None)
+        self.specs.pop(paper_id, None)
         self.sources.pop(paper_id, None)
+        self.jobs.pop(paper_id, None)
 
     async def apply_parameter_correction_atomically(
         self,
@@ -205,6 +244,143 @@ class FakePaperBundleStore(PaperBundleStore, PaperReparseStore):
 
     async def delete_parameter_correction(self, paper_id: str, correction_id: str) -> None:
         _ = paper_id, correction_id
+
+    async def create_upload_job(
+        self,
+        *,
+        job_id: str,
+        paper_id: str,
+        execution_mode: PaperUploadExecutionMode,
+        document_ids: list[str],
+        expires_at: datetime,
+    ) -> PaperUploadJobRecord:
+        now = datetime.utcnow()
+        record = PaperUploadJobRecord(
+            job_id=job_id,
+            paper_id=paper_id,
+            execution_mode=execution_mode,
+            job_state="queued",
+            stage="uploading",
+            failed_stage=None,
+            last_error_code=None,
+            retryable=False,
+            attempt_count=1,
+            state_version=0,
+            created_at=now,
+            started_at=None,
+            finished_at=None,
+            expires_at=expires_at,
+            documents=[
+                PaperUploadJobDocument(
+                    document_id=document_id,
+                    upload_index=index,
+                    status="pending",
+                    error_code=None,
+                    updated_at=now,
+                )
+                for index, document_id in enumerate(document_ids)
+            ],
+        )
+        self.jobs[paper_id] = record
+        return record
+
+    async def get_upload_job(self, paper_id: str) -> PaperUploadJobRecord | None:
+        return self.jobs.get(paper_id)
+
+    async def update_upload_job_state(
+        self,
+        paper_id: str,
+        *,
+        job_state: PaperUploadJobState,
+        stage: PaperUploadStage,
+        failed_stage: PaperUploadStage | None = None,
+        error_code: str | None = None,
+        retryable: bool,
+        finished_at: datetime | None = None,
+    ) -> PaperUploadJobRecord:
+        record = self.jobs[paper_id]
+        updated = PaperUploadJobRecord(
+            job_id=record.job_id,
+            paper_id=record.paper_id,
+            execution_mode=record.execution_mode,
+            job_state=job_state,
+            stage=stage,
+            failed_stage=failed_stage,
+            last_error_code=error_code,
+            retryable=retryable,
+            attempt_count=record.attempt_count,
+            state_version=record.state_version + 1,
+            created_at=record.created_at,
+            started_at=record.started_at or datetime.utcnow(),
+            finished_at=finished_at,
+            expires_at=record.expires_at,
+            documents=record.documents,
+        )
+        self.jobs[paper_id] = updated
+        return updated
+
+    async def update_upload_document_state(
+        self,
+        paper_id: str,
+        document_id: str,
+        *,
+        status: PaperUploadDocumentState,
+        error_code: str | None = None,
+    ) -> None:
+        record = self.jobs[paper_id]
+        documents = [
+            PaperUploadJobDocument(
+                document_id=document.document_id,
+                upload_index=document.upload_index,
+                status=status if document.document_id == document_id else document.status,
+                error_code=error_code
+                if document.document_id == document_id
+                else document.error_code,
+                updated_at=datetime.utcnow(),
+            )
+            for document in record.documents
+        ]
+        self.jobs[paper_id] = PaperUploadJobRecord(
+            job_id=record.job_id,
+            paper_id=record.paper_id,
+            execution_mode=record.execution_mode,
+            job_state=record.job_state,
+            stage=record.stage,
+            failed_stage=record.failed_stage,
+            last_error_code=record.last_error_code,
+            retryable=record.retryable,
+            attempt_count=record.attempt_count,
+            state_version=record.state_version,
+            created_at=record.created_at,
+            started_at=record.started_at,
+            finished_at=record.finished_at,
+            expires_at=record.expires_at,
+            documents=documents,
+        )
+
+    async def try_start_rerun_plan(self, paper_id: str) -> PaperUploadJobRecord | None:
+        record = self.jobs.get(paper_id)
+        if record is None or record.job_state not in {"spec_ready", "plan_failed_retryable"}:
+            return None
+        updated = PaperUploadJobRecord(
+            job_id=record.job_id,
+            paper_id=record.paper_id,
+            execution_mode="rerun_plan",
+            job_state="plan_generating",
+            stage="generating_plan",
+            failed_stage=None,
+            last_error_code=None,
+            retryable=False,
+            attempt_count=record.attempt_count + 1,
+            state_version=record.state_version + 1,
+            created_at=record.created_at,
+            started_at=datetime.utcnow(),
+            finished_at=None,
+            expires_at=record.expires_at,
+            documents=record.documents,
+        )
+        self.jobs[paper_id] = updated
+        return updated
 
 
 def test_upload_document_returns_200_with_paper_id_and_spec(
@@ -429,6 +605,120 @@ def test_upload_store_failure_does_not_run_application_compensation_delete(
     assert bundle_store.deleted_ids == []
 
 
+def test_upload_plan_failure_keeps_spec_and_status_allows_rerun(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    app = _create_app(
+        tmp_path,
+        monkeypatch,
+        FakePaperSpecService(),
+        plan_service=FakePaperPlanService(PaperPlanGenerationError("bad_plan")),
+        bundle_store=bundle_store,
+    )
+
+    with TestClient(app) as client:
+        upload_response = _post_document(client, b"%PDF-1.7\n", "paper.pdf")
+        paper_id = upload_response.json()["paper_id"]
+        status_response = client.get(f"/api/v1/papers/{paper_id}/status")
+
+    assert upload_response.status_code == 502
+    assert upload_response.json()["error"] == "paper_plan_generation_failed"
+    assert "paper_id" in upload_response.json()
+    assert paper_id in bundle_store.specs
+    assert paper_id not in bundle_store.records
+    status_body = status_response.json()
+    assert status_response.status_code == 200
+    assert status_body["job_state"] == "plan_failed_retryable"
+    assert status_body["failed_stage"] == "generating_plan"
+    assert status_body["next_action"] == "rerun_plan"
+    assert status_body["documents"] == [
+        {"document_id": "DOC-001", "status": "succeeded", "error_code": None}
+    ]
+
+
+def test_rerun_plan_recovers_from_spec_only_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    app = _create_app(
+        tmp_path,
+        monkeypatch,
+        FakePaperSpecService(),
+        plan_service=FakePaperPlanService(PaperPlanGenerationError("bad_plan")),
+        bundle_store=bundle_store,
+    )
+
+    with TestClient(app) as client:
+        upload_response = _post_document(client, b"%PDF-1.7\n", "paper.pdf")
+        paper_id = upload_response.json()["paper_id"]
+        app.dependency_overrides[get_paper_plan_service] = lambda: FakePaperPlanService()
+        rerun_response = client.post(f"/api/v1/papers/{paper_id}/rerun-plan", json={})
+        status_response = client.get(f"/api/v1/papers/{paper_id}/status")
+
+    assert rerun_response.status_code == 200
+    assert rerun_response.json()["paper_id"] == paper_id
+    assert rerun_response.json()["job_state"] == "ready"
+    assert bundle_store.records[paper_id].plan.plan_id == f"PLAN-{paper_id}"
+    assert status_response.json()["job_state"] == "ready"
+    assert status_response.json()["next_action"] == "open_result"
+    assert bundle_store.jobs[paper_id].attempt_count == 2
+
+
+def test_rerun_plan_rejects_ready_state_with_cas_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    app = _create_app(
+        tmp_path,
+        monkeypatch,
+        FakePaperSpecService(),
+        bundle_store=bundle_store,
+    )
+
+    with TestClient(app) as client:
+        upload_response = _post_document(client, b"%PDF-1.7\n", "paper.pdf")
+        paper_id = upload_response.json()["paper_id"]
+        rerun_response = client.post(f"/api/v1/papers/{paper_id}/rerun-plan", json={})
+
+    assert upload_response.status_code == 200
+    assert rerun_response.status_code == 409
+    assert rerun_response.json()["error"] == "rerun_plan_unavailable"
+
+
+def test_status_expired_returns_410_without_content_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    app = _create_app(
+        tmp_path,
+        monkeypatch,
+        FakePaperSpecService(),
+        bundle_store=bundle_store,
+    )
+
+    with TestClient(app) as client:
+        upload_response = _post_document(client, b"%PDF-1.7\n", "paper.pdf")
+        paper_id = upload_response.json()["paper_id"]
+        bundle_store.jobs[paper_id] = replace(
+            bundle_store.jobs[paper_id],
+            expires_at=datetime(2026, 1, 1, 0, 0, 0),
+        )
+        status_response = client.get(f"/api/v1/papers/{paper_id}/status")
+
+    assert status_response.status_code == 410
+    assert status_response.json() == {
+        "error": "paper_expired",
+        "message": "这份资料已过期,请重新上传",
+        "paper_id": paper_id,
+        "job_id": bundle_store.jobs[paper_id].job_id,
+    }
+
+
 def test_upload_calls_plan_service_with_injected_paper_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -577,6 +867,9 @@ def _create_app(
         lambda: bundle_store or FakePaperBundleStore()
     )
     app.dependency_overrides[get_paper_reparse_store] = (
+        lambda: bundle_store or FakePaperBundleStore()
+    )
+    app.dependency_overrides[get_paper_upload_job_store] = (
         lambda: bundle_store or FakePaperBundleStore()
     )
     return app
