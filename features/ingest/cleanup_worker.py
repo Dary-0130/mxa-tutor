@@ -12,6 +12,8 @@ from core.domain.paper_reparse_source import PAPER_REPARSE_TTL_HOURS
 from core.interfaces.paper_reparse_store import PaperReparseStore
 from core.interfaces.project_store import ProjectStore
 
+PAPER_STAGING_DIRNAME = "paper_staging"
+
 
 class CleanupWorker:
     """常驻 asyncio.Task,定时清理过期项目。"""
@@ -40,6 +42,8 @@ class CleanupWorker:
 
         deleted = 0
         for project_id in expired:
+            if project_id == PAPER_STAGING_DIRNAME:
+                continue
             project_dir = self._upload_dir / project_id
             if project_dir.exists():
                 shutil.rmtree(project_dir, ignore_errors=True)
