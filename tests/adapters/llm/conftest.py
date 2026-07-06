@@ -15,13 +15,16 @@ def fake_chat_completion() -> Any:
         prompt_tokens: int = 12,
         completion_tokens: int = 5,
         model: str = "deepseek-v4-flash",
+        finish_reason: str | None = None,
+        include_finish_reason: bool = True,
     ) -> Any:
+        choice = SimpleNamespace(
+            message=SimpleNamespace(content=text),
+        )
+        if include_finish_reason:
+            choice.finish_reason = finish_reason
         return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=text),
-                ),
-            ],
+            choices=[choice],
             usage=SimpleNamespace(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,

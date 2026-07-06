@@ -34,6 +34,7 @@ class LLMResponse:
     completion_tokens: int
     model: str
     latency_ms: int
+    finish_reason: str | None = None
 
 
 class TextProvider(ABC):
