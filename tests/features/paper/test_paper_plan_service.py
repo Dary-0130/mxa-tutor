@@ -391,8 +391,10 @@ async def test_missing_detector_rejects_paper_reference_not_document_extracted()
     payloads["missing_detector"]["missing_prompts"][0]["paper_reference"] = _user_evidence_payload()
     service = PayloadPaperPlanService(payloads)
 
-    with pytest.raises(PaperPlanGenerationError):
+    with pytest.raises(PaperPlanGenerationError) as exc_info:
         await service._llm_missing_detect(_spec(), "PAPER-001", [_sentinel_mapping()])
+
+    assert exc_info.value.reason_code == "paper_reference_must_be_document_extracted"
 
 
 @pytest.mark.asyncio
@@ -401,8 +403,10 @@ async def test_missing_detector_rejects_figure_id_not_in_spec_whitelist() -> Non
     payloads["missing_detector"]["missing_prompts"][0]["paper_reference"]["source_ref"] = "REF-999"
     service = PayloadPaperPlanService(payloads)
 
-    with pytest.raises(PaperPlanGenerationError):
+    with pytest.raises(PaperPlanGenerationError) as exc_info:
         await service._llm_missing_detect(_spec(), "PAPER-001", [_sentinel_mapping()])
+
+    assert exc_info.value.reason_code == "schema_validation"
 
 
 @pytest.mark.asyncio
@@ -411,8 +415,10 @@ async def test_missing_detector_rejects_source_not_user_supplied() -> None:
     payloads["missing_detector"]["missing_prompts"][0]["source"] = "document_extracted"
     service = PayloadPaperPlanService(payloads)
 
-    with pytest.raises(PaperPlanGenerationError):
+    with pytest.raises(PaperPlanGenerationError) as exc_info:
         await service._llm_missing_detect(_spec(), "PAPER-001", [_sentinel_mapping()])
+
+    assert exc_info.value.reason_code == "schema_validation"
 
 
 @pytest.mark.asyncio
@@ -420,12 +426,14 @@ async def test_missing_detector_rejects_llm_prompt_id_output() -> None:
     payloads = _payloads()
     payloads["missing_detector"]["missing_prompts"][0]["prompt_id"] = "MISS-LLM"
 
-    with pytest.raises(PaperPlanGenerationError, match="validation_failed"):
+    with pytest.raises(PaperPlanGenerationError, match="validation_failed") as exc_info:
         await PayloadPaperPlanService(payloads)._llm_missing_detect(
             _spec(),
             "PAPER-001",
             [_sentinel_mapping()],
         )
+
+    assert exc_info.value.reason_code == "schema_validation"
 
 
 @pytest.mark.asyncio
@@ -440,18 +448,28 @@ async def test_missing_detector_rejects_parameter_name_mismatch() -> None:
         source=EvidenceSource.DOCUMENT_EXTRACTED,
     )
 
-    with pytest.raises(PaperPlanGenerationError, match="missing_prompt_parameter_mismatch"):
+    with pytest.raises(
+        PaperPlanGenerationError,
+        match="missing_prompt_parameter_mismatch",
+    ) as exc_info:
         await PayloadPaperPlanService(payloads)._llm_missing_detect(
             _spec(),
             "PAPER-001",
             [sentinel],
         )
 
+    assert exc_info.value.reason_code == "missing_prompt_parameter_mismatch"
+
 
 @pytest.mark.asyncio
 async def test_missing_detector_rejects_cardinality_mismatch() -> None:
-    with pytest.raises(PaperPlanGenerationError, match="missing_prompt_cardinality_mismatch"):
+    with pytest.raises(
+        PaperPlanGenerationError,
+        match="missing_prompt_cardinality_mismatch",
+    ) as exc_info:
         await PayloadPaperPlanService(_payloads())._llm_missing_detect(_spec(), "PAPER-001", [])
+
+    assert exc_info.value.reason_code == "missing_prompt_cardinality_mismatch"
 
 
 @pytest.mark.asyncio
@@ -467,10 +485,12 @@ async def test_plan_composer_rejects_duplicate_paper_param_name() -> None:
         }
     )
 
-    with pytest.raises(PaperPlanGenerationError, match="paper_param_name_duplicate"):
+    with pytest.raises(PaperPlanGenerationError, match="paper_param_name_duplicate") as exc_info:
         await PayloadPaperPlanService(payloads)._llm_plan_compose(
             _spec(), "PLAN-PAPER-001", "PAPER-001"
         )
+
+    assert exc_info.value.reason_code == "paper_param_name_duplicate"
 
 
 @pytest.mark.asyncio
@@ -511,10 +531,12 @@ async def test_plan_composer_value_must_be_string_not_none() -> None:
     payloads = _payloads()
     payloads["plan_composer"]["parameter_mapping"][0]["value"] = None
 
-    with pytest.raises(PaperPlanGenerationError, match="validation_failed"):
+    with pytest.raises(PaperPlanGenerationError, match="validation_failed") as exc_info:
         await PayloadPaperPlanService(payloads)._llm_plan_compose(
             _spec(), "PLAN-PAPER-001", "PAPER-001"
         )
+
+    assert exc_info.value.reason_code == "schema_validation"
 
 
 @pytest.mark.asyncio
@@ -782,8 +804,10 @@ async def test_evidence_tagger_locator_whitelist_fail_raises_502() -> None:
 async def test_invalid_json_raises_paper_plan_generation_error() -> None:
     service = PaperPlanService(QueueTextProvider(["not json", "still not json"]))
 
-    with pytest.raises(PaperPlanGenerationError, match="invalid_json"):
+    with pytest.raises(PaperPlanGenerationError, match="invalid_json") as exc_info:
         await service._call_llm_json([LLMMessage("system", "x")], "plan_composer")
+
+    assert exc_info.value.reason_code == "invalid_json"
 
 
 @pytest.mark.asyncio
@@ -818,10 +842,12 @@ async def test_pydantic_validation_error_raises_paper_plan_generation_error() ->
     payloads = _payloads()
     del payloads["plan_composer"]["library_choice"]
 
-    with pytest.raises(PaperPlanGenerationError, match="validation_failed"):
+    with pytest.raises(PaperPlanGenerationError, match="validation_failed") as exc_info:
         await PayloadPaperPlanService(payloads)._llm_plan_compose(
             _spec(), "PLAN-PAPER-001", "PAPER-001"
         )
+
+    assert exc_info.value.reason_code == "schema_validation"
 
 
 @pytest.mark.asyncio

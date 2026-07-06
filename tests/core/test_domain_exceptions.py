@@ -79,6 +79,16 @@ def test_top_level_business_errors_inherit_from_mxa_error() -> None:
     assert isinstance(PaperUserSupplyError("x"), MxaError)
 
 
+def test_paper_generation_errors_carry_optional_reason_code() -> None:
+    assert PaperSpecGenerationError("x").reason_code is None
+    assert PaperPlanGenerationError("x").reason_code is None
+    assert PaperSpecGenerationError("x", reason_code="invalid_json").reason_code == "invalid_json"
+    assert (
+        PaperPlanGenerationError("x", reason_code="schema_validation").reason_code
+        == "schema_validation"
+    )
+
+
 def test_vector_store_error_inherits_from_store_error() -> None:
     error = VectorStoreError("x")
     assert isinstance(error, StoreError)

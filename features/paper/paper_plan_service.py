@@ -96,7 +96,10 @@ class PaperPlanService:
         try:
             validate_parameter_conflicts_materialized(spec)
         except ValueError:
-            raise PaperPlanGenerationError("parameter_conflicts_mismatch") from None
+            raise PaperPlanGenerationError(
+                "parameter_conflicts_mismatch",
+                reason_code="parameter_conflicts_mismatch",
+            ) from None
 
         plan_composer_output, mscript = await asyncio.gather(
             self._llm_plan_compose(spec, plan_id, paper_spec_id),
@@ -181,26 +184,37 @@ class PaperPlanService:
             except json.JSONDecodeError as exc:
                 last_json_error = exc
                 logger.error(
-                    "paper_plan_json_decode_failed role=%s attempt=%s exc_type=%s",
+                    "paper_plan_json_decode_failed role=%s attempt=%s reason_code=%s "
+                    "exc_type=%s finish_reason=%s",
                     role_name,
                     attempt,
+                    "invalid_json",
                     type(exc).__name__,
+                    response.finish_reason,
                 )
         else:
             assert last_json_error is not None
             logger.error(
-                "paper_plan_json_decode_exhausted role=%s exc_type=%s",
+                "paper_plan_json_decode_exhausted role=%s reason_code=%s exc_type=%s",
                 role_name,
+                "invalid_json",
                 type(last_json_error).__name__,
             )
             if role_name in BUILD_STEP_ROLE_NAMES:
                 raise BuildStepsJsonParseError("json_parse_failed") from None
-            raise PaperPlanGenerationError(f"role={role_name}: invalid_json") from None
+            raise PaperPlanGenerationError(
+                f"role={role_name}: invalid_json",
+                reason_code="invalid_json",
+            ) from None
 
         if not isinstance(payload, dict):
             if role_name in BUILD_STEP_ROLE_NAMES:
                 raise BuildStepsDtoValidationError("json_top_level_must_be_object")
-            self._raise_generation_error(role_name, "json_top_level_must_be_object")
+            self._raise_generation_error(
+                role_name,
+                "json_top_level_must_be_object",
+                reason_code="schema_validation",
+            )
         return payload
 
     async def _llm_missing_detect(
@@ -433,15 +447,33 @@ class PaperPlanService:
 
     def _raise_validation_error(self, role_name: str, exc: ValidationError) -> NoReturn:
         logger.error(
-            "paper_plan_validation_failed role=%s exc_type=%s",
+            "paper_plan_validation_failed role=%s reason_code=%s exc_type=%s",
             role_name,
+            "schema_validation",
             type(exc).__name__,
         )
-        raise PaperPlanGenerationError(f"role={role_name}: validation_failed") from None
+        raise PaperPlanGenerationError(
+            f"role={role_name}: validation_failed",
+            reason_code="schema_validation",
+        ) from None
 
-    def _raise_generation_error(self, role_name: str, reason: str) -> NoReturn:
-        logger.error("paper_plan_generation_failed role=%s reason=%s", role_name, reason)
-        raise PaperPlanGenerationError(f"role={role_name}: {reason}") from None
+    def _raise_generation_error(
+        self,
+        role_name: str,
+        reason: str,
+        *,
+        reason_code: str | None = None,
+    ) -> NoReturn:
+        effective_reason_code = reason_code or reason
+        logger.error(
+            "paper_plan_generation_failed role=%s reason_code=%s",
+            role_name,
+            effective_reason_code,
+        )
+        raise PaperPlanGenerationError(
+            f"role={role_name}: {reason}",
+            reason_code=effective_reason_code,
+        ) from None
 
     def _sentinel_mappings(self, mappings: list[ParameterMapping]) -> list[ParameterMapping]:
         return [mapping for mapping in mappings if mapping.value == MISSING_VALUE_SENTINEL]

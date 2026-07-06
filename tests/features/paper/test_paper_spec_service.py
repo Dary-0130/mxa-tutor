@@ -131,16 +131,20 @@ async def test_extract_uses_to_thread_for_route_sandbox_and_llm(
 def test_invalid_json_raises_generation_error() -> None:
     service = _service(FakeTextProvider())
 
-    with pytest.raises(PaperSpecGenerationError):
+    with pytest.raises(PaperSpecGenerationError) as exc_info:
         service._parse_and_validate(_response_text("{"), _parsed_document())
+
+    assert exc_info.value.reason_code == "invalid_json"
 
 
 def test_schema_error_raises_generation_error() -> None:
     payload = _valid_payload()
     payload["domain"] = "general"
 
-    with pytest.raises(PaperSpecGenerationError):
+    with pytest.raises(PaperSpecGenerationError) as exc_info:
         _service(FakeTextProvider())._parse_and_validate(_response(payload), _parsed_document())
+
+    assert exc_info.value.reason_code == "schema_validation"
 
 
 def test_parse_and_validate_enriches_single_document_identity_and_filename() -> None:
@@ -163,8 +167,10 @@ def test_service_rejects_figure_when_parser_found_none() -> None:
         {"figure_id": "FIG-01", "caption": "model", "paper_section_id": "S1"}
     ]
 
-    with pytest.raises(PaperSpecGenerationError):
+    with pytest.raises(PaperSpecGenerationError) as exc_info:
         _service(FakeTextProvider())._parse_and_validate(_response(payload), _parsed_document())
+
+    assert exc_info.value.reason_code == "figure_hallucination"
 
 
 def test_service_rejects_figure_id_outside_whitelist() -> None:
@@ -174,16 +180,20 @@ def test_service_rejects_figure_id_outside_whitelist() -> None:
     ]
     parsed = _parsed_document(figures=[FigurePlaceholder("FIG-01", "model", "S1")])
 
-    with pytest.raises(PaperSpecGenerationError):
+    with pytest.raises(PaperSpecGenerationError) as exc_info:
         _service(FakeTextProvider())._parse_and_validate(_response(payload), parsed)
+
+    assert exc_info.value.reason_code == "figure_hallucination"
 
 
 def test_service_rejects_evidence_locator_outside_whitelist() -> None:
     payload = _valid_payload()
     payload["evidence"][0]["paper_section_id"] = "S9"
 
-    with pytest.raises(PaperSpecGenerationError):
+    with pytest.raises(PaperSpecGenerationError) as exc_info:
         _service(FakeTextProvider())._parse_and_validate(_response(payload), _parsed_document())
+
+    assert exc_info.value.reason_code == "paper_section_locator_invalid"
 
 
 def test_service_rejects_equation_id_outside_whitelist() -> None:

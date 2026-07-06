@@ -41,6 +41,7 @@ def test_chat_normal_path_returns_llm_response(
         prompt_tokens=10,
         completion_tokens=3,
         model="deepseek-v4-flash",
+        finish_reason="stop",
     )
 
     response = _provider().chat([LLMMessage(role="user", content="hi")])
@@ -50,6 +51,20 @@ def test_chat_normal_path_returns_llm_response(
     assert response.completion_tokens == 3
     assert response.model == "deepseek-v4-flash"
     assert response.latency_ms >= 0
+    assert response.finish_reason == "stop"
+
+
+def test_chat_finish_reason_missing_returns_none(
+    mock_openai_client: tuple[Any, Any],
+    fake_chat_completion: Any,
+) -> None:
+    """Missing provider finish_reason stays unknown instead of being guessed."""
+    _, mock_create = mock_openai_client
+    mock_create.return_value = fake_chat_completion(include_finish_reason=False)
+
+    response = _provider().chat([LLMMessage(role="user", content="hi")])
+
+    assert response.finish_reason is None
 
 
 def test_chat_passes_messages_role_content(
@@ -260,3 +275,4 @@ def test_no_message_content_logged(
     assert "secret prompt" not in joined
     assert "secret response" not in joined
     assert "tokens_in=" in joined
+    assert "finish_reason=" in joined

@@ -93,9 +93,17 @@ class OverviewGenerationError(MxaError):
 class PaperSpecGenerationError(MxaError):
     """PaperSpec 生成失败。"""
 
+    def __init__(self, message: str = "", *, reason_code: str | None = None) -> None:
+        self.reason_code = reason_code
+        super().__init__(message)
+
 
 class PaperPlanGenerationError(MxaError):
     """Paper plan 生成失败。"""
+
+    def __init__(self, message: str = "", *, reason_code: str | None = None) -> None:
+        self.reason_code = reason_code
+        super().__init__(message)
 
 
 class PaperNotFoundError(MxaError):

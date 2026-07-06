@@ -166,13 +166,13 @@ class EvidenceTagger:
                 continue
             ref = _user_evidence_ref(entry)
             if ref is None:
-                raise PaperPlanGenerationError("user_evidence_unresolved")
+                _raise_plan_generation_error("user_evidence_unresolved")
             if ref not in resolved_refs:
                 if ref.kind is UserEvidenceAction.CORRECT_EXTRACTED:
-                    raise PaperPlanGenerationError("user_evidence_unresolved_correction")
-                raise PaperPlanGenerationError("user_evidence_unresolved_prompt")
+                    _raise_plan_generation_error("user_evidence_unresolved_correction")
+                _raise_plan_generation_error("user_evidence_unresolved_prompt")
             if ref not in plan_user_evidence_refs:
-                raise PaperPlanGenerationError("user_evidence_missing_from_plan")
+                _raise_plan_generation_error("user_evidence_missing_from_plan")
 
     def tag_user_supplied(
         self,
@@ -201,47 +201,47 @@ class EvidenceTagger:
     ) -> None:
         if entry.source is EvidenceSource.DOCUMENT_EXTRACTED:
             if entry.document_id not in allowed_document_ids:
-                raise PaperPlanGenerationError("document_evidence_document_id_invalid")
+                _raise_plan_generation_error("document_evidence_document_id_invalid")
             if not any((entry.paper_section_id, entry.equation_id, entry.figure_id)):
-                raise PaperPlanGenerationError("document_evidence_missing_locator")
+                _raise_plan_generation_error("document_evidence_missing_locator")
             if not entry.excerpt or len(entry.excerpt) > 300:
-                raise PaperPlanGenerationError("document_evidence_invalid_excerpt")
+                _raise_plan_generation_error("document_evidence_invalid_excerpt")
             if entry.missing_param_prompt_id is not None:
-                raise PaperPlanGenerationError("document_evidence_has_missing_prompt")
+                _raise_plan_generation_error("document_evidence_has_missing_prompt")
             if entry.user_action is not None:
-                raise PaperPlanGenerationError("document_evidence_has_user_action")
+                _raise_plan_generation_error("document_evidence_has_user_action")
             if entry.parameter_correction_id is not None:
-                raise PaperPlanGenerationError("document_evidence_has_correction_id")
+                _raise_plan_generation_error("document_evidence_has_correction_id")
             if entry.correction_param_key is not None:
-                raise PaperPlanGenerationError("document_evidence_has_correction_field")
+                _raise_plan_generation_error("document_evidence_has_correction_field")
             return
 
         if entry.source is EvidenceSource.USER_SUPPLIED:
             if entry.document_id is not None:
-                raise PaperPlanGenerationError("user_evidence_document_id_not_null")
+                _raise_plan_generation_error("user_evidence_document_id_not_null")
             if any((entry.paper_section_id, entry.equation_id, entry.figure_id)):
-                raise PaperPlanGenerationError("user_evidence_has_locator")
+                _raise_plan_generation_error("user_evidence_has_locator")
             if entry.excerpt is not None:
-                raise PaperPlanGenerationError("user_evidence_has_excerpt")
+                _raise_plan_generation_error("user_evidence_has_excerpt")
             if entry.user_action is None:
-                raise PaperPlanGenerationError("user_evidence_missing_action")
+                _raise_plan_generation_error("user_evidence_missing_action")
             if entry.user_action is UserEvidenceAction.FILL_MISSING:
                 if entry.missing_param_prompt_id is None:
-                    raise PaperPlanGenerationError("user_evidence_missing_prompt_id")
+                    _raise_plan_generation_error("user_evidence_missing_prompt_id")
                 if entry.parameter_correction_id is not None:
-                    raise PaperPlanGenerationError("user_evidence_has_correction_id")
+                    _raise_plan_generation_error("user_evidence_has_correction_id")
                 if entry.correction_param_key is not None:
-                    raise PaperPlanGenerationError("user_evidence_has_correction_field")
+                    _raise_plan_generation_error("user_evidence_has_correction_field")
                 return
             if entry.user_action is UserEvidenceAction.CORRECT_EXTRACTED:
                 if entry.missing_param_prompt_id is not None:
-                    raise PaperPlanGenerationError("user_evidence_has_missing_prompt_id")
+                    _raise_plan_generation_error("user_evidence_has_missing_prompt_id")
                 if entry.parameter_correction_id is None:
-                    raise PaperPlanGenerationError("user_evidence_missing_correction_id")
+                    _raise_plan_generation_error("user_evidence_missing_correction_id")
                 return
             return
 
-        raise PaperPlanGenerationError("unknown_evidence_source")
+        _raise_plan_generation_error("unknown_evidence_source")
 
     def _validate_locator_whitelist(
         self,
@@ -258,17 +258,17 @@ class EvidenceTagger:
             entry.paper_section_id is not None
             and (entry.document_id, entry.paper_section_id) not in allowed_sections
         ):
-            raise PaperPlanGenerationError("paper_section_id_outside_whitelist")
+            _raise_plan_generation_error("paper_section_id_outside_whitelist")
         if (
             entry.equation_id is not None
             and (entry.document_id, entry.equation_id) not in allowed_equations
         ):
-            raise PaperPlanGenerationError("equation_id_outside_whitelist")
+            _raise_plan_generation_error("equation_id_outside_whitelist")
         if (
             entry.figure_id is not None
             and (entry.document_id, entry.figure_id) not in allowed_figures
         ):
-            raise PaperPlanGenerationError("figure_id_outside_whitelist")
+            _raise_plan_generation_error("figure_id_outside_whitelist")
 
 
 def build_plan_evidence_source_refs(spec: PaperSpec) -> list[PlanEvidenceSourceRef]:
@@ -794,9 +794,9 @@ class PlanAssembler:
             and mapping.paper_param_name == missing_prompt.parameter_name
         ]
         if not matches:
-            raise PaperPlanGenerationError("missing_binding_not_found")
+            _raise_plan_generation_error("missing_binding_not_found")
         if len(matches) > 1:
-            raise PaperPlanGenerationError("missing_binding_ambiguous")
+            _raise_plan_generation_error("missing_binding_ambiguous")
 
         mapping = matches[0]
         return MissingBindingModel(
@@ -936,7 +936,7 @@ def validate_build_step_evidence_for_spec(
     try:
         EvidenceTagger().validate_for_spec(evidence, spec)
     except PaperPlanGenerationError as exc:
-        reason = str(exc) or "evidence_invalid"
+        reason = exc.reason_code or "evidence_invalid"
         raise BuildStepsEvidenceError(reason) from None
 
     allowed_refs = allowed_user_evidence_refs or set()
@@ -1093,6 +1093,10 @@ def _label_starts(text: str, label: str) -> list[int]:
         starts.append(start)
         start = text.find(label, start + 1)
     return starts
+
+
+def _raise_plan_generation_error(reason_code: str) -> NoReturn:
+    raise PaperPlanGenerationError(reason_code, reason_code=reason_code)
 
 
 def _raise_semantic(reason_code: str) -> NoReturn:

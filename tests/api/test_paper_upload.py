@@ -689,6 +689,7 @@ def test_upload_plan_failure_keeps_spec_and_status_allows_rerun(
 
     assert upload_response.status_code == 502
     assert upload_response.json()["error"] == "paper_plan_generation_failed"
+    assert "reason_code" not in upload_response.json()
     assert "paper_id" in upload_response.json()
     assert paper_id in bundle_store.specs
     assert paper_id not in bundle_store.records
@@ -696,6 +697,8 @@ def test_upload_plan_failure_keeps_spec_and_status_allows_rerun(
     assert status_response.status_code == 200
     assert status_body["job_state"] == "plan_failed_retryable"
     assert status_body["failed_stage"] == "generating_plan"
+    assert "reason_code" not in status_body
+    assert status_body["error_code"] == "paper_plan_generation_failed"
     assert status_body["next_action"] == "rerun_plan"
     assert status_body["documents"] == [
         {"document_id": "DOC-001", "status": "succeeded", "error_code": None}

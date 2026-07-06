@@ -128,12 +128,29 @@ class PaperSpecService:
         try:
             payload = json.loads(response.text)
         except json.JSONDecodeError as exc:
-            logger.error("PaperSpec JSON parse failed: error_type={}", type(exc).__name__)
-            raise PaperSpecGenerationError(_GENERATION_ERROR_MESSAGE) from None
+            logger.error(
+                "PaperSpec JSON parse failed: reason_code={} error_type={} finish_reason={}",
+                "invalid_json",
+                type(exc).__name__,
+                response.finish_reason,
+            )
+            raise PaperSpecGenerationError(
+                _GENERATION_ERROR_MESSAGE,
+                reason_code="invalid_json",
+            ) from None
 
         if not isinstance(payload, dict):
-            logger.error("PaperSpec schema validation failed: error_type=payload_not_mapping")
-            raise PaperSpecGenerationError(_GENERATION_ERROR_MESSAGE) from None
+            logger.error(
+                "PaperSpec schema validation failed: reason_code={} error_type={} "
+                "finish_reason={}",
+                "schema_validation",
+                "payload_not_mapping",
+                response.finish_reason,
+            )
+            raise PaperSpecGenerationError(
+                _GENERATION_ERROR_MESSAGE,
+                reason_code="schema_validation",
+            ) from None
 
         payload = enrich_single_document_spec_payload(
             payload,
@@ -143,16 +160,35 @@ class PaperSpecService:
         try:
             spec = PaperSpecModel.model_validate(payload).to_domain()
         except ValidationError as exc:
-            logger.error("PaperSpec schema validation failed: error_type={}", type(exc).__name__)
-            raise PaperSpecGenerationError(_GENERATION_ERROR_MESSAGE) from None
+            logger.error(
+                "PaperSpec schema validation failed: reason_code={} error_type={} "
+                "finish_reason={}",
+                "schema_validation",
+                type(exc).__name__,
+                response.finish_reason,
+            )
+            raise PaperSpecGenerationError(
+                _GENERATION_ERROR_MESSAGE,
+                reason_code="schema_validation",
+            ) from None
 
         try:
             _validate_figure_references(spec, parsed)
             _validate_locator_whitelist(spec, parsed)
             _validate_task501_sources(spec)
-        except PaperSpecGenerationError:
-            logger.error("PaperSpec post validation failed: error_type=post_validation")
-            raise PaperSpecGenerationError(_GENERATION_ERROR_MESSAGE) from None
+        except PaperSpecGenerationError as exc:
+            reason_code = exc.reason_code or "post_validation"
+            logger.error(
+                "PaperSpec post validation failed: reason_code={} error_type={} "
+                "finish_reason={}",
+                reason_code,
+                "post_validation",
+                response.finish_reason,
+            )
+            raise PaperSpecGenerationError(
+                _GENERATION_ERROR_MESSAGE,
+                reason_code=reason_code,
+            ) from None
 
         return with_parameter_conflicts(spec)
 
@@ -160,9 +196,9 @@ class PaperSpecService:
 def _validate_figure_references(spec: PaperSpec, parsed: ParsedDocument) -> None:
     allowed_figures = {figure.figure_id for figure in parsed.figure_placeholders}
     if not allowed_figures and spec.figure_locations:
-        raise PaperSpecGenerationError("figure_hallucination")
+        raise PaperSpecGenerationError("figure_hallucination", reason_code="figure_hallucination")
     if any(figure.figure_id not in allowed_figures for figure in spec.figure_locations):
-        raise PaperSpecGenerationError("figure_hallucination")
+        raise PaperSpecGenerationError("figure_hallucination", reason_code="figure_hallucination")
 
 
 def _validate_locator_whitelist(spec: PaperSpec, parsed: ParsedDocument) -> None:
@@ -173,22 +209,40 @@ def _validate_locator_whitelist(spec: PaperSpec, parsed: ParsedDocument) -> None
 
     for evidence in spec.evidence:
         if not _locator_allowed(evidence.paper_section_id, section_ids):
-            raise PaperSpecGenerationError("paper_section_locator_invalid")
+            raise PaperSpecGenerationError(
+                "paper_section_locator_invalid",
+                reason_code="paper_section_locator_invalid",
+            )
         if not _locator_allowed(evidence.equation_id, equation_ids):
-            raise PaperSpecGenerationError("equation_locator_invalid")
+            raise PaperSpecGenerationError(
+                "equation_locator_invalid",
+                reason_code="equation_locator_invalid",
+            )
         if not _locator_allowed(evidence.figure_id, figure_ids):
-            raise PaperSpecGenerationError("figure_locator_invalid")
+            raise PaperSpecGenerationError(
+                "figure_locator_invalid",
+                reason_code="figure_locator_invalid",
+            )
 
     for equation in spec.equations:
         if equation.equation_id in equation_seen or equation.equation_id not in equation_ids:
-            raise PaperSpecGenerationError("equation_locator_invalid")
+            raise PaperSpecGenerationError(
+                "equation_locator_invalid",
+                reason_code="equation_locator_invalid",
+            )
         equation_seen.add(equation.equation_id)
         if equation.paper_section_id not in section_ids:
-            raise PaperSpecGenerationError("paper_section_locator_invalid")
+            raise PaperSpecGenerationError(
+                "paper_section_locator_invalid",
+                reason_code="paper_section_locator_invalid",
+            )
 
     for figure in spec.figure_locations:
         if figure.figure_id not in figure_ids or figure.paper_section_id not in section_ids:
-            raise PaperSpecGenerationError("figure_locator_invalid")
+            raise PaperSpecGenerationError(
+                "figure_locator_invalid",
+                reason_code="figure_locator_invalid",
+            )
 
 
 def _validate_task501_sources(spec: PaperSpec) -> None:
@@ -196,9 +250,13 @@ def _validate_task501_sources(spec: PaperSpec) -> None:
         parameter.source is not EvidenceSource.DOCUMENT_EXTRACTED
         for parameter in spec.parameter_table
     ):
-        raise PaperSpecGenerationError("parameter_source_invalid")
+        raise PaperSpecGenerationError(
+            "parameter_source_invalid", reason_code="parameter_source_invalid"
+        )
     if any(evidence.source is not EvidenceSource.DOCUMENT_EXTRACTED for evidence in spec.evidence):
-        raise PaperSpecGenerationError("evidence_source_invalid")
+        raise PaperSpecGenerationError(
+            "evidence_source_invalid", reason_code="evidence_source_invalid"
+        )
 
 
 def _locator_allowed(value: str | None, allowed: set[str]) -> bool:
