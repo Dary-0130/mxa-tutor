@@ -81,7 +81,11 @@ PLAN_COMPOSER_ROLE_NAME = "plan_composer"
 MISSING_DETECTOR_ROLE_NAME = "missing_detector"
 BUILD_STEP_ROLE_NAME = "build_step_planner"
 BUILD_STEP_REGENERATION_ROLE_NAME = "build_step_regenerator"
+SUBSYSTEM_PLANNER_ROLE_NAME = "subsystem_planner"
 BUILD_STEP_ROLE_NAMES = frozenset({BUILD_STEP_ROLE_NAME, BUILD_STEP_REGENERATION_ROLE_NAME})
+BUILD_STEP_DEGRADATION_ROLE_NAMES = frozenset(
+    {BUILD_STEP_ROLE_NAME, BUILD_STEP_REGENERATION_ROLE_NAME, SUBSYSTEM_PLANNER_ROLE_NAME}
+)
 PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS = 2
 RETRYABLE_PLAN_LEAF_NAMES = frozenset({PLAN_COMPOSER_ROLE_NAME, MISSING_DETECTOR_ROLE_NAME})
 EQUATION_REASON_CODES = frozenset({"equation_locator_invalid", "equation_id_outside_whitelist"})
@@ -269,15 +273,17 @@ class PaperPlanService:
         last_json_error: json.JSONDecodeError | None = None
         payload: Any = None
         messages = append_retry_hint(messages, role_name)
+        enforce_retry_caps = role_name not in BUILD_STEP_DEGRADATION_ROLE_NAMES
         for attempt in range(1, 3):
-            try:
-                before_llm_call(component="plan", leaf=role_name)
-            except StructuredRetryLimitExceeded as exc:
-                raise PaperPlanGenerationError(
-                    f"role={role_name}: {exc.reason_code}",
-                    reason_code=exc.reason_code,
-                    leaf=role_name,
-                ) from None
+            if enforce_retry_caps:
+                try:
+                    before_llm_call(component="plan", leaf=role_name)
+                except StructuredRetryLimitExceeded as exc:
+                    raise PaperPlanGenerationError(
+                        f"role={role_name}: {exc.reason_code}",
+                        reason_code=exc.reason_code,
+                        leaf=role_name,
+                    ) from None
             response = await asyncio.to_thread(
                 self._text_provider.chat,
                 messages,
@@ -286,17 +292,18 @@ class PaperPlanService:
                 max_tokens=self._max_tokens,
             )
             set_current_finish_reason(response.finish_reason)
-            try:
-                current_context = current_retry_context()
-                if current_context is not None:
-                    current_context.check_wall_clock()
-            except StructuredRetryLimitExceeded as exc:
-                raise PaperPlanGenerationError(
-                    f"role={role_name}: {exc.reason_code}",
-                    reason_code=exc.reason_code,
-                    finish_reason=response.finish_reason,
-                    leaf=role_name,
-                ) from None
+            if enforce_retry_caps:
+                try:
+                    current_context = current_retry_context()
+                    if current_context is not None:
+                        current_context.check_wall_clock()
+                except StructuredRetryLimitExceeded as exc:
+                    raise PaperPlanGenerationError(
+                        f"role={role_name}: {exc.reason_code}",
+                        reason_code=exc.reason_code,
+                        finish_reason=response.finish_reason,
+                        leaf=role_name,
+                    ) from None
             response_text = vars(response)["text"]
             try:
                 payload = json.loads(response_text)
@@ -436,7 +443,7 @@ class PaperPlanService:
         block_recommendations: list[BlockRecommendation],
         evidence: list[PaperEvidenceEntry],
     ) -> list[str]:
-        role_name = "subsystem_planner"
+        role_name = SUBSYSTEM_PLANNER_ROLE_NAME
         data = await self._call_llm_json(
             build_messages_for_subsystem_plan(block_recommendations, evidence),
             role_name,

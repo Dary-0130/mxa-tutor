@@ -963,6 +963,62 @@ async def test_call_llm_json_counts_decode_retry_against_job_cap() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_steps_cap_boundary_still_falls_back_to_legacy() -> None:
+    class BuildStepsCapBoundaryService(PaperPlanService):
+        async def _llm_plan_compose(
+            self,
+            spec: PaperSpec,
+            plan_id: str,
+            paper_spec_id: str,
+        ) -> ModelGenerationPlan:
+            _ = spec, plan_id, paper_spec_id
+            return _plan_domain(missing=False)
+
+        async def _llm_mscript_draft(self, spec: PaperSpec) -> str | None:
+            _ = spec
+            return None
+
+        async def _llm_missing_detect(
+            self,
+            spec: PaperSpec,
+            paper_id: str,
+            sentinel_mappings: list[ParameterMapping],
+        ) -> list[MissingParameterPrompt]:
+            _ = spec, paper_id, sentinel_mappings
+            return []
+
+    provider = QueueTextProvider(
+        [
+            json.dumps({"build_steps": []}),
+            json.dumps(
+                {
+                    "subsystem_breakdown": [
+                        "第 1 步:放置电机",
+                        "第 2 步:接入故障",
+                        "第 3 步:观察电流",
+                    ]
+                }
+            ),
+        ]
+    )
+    service = BuildStepsCapBoundaryService(provider)
+    context = StructuredRetryContext(warning_call_count=1, hard_call_count=1)
+    context.call_count = 1
+
+    plan, missing_prompts, _ = await service.generate(
+        _spec(),
+        "PAPER-001",
+        retry_context=context,
+    )
+
+    assert plan.build_steps is None
+    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+    assert missing_prompts == []
+    assert len(provider.calls) == 2
+    assert context.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_pydantic_validation_error_raises_paper_plan_generation_error() -> None:
     payloads = _payloads()
     del payloads["plan_composer"]["library_choice"]
