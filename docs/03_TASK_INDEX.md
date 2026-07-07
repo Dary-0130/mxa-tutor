@@ -350,9 +350,9 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 21/22 (paper-to-model TASK-500~508 + TASK-520(🔍 追问子线) + TASK-521(🔍 多文件子线) + TASK-522(🔍 解析纠错子线);MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 22/23 (paper-to-model TASK-500~508 + TASK-520(🔍 追问子线) + TASK-521(🔍 多文件子线) + TASK-522(🔍 解析纠错子线) + TASK-526(✅ LLM 结构化输出稳定性收尾);MATLAB bridge/engine TASK-510~519)
 
-总计: 52/55
+总计: 53/56
 ```
 
 ---
@@ -393,7 +393,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-524 | Build steps 红线 parameter_value_leak 误报修复 | ✅ | Codex | paper-to-model 线修复卡;普通红线退扫 display_text + context-aware b-unit/b-number + config target/setting_name 窄 profile;冲突守门零改动;真机中文 E2E 通过;不占完工计数,进度维持 21/22 · 52/55 |
 | TASK-525-A | 论文上传作业化后端状态基座 | ✅ | Codex | 已合并;上传 job 状态基座 + spec 提前落盘 + rerun-plan 恢复;同一篇身份/C 覆盖顺延 TASK-527 |
 | TASK-525-B | 论文上传作业化:异步执行 + 文件生命周期收口 + 僵尸恢复 | ✅ | Codex | 已合并;异步上传 + 文件生命周期收口 + 僵尸三段恢复 + rerun CAS 扩源;两 PR:B1 #176 / B2 #177 |
-| TASK-526 | LLM 结构化输出稳定性 | 🔍 | Codex | 阶段一诊断 + 526-A 可观测打底(reason_code / finish_reason)已合并(PR #179);526-B 重试主体待起 |
+| TASK-526 | LLM 结构化输出稳定性 | ✅ | Codex | 阶段一诊断 + 526-A 可观测打底(reason_code / finish_reason) + 526-B 结构化重试主体均已完成;526 线收尾;526-A PR #179,526-B PR #181 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
