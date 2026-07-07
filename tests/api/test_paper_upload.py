@@ -52,6 +52,10 @@ from core.interfaces.paper_cache import PaperBundleStore
 from core.interfaces.paper_reparse_store import PaperReparseStore
 from core.interfaces.paper_upload_job_store import PaperUploadJobStore
 from features.paper.paper_plan_helpers import MISSING_VALUE_SENTINEL, MissingBindingModel
+from features.paper.structured_retry import (
+    REASON_WALL_CLOCK_CAP_EXCEEDED,
+    StructuredRetryContext,
+)
 
 
 class FakePaperSpecService:
@@ -81,8 +85,9 @@ class FakePaperSpecService:
         paper_id: str,
         display_filename: str | None = None,
         document_id: str = "DOC-001",
+        retry_context: object | None = None,
     ) -> PaperSpec:
-        _ = parsed
+        _ = parsed, retry_context
         uuid.UUID(paper_id)
         self.display_filenames.append(display_filename)
         self.document_ids.append(document_id)
@@ -116,7 +121,9 @@ class FakePaperPlanService:
         self,
         spec: PaperSpec,
         paper_id: str,
+        retry_context: object | None = None,
     ) -> tuple[ModelGenerationPlan, list[MissingParameterPrompt], list[MissingBindingModel]]:
+        _ = retry_context
         uuid.UUID(paper_id)
         self.calls.append((spec, paper_id))
         if self.error is not None:
@@ -929,6 +936,55 @@ def test_initial_plan_generation_uses_same_lock_as_rerun(
     assert bundle_store.jobs[paper_id].job_state == "plan_failed_retryable"
 
 
+def test_plan_wall_clock_cap_marks_retryable_releases_lock_and_keeps_no_partial_bundle(
+    tmp_path: Path,
+) -> None:
+    bundle_store = FakePaperBundleStore()
+    paper_id = str(uuid.uuid4())
+    job_id = "PUJ-wall-clock"
+    spec = _paper_spec("paper.pdf")
+    bundle_store.specs[paper_id] = spec
+    bundle_store.jobs[paper_id] = _job_record(
+        paper_id=paper_id,
+        job_id=job_id,
+        job_state="spec_ready",
+        stage="persisting_spec",
+        retryable=True,
+    )
+    plan_service = FakePaperPlanService(
+        PaperPlanGenerationError(
+            "cap",
+            reason_code=REASON_WALL_CLOCK_CAP_EXCEEDED,
+            leaf="plan_composer",
+        )
+    )
+    registry = paper_upload_module.PaperReparseLockRegistry()
+
+    async def run_case():
+        result = await paper_upload_module._run_initial_plan_generation(
+            paper_id=paper_id,
+            job_id=job_id,
+            spec=spec,
+            plan_service=plan_service,
+            bundle_store=bundle_store,
+            reparse_store=bundle_store,
+            job_store=bundle_store,
+            lock_registry=registry,
+            source=None,
+            retry_context=StructuredRetryContext(wall_clock_seconds=0.01),
+        )
+        async with await registry.acquire(paper_id):
+            return result
+
+    result = asyncio.run(run_case())
+
+    assert isinstance(result, paper_upload_module._UploadFailure)
+    assert result.error_code == "paper_plan_generation_failed"
+    assert bundle_store.jobs[paper_id].job_state == "plan_failed_retryable"
+    assert bundle_store.jobs[paper_id].failed_stage == "generating_plan"
+    assert paper_id not in bundle_store.records
+
+
 def test_rerun_plan_rejects_ready_state_with_cas_conflict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1096,7 +1152,13 @@ def test_upload_removes_staging_before_plan_generation(
     service = FakePaperSpecService()
 
     class StagingAwarePlanService(FakePaperPlanService):
-        async def generate(self, spec: PaperSpec, paper_id: str):
+        async def generate(
+            self,
+            spec: PaperSpec,
+            paper_id: str,
+            retry_context: object | None = None,
+        ):
+            _ = retry_context
             assert service.paths
             assert not service.paths[0].parent.exists()
             return await super().generate(spec, paper_id)

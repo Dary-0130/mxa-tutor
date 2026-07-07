@@ -65,6 +65,11 @@ class AppSettings(BaseSettings):
     upload_dir: str = "./data/uploads"
     upload_ttl_hours: int = 24
 
+    # Paper structured-output retry(TASK-526-B)
+    paper_structured_retry_warning_call_count: int = Field(default=10, ge=1, le=50)
+    paper_structured_retry_hard_call_count: int = Field(default=12, ge=1, le=50)
+    paper_structured_retry_wall_clock_seconds: float = Field(default=600.0, gt=0, le=3600)
+
     # Quota
     free_question_per_project: int = 3
     single_pack_quota: int = 100
@@ -119,6 +124,14 @@ class AppSettings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_matlab_bridge_guards(self) -> Self:
+        if (
+            self.paper_structured_retry_warning_call_count
+            > self.paper_structured_retry_hard_call_count
+        ):
+            raise ValueError(
+                "paper_structured_retry_warning_call_count must not exceed "
+                "paper_structured_retry_hard_call_count"
+            )
         if self.matlab_bridge_dev_auth_enabled and not self.matlab_bridge_enabled:
             raise ValueError("matlab_bridge_dev_auth_enabled requires MATLAB_BRIDGE_ENABLED=true")
         if self.matlab_bridge_enabled:

@@ -6,7 +6,8 @@ import asyncio
 import json
 import logging
 from collections import Counter
-from typing import Annotated, Any, Literal, NoReturn
+from collections.abc import Awaitable
+from typing import Annotated, Any, Literal, NoReturn, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
@@ -59,14 +60,33 @@ from features.paper.paper_schemas import (
     ParameterMappingRefModel,
     StepBlockRefModel,
 )
+from features.paper.structured_retry import (
+    REASON_CALL_CAP_EXCEEDED,
+    REASON_WALL_CLOCK_CAP_EXCEEDED,
+    StructuredRetryContext,
+    StructuredRetryLimitExceeded,
+    append_retry_hint,
+    before_llm_call,
+    bind_retry_context,
+    current_finish_reason,
+    current_retry_context,
+    set_current_finish_reason,
+)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS = 120.0
 DEFAULT_PAPER_PLAN_MAX_TOKENS = 8000  # R6 真启动调参,对齐 DeepSeek V3 8192 上限
+PLAN_COMPOSER_ROLE_NAME = "plan_composer"
+MISSING_DETECTOR_ROLE_NAME = "missing_detector"
 BUILD_STEP_ROLE_NAME = "build_step_planner"
 BUILD_STEP_REGENERATION_ROLE_NAME = "build_step_regenerator"
 BUILD_STEP_ROLE_NAMES = frozenset({BUILD_STEP_ROLE_NAME, BUILD_STEP_REGENERATION_ROLE_NAME})
+PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS = 2
+RETRYABLE_PLAN_LEAF_NAMES = frozenset({PLAN_COMPOSER_ROLE_NAME, MISSING_DETECTOR_ROLE_NAME})
+EQUATION_REASON_CODES = frozenset({"equation_locator_invalid", "equation_id_outside_whitelist"})
+CONTRACT_MISMATCH_REPEAT_COUNT = 3
+_UNSET = object()
 
 
 class PaperPlanService:
@@ -90,6 +110,18 @@ class PaperPlanService:
         self,
         spec: PaperSpec,
         paper_id: str,
+        retry_context: StructuredRetryContext | None = None,
+    ) -> tuple[ModelGenerationPlan, list[MissingParameterPrompt], list[MissingBindingModel]]:
+        token = bind_retry_context(retry_context)
+        try:
+            return await self._generate_with_retries(spec, paper_id)
+        finally:
+            token.reset()
+
+    async def _generate_with_retries(
+        self,
+        spec: PaperSpec,
+        paper_id: str,
     ) -> tuple[ModelGenerationPlan, list[MissingParameterPrompt], list[MissingBindingModel]]:
         plan_id = f"PLAN-{paper_id}"
         paper_spec_id = paper_id
@@ -100,24 +132,95 @@ class PaperPlanService:
                 "parameter_conflicts_mismatch",
                 reason_code="parameter_conflicts_mismatch",
             ) from None
+        self._preflight_spec_equation_namespace(spec)
 
-        plan_composer_output, mscript = await asyncio.gather(
-            self._llm_plan_compose(spec, plan_id, paper_spec_id),
-            self._llm_mscript_draft(spec),
-        )
+        remaining_structured_retries = PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS
+        retried_leaves: set[str] = set()
+        plan_composer_output: ModelGenerationPlan | None = None
+        mscript: str | None = None
+        mscript_ready = False
+
+        while plan_composer_output is None:
+            if mscript_ready:
+                plan_result = await self._capture_plan_leaf(
+                    self._llm_plan_compose(spec, plan_id, paper_spec_id),
+                    PLAN_COMPOSER_ROLE_NAME,
+                )
+                mscript_result: str | BaseException | None = mscript
+            else:
+                plan_result, mscript_result = await asyncio.gather(
+                    self._capture_plan_leaf(
+                        self._llm_plan_compose(spec, plan_id, paper_spec_id),
+                        PLAN_COMPOSER_ROLE_NAME,
+                    ),
+                    self._llm_mscript_draft(spec),
+                    return_exceptions=True,
+                )
+                if not isinstance(mscript_result, BaseException):
+                    mscript = mscript_result
+                    mscript_ready = True
+
+            if isinstance(mscript_result, BaseException):
+                raise mscript_result
+            if isinstance(plan_result, BaseException):
+                if self._should_retry_plan_leaf(
+                    plan_result,
+                    PLAN_COMPOSER_ROLE_NAME,
+                    remaining_structured_retries,
+                ):
+                    remaining_structured_retries -= 1
+                    retried_leaves.add(PLAN_COMPOSER_ROLE_NAME)
+                    self._record_plan_retry(
+                        plan_result,
+                        PLAN_COMPOSER_ROLE_NAME,
+                        remaining_structured_retries,
+                    )
+                    continue
+                self._record_plan_exhausted(plan_result, PLAN_COMPOSER_ROLE_NAME)
+                raise plan_result
+            plan_composer_output = cast(ModelGenerationPlan, plan_result)
+            self._record_plan_rescue_if_needed(PLAN_COMPOSER_ROLE_NAME, retried_leaves)
+
         sentinel_mappings = self._sentinel_mappings(plan_composer_output.parameter_mapping)
-        missing_result, build_steps_result = await asyncio.gather(
-            self._llm_missing_detect(spec, paper_id, sentinel_mappings),
-            self._llm_build_steps(
-                plan_composer_output.block_recommendations,
-                plan_composer_output.parameter_mapping,
-                spec,
-            ),
-            return_exceptions=True,
-        )
-        if isinstance(missing_result, BaseException):
-            raise missing_result
-        missing_prompts = missing_result
+        build_steps_result: object = _UNSET
+        missing_prompts: list[MissingParameterPrompt] | None = None
+        while missing_prompts is None:
+            if build_steps_result is _UNSET:
+                missing_result, build_steps_result = await asyncio.gather(
+                    self._capture_plan_leaf(
+                        self._llm_missing_detect(spec, paper_id, sentinel_mappings),
+                        MISSING_DETECTOR_ROLE_NAME,
+                    ),
+                    self._llm_build_steps(
+                        plan_composer_output.block_recommendations,
+                        plan_composer_output.parameter_mapping,
+                        spec,
+                    ),
+                    return_exceptions=True,
+                )
+            else:
+                missing_result = await self._capture_plan_leaf(
+                    self._llm_missing_detect(spec, paper_id, sentinel_mappings),
+                    MISSING_DETECTOR_ROLE_NAME,
+                )
+            if isinstance(missing_result, BaseException):
+                if self._should_retry_plan_leaf(
+                    missing_result,
+                    MISSING_DETECTOR_ROLE_NAME,
+                    remaining_structured_retries,
+                ):
+                    remaining_structured_retries -= 1
+                    retried_leaves.add(MISSING_DETECTOR_ROLE_NAME)
+                    self._record_plan_retry(
+                        missing_result,
+                        MISSING_DETECTOR_ROLE_NAME,
+                        remaining_structured_retries,
+                    )
+                    continue
+                self._record_plan_exhausted(missing_result, MISSING_DETECTOR_ROLE_NAME)
+                raise missing_result
+            missing_prompts = cast(list[MissingParameterPrompt], missing_result)
+            self._record_plan_rescue_if_needed(MISSING_DETECTOR_ROLE_NAME, retried_leaves)
 
         build_steps: list[ModelBuildStep] | None
         try:
@@ -125,8 +228,14 @@ class PaperPlanService:
                 raise build_steps_result
             if isinstance(build_steps_result, BaseException):
                 raise build_steps_result
+            if build_steps_result is _UNSET:
+                raise PaperPlanGenerationError(
+                    "role=build_step_planner: missing_result",
+                    reason_code="build_steps_missing_result",
+                    leaf=BUILD_STEP_ROLE_NAME,
+                )
             build_steps = self._plan_assembler.validate_and_derive_build_steps(
-                build_steps_result,
+                cast(list[ModelBuildStepDraft], build_steps_result),
                 plan_composer_output.parameter_mapping,
                 plan_composer_output.block_recommendations,
             )
@@ -149,16 +258,6 @@ class PaperPlanService:
             build_steps=build_steps,
         )
 
-        self._evidence_tagger.validate_for_spec(assembled_plan.evidence, spec)
-        self._evidence_tagger.validate_for_spec(
-            [block.paper_reference for block in assembled_plan.block_recommendations],
-            spec,
-        )
-        self._evidence_tagger.validate_for_spec(
-            [prompt.paper_reference for prompt in missing_prompts],
-            spec,
-        )
-        validate_plan_does_not_resolve_conflicts(assembled_plan, spec.parameter_conflicts)
         return assembled_plan, missing_prompts, missing_bindings
 
     async def _call_llm_json(
@@ -169,7 +268,16 @@ class PaperPlanService:
         """Call the sync TextProvider behind the single thread bridge."""
         last_json_error: json.JSONDecodeError | None = None
         payload: Any = None
+        messages = append_retry_hint(messages, role_name)
         for attempt in range(1, 3):
+            try:
+                before_llm_call(component="plan", leaf=role_name)
+            except StructuredRetryLimitExceeded as exc:
+                raise PaperPlanGenerationError(
+                    f"role={role_name}: {exc.reason_code}",
+                    reason_code=exc.reason_code,
+                    leaf=role_name,
+                ) from None
             response = await asyncio.to_thread(
                 self._text_provider.chat,
                 messages,
@@ -177,6 +285,18 @@ class PaperPlanService:
                 timeout=self._timeout,
                 max_tokens=self._max_tokens,
             )
+            set_current_finish_reason(response.finish_reason)
+            try:
+                current_context = current_retry_context()
+                if current_context is not None:
+                    current_context.check_wall_clock()
+            except StructuredRetryLimitExceeded as exc:
+                raise PaperPlanGenerationError(
+                    f"role={role_name}: {exc.reason_code}",
+                    reason_code=exc.reason_code,
+                    finish_reason=response.finish_reason,
+                    leaf=role_name,
+                ) from None
             response_text = vars(response)["text"]
             try:
                 payload = json.loads(response_text)
@@ -205,6 +325,8 @@ class PaperPlanService:
             raise PaperPlanGenerationError(
                 f"role={role_name}: invalid_json",
                 reason_code="invalid_json",
+                finish_reason=current_finish_reason(),
+                leaf=role_name,
             ) from None
 
         if not isinstance(payload, dict):
@@ -223,7 +345,7 @@ class PaperPlanService:
         paper_id: str,
         sentinel_mappings: list[ParameterMapping],
     ) -> list[MissingParameterPrompt]:
-        role_name = "missing_detector"
+        role_name = MISSING_DETECTOR_ROLE_NAME
         messages = build_messages_for_missing_detect(spec, sentinel_mappings)
         data = await self._call_llm_json(messages, role_name)
         source_refs = build_plan_evidence_source_refs(spec)
@@ -269,7 +391,7 @@ class PaperPlanService:
         plan_id: str,
         paper_spec_id: str,
     ) -> ModelGenerationPlan:
-        role_name = "plan_composer"
+        role_name = PLAN_COMPOSER_ROLE_NAME
         data = await self._call_llm_json(
             build_messages_for_plan_compose(spec, plan_id, paper_spec_id),
             role_name,
@@ -302,6 +424,11 @@ class PaperPlanService:
             validate_plan_does_not_resolve_conflicts(plan, spec.parameter_conflicts)
         except PaperPlanGenerationError:
             self._raise_generation_error(role_name, "parameter_conflict_mapping")
+        self._evidence_tagger.validate_for_spec(plan.evidence, spec)
+        self._evidence_tagger.validate_for_spec(
+            [block.paper_reference for block in plan.block_recommendations],
+            spec,
+        )
         return plan
 
     async def _llm_subsystem_plan(
@@ -446,15 +573,20 @@ class PaperPlanService:
         return value
 
     def _raise_validation_error(self, role_name: str, exc: ValidationError) -> NoReturn:
+        loc = _validation_loc(exc)
         logger.error(
-            "paper_plan_validation_failed role=%s reason_code=%s exc_type=%s",
+            "paper_plan_validation_failed role=%s reason_code=%s exc_type=%s schema_subtype=%s",
             role_name,
             "schema_validation",
             type(exc).__name__,
+            _schema_subtype("schema_validation", loc),
         )
         raise PaperPlanGenerationError(
             f"role={role_name}: validation_failed",
             reason_code="schema_validation",
+            finish_reason=current_finish_reason(),
+            leaf=role_name,
+            loc=loc,
         ) from None
 
     def _raise_generation_error(
@@ -473,7 +605,158 @@ class PaperPlanService:
         raise PaperPlanGenerationError(
             f"role={role_name}: {reason}",
             reason_code=effective_reason_code,
+            finish_reason=current_finish_reason(),
+            leaf=role_name,
+            locator_namespace=_locator_namespace_for_reason(effective_reason_code),
         ) from None
+
+    async def _capture_plan_leaf(
+        self,
+        awaitable: Awaitable[object],
+        leaf: str,
+    ) -> object | BaseException:
+        try:
+            return await awaitable
+        except PaperPlanGenerationError as exc:
+            return _with_plan_error_metadata(exc, leaf=leaf)
+        except BaseException as exc:
+            return exc
+
+    def _should_retry_plan_leaf(
+        self,
+        exc: BaseException,
+        leaf: str,
+        remaining_structured_retries: int,
+    ) -> bool:
+        if not isinstance(exc, PaperPlanGenerationError):
+            return False
+        exc = _with_plan_error_metadata(exc, leaf=leaf)
+        context = current_retry_context()
+        repeat_count = (
+            context.record_failure(
+                leaf=leaf,
+                reason_code=exc.reason_code,
+                locator_namespace=exc.locator_namespace,
+                loc=exc.loc,
+            )
+            if context is not None
+            else 1
+        )
+        if leaf not in RETRYABLE_PLAN_LEAF_NAMES:
+            return False
+        if exc.finish_reason == "length":
+            self._log_plan_retry_decision("non_retryable", exc, leaf, remaining_structured_retries)
+            return False
+        if exc.reason_code in {REASON_CALL_CAP_EXCEEDED, REASON_WALL_CLOCK_CAP_EXCEEDED}:
+            self._log_plan_retry_decision("non_retryable", exc, leaf, remaining_structured_retries)
+            return False
+        if repeat_count >= CONTRACT_MISMATCH_REPEAT_COUNT:
+            event = (
+                "equation_locator_invalid_repeated"
+                if exc.reason_code in EQUATION_REASON_CODES
+                else "schema_contract_mismatch_suspected"
+            )
+            logger.warning(
+                "paper_structured_retry_early_stop component=%s leaf=%s event=%s "
+                "reason_code=%s repeat_count=%s",
+                "plan",
+                leaf,
+                event,
+                exc.reason_code,
+                repeat_count,
+            )
+            return False
+        return remaining_structured_retries > 0
+
+    def _record_plan_retry(
+        self,
+        exc: BaseException,
+        leaf: str,
+        remaining_structured_retries: int,
+    ) -> None:
+        if isinstance(exc, PaperPlanGenerationError):
+            context = current_retry_context()
+            if context is not None:
+                context.set_retry_hint(
+                    leaf=leaf,
+                    reason_code=exc.reason_code,
+                    loc=exc.loc,
+                )
+            self._log_plan_retry_decision("attempt", exc, leaf, remaining_structured_retries)
+
+    def _record_plan_exhausted(self, exc: BaseException, leaf: str) -> None:
+        if isinstance(exc, PaperPlanGenerationError):
+            self._log_plan_retry_decision("exhausted", exc, leaf, 0)
+            if exc.reason_code in EQUATION_REASON_CODES:
+                logger.warning(
+                    "paper_structured_retry_equation_exhausted component=%s leaf=%s "
+                    "reason_code=%s",
+                    "plan",
+                    leaf,
+                    exc.reason_code,
+                )
+
+    def _record_plan_rescue_if_needed(self, leaf: str, retried_leaves: set[str]) -> None:
+        if leaf not in retried_leaves:
+            return
+        context = current_retry_context()
+        if context is not None:
+            context.mark_rescued(leaf)
+        logger.info(
+            "paper_structured_retry_rescued component=%s leaf=%s",
+            "plan",
+            leaf,
+        )
+        if leaf in {PLAN_COMPOSER_ROLE_NAME, MISSING_DETECTOR_ROLE_NAME}:
+            logger.info(
+                "paper_structured_retry_equation_rescue_checked component=%s leaf=%s",
+                "plan",
+                leaf,
+            )
+        retried_leaves.discard(leaf)
+
+    def _log_plan_retry_decision(
+        self,
+        event: str,
+        exc: PaperPlanGenerationError,
+        leaf: str,
+        remaining_structured_retries: int,
+    ) -> None:
+        logger.info(
+            "paper_structured_retry_decision component=%s leaf=%s event=%s "
+            "reason_code=%s finish_reason=%s remaining=%s schema_subtype=%s",
+            "plan",
+            leaf,
+            event,
+            exc.reason_code,
+            exc.finish_reason,
+            remaining_structured_retries,
+            _schema_subtype(exc.reason_code, exc.loc),
+        )
+
+    def _preflight_spec_equation_namespace(self, spec: PaperSpec) -> None:
+        document_ids = [document.document_id for document in spec.documents]
+        document_id_set = set(document_ids)
+        if len(document_ids) != len(document_id_set):
+            _raise_plan_preflight_equation_error()
+
+        equation_keys: list[tuple[str, str]] = []
+        for equation in spec.equations:
+            if equation.document_id is None or equation.document_id not in document_id_set:
+                _raise_plan_preflight_equation_error()
+            equation_keys.append((equation.document_id, equation.equation_id))
+        if len(equation_keys) != len(set(equation_keys)):
+            _raise_plan_preflight_equation_error()
+
+        allowed_equations = set(equation_keys)
+        for entry in spec.evidence:
+            if entry.equation_id is None:
+                continue
+            if (
+                entry.document_id is None
+                or (entry.document_id, entry.equation_id) not in allowed_equations
+            ):
+                _raise_plan_preflight_equation_error()
 
     def _sentinel_mappings(self, mappings: list[ParameterMapping]) -> list[ParameterMapping]:
         return [mapping for mapping in mappings if mapping.value == MISSING_VALUE_SENTINEL]
@@ -541,6 +824,58 @@ class PaperPlanService:
             exc.reason_code,
             type(exc).__name__,
         )
+
+
+def _with_plan_error_metadata(
+    exc: PaperPlanGenerationError,
+    *,
+    leaf: str,
+) -> PaperPlanGenerationError:
+    if exc.leaf is None:
+        exc.leaf = leaf
+    if exc.locator_namespace is None:
+        exc.locator_namespace = _locator_namespace_for_reason(exc.reason_code)
+    return exc
+
+
+def _validation_loc(exc: ValidationError) -> tuple[str, ...] | None:
+    errors = exc.errors(include_url=False, include_context=False, include_input=False)
+    if not errors:
+        return None
+    loc = errors[0].get("loc")
+    if not isinstance(loc, tuple):
+        return None
+    return tuple(str(part) for part in loc)
+
+
+def _locator_namespace_for_reason(reason_code: str | None) -> str | None:
+    if reason_code in {"equation_locator_invalid", "equation_id_outside_whitelist"}:
+        return "equation_id"
+    if reason_code in {"paper_section_locator_invalid", "paper_section_id_outside_whitelist"}:
+        return "paper_section_id"
+    if reason_code in {"figure_locator_invalid", "figure_id_outside_whitelist"}:
+        return "figure_id"
+    return None
+
+
+def _schema_subtype(reason_code: str | None, loc: tuple[str, ...] | None) -> str | None:
+    if reason_code != "schema_validation":
+        return None
+    loc_parts = set(loc or ())
+    if loc_parts & {"evidence", "paper_reference", "source_ref"}:
+        return "schema_evidence_invalid"
+    if loc_parts & {"missing_prompts", "block_recommendations", "parameter_mapping"}:
+        return "schema_cardinality_invalid"
+    return "schema_shape_invalid"
+
+
+def _raise_plan_preflight_equation_error() -> NoReturn:
+    raise PaperPlanGenerationError(
+        "role=plan_preflight: equation_namespace_invalid",
+        reason_code="equation_id_outside_whitelist",
+        leaf="plan_preflight",
+        locator_namespace="equation_id",
+    ) from None
 
 
 class _PlanComposerOutputModel(BaseModel):

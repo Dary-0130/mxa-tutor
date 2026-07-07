@@ -72,6 +72,7 @@ from features.paper.paper_upload_job_schemas import (
     RerunPlanResponse,
     UploadAsyncResponse,
 )
+from features.paper.structured_retry import StructuredRetryContext
 
 PDF_MAGIC = b"%PDF-"
 DOCX_MAGIC = b"PK\x03\x04"
@@ -198,6 +199,7 @@ async def upload_document(
             reparse_store=reparse_store,
             job_store=job_store,
             lock_registry=lock_registry,
+            retry_context=_structured_retry_context(settings),
         )
         if isinstance(result, _UploadFailure):
             failure = result
@@ -288,6 +290,7 @@ async def upload_document_async(
             reparse_store=reparse_store,
             job_store=job_store,
             lock_registry=lock_registry,
+            retry_context=_structured_retry_context(settings),
         )
         return UploadAsyncResponse(paper_id=paper_id, job_id=job_id)
     finally:
@@ -403,6 +406,7 @@ async def _run_upload_job(
     reparse_store: PaperReparseStore,
     job_store: PaperUploadJobStore,
     lock_registry: PaperReparseLockRegistry,
+    retry_context: StructuredRetryContext | None = None,
 ) -> UploadDocumentResponse | _UploadFailure:
     successes: list[SuccessfulPaperSpec] = []
     source_documents: list[SuccessfulParsedDocument] = []
@@ -438,6 +442,7 @@ async def _run_upload_job(
                     paper_id,
                     display_filename=display_filename,
                     document_id=document_id,
+                    retry_context=retry_context,
                 )
             except (DocumentParseError, PaperSpecGenerationError) as exc:
                 first_error = first_error or exc
@@ -559,6 +564,7 @@ async def _run_upload_job(
         job_store=job_store,
         lock_registry=lock_registry,
         source=source,
+        retry_context=retry_context,
     )
     if isinstance(plan_result, _UploadFailure):
         return plan_result
@@ -589,6 +595,7 @@ async def _run_upload_job_background(
     reparse_store: PaperReparseStore,
     job_store: PaperUploadJobStore,
     lock_registry: PaperReparseLockRegistry,
+    retry_context: StructuredRetryContext | None = None,
 ) -> None:
     try:
         result = await _run_upload_job(
@@ -605,6 +612,7 @@ async def _run_upload_job_background(
             reparse_store=reparse_store,
             job_store=job_store,
             lock_registry=lock_registry,
+            retry_context=retry_context,
         )
         if isinstance(result, _UploadFailure):
             logger.info(
@@ -763,6 +771,7 @@ async def rerun_paper_plan(
         PaperReparseLockRegistry,
         Depends(get_paper_reparse_lock_registry),
     ],
+    settings: Annotated[AppSettings, Depends(get_settings)],
 ) -> RerunPlanResponse | JSONResponse:
     """Regenerate a plan from a persisted spec-only or retryable-failed state."""
     _ = request
@@ -811,6 +820,7 @@ async def rerun_paper_plan(
                 reparse_store=None,
                 job_store=job_store,
                 source=None,
+                retry_context=_structured_retry_context(settings),
             )
     except PaperReparseInProgressError:
         return _paper_error_response(
@@ -854,6 +864,7 @@ async def _run_initial_plan_generation(
     job_store: PaperUploadJobStore,
     lock_registry: PaperReparseLockRegistry,
     source: PaperReparseSource | None,
+    retry_context: StructuredRetryContext | None = None,
 ) -> _PlanGenerationResult | _UploadFailure:
     try:
         async with await lock_registry.acquire(paper_id):
@@ -876,6 +887,7 @@ async def _run_initial_plan_generation(
                 reparse_store=reparse_store,
                 job_store=job_store,
                 source=source,
+                retry_context=retry_context,
             )
     except PaperReparseInProgressError:
         await job_store.update_upload_job_state(
@@ -906,17 +918,28 @@ async def _run_plan_generation(
     reparse_store: PaperReparseStore | None,
     job_store: PaperUploadJobStore,
     source: PaperReparseSource | None,
+    retry_context: StructuredRetryContext | None = None,
 ) -> _PlanGenerationResult | _UploadFailure:
     try:
-        plan, missing_prompts, missing_bindings = await plan_service.generate(spec, paper_id)
+        plan, missing_prompts, missing_bindings = await plan_service.generate(
+            spec,
+            paper_id,
+            retry_context=retry_context,
+        )
     except Exception as exc:
-        return await _mark_plan_failed(
+        failure = await _mark_plan_failed(
             job_store,
             paper_id,
             job_id,
             exc,
             failed_stage="generating_plan",
         )
+        _log_structured_retry_job_summary(
+            paper_id=paper_id,
+            terminal_state="plan_failed_retryable",
+            retry_context=retry_context,
+        )
+        return failure
 
     record = PaperPlanRecord(
         paper_id=paper_id,
@@ -945,9 +968,14 @@ async def _run_plan_generation(
             retryable=False,
             finished_at=datetime.utcnow(),
         )
+        _log_structured_retry_job_summary(
+            paper_id=paper_id,
+            terminal_state="ready",
+            retry_context=retry_context,
+        )
         return _PlanGenerationResult(record=record)
     except Exception as exc:
-        return await _mark_plan_failed(
+        failure = await _mark_plan_failed(
             job_store,
             paper_id,
             job_id,
@@ -957,6 +985,12 @@ async def _run_plan_generation(
             force_error_code="store_error" if isinstance(exc, StoreError) else None,
             status_code=500 if isinstance(exc, StoreError) else None,
         )
+        _log_structured_retry_job_summary(
+            paper_id=paper_id,
+            terminal_state="plan_failed_retryable",
+            retry_context=retry_context,
+        )
+        return failure
 
 
 async def _mark_unhandled_background_failure(
@@ -1023,6 +1057,32 @@ def _plan_failure_stage(stage: PaperUploadStage) -> Literal["generating_plan", "
     if stage == "persisting_plan":
         return "persisting_plan"
     return "generating_plan"
+
+
+def _structured_retry_context(settings: AppSettings) -> StructuredRetryContext:
+    return StructuredRetryContext(
+        warning_call_count=settings.paper_structured_retry_warning_call_count,
+        hard_call_count=settings.paper_structured_retry_hard_call_count,
+        wall_clock_seconds=settings.paper_structured_retry_wall_clock_seconds,
+    )
+
+
+def _log_structured_retry_job_summary(
+    *,
+    paper_id: str,
+    terminal_state: str,
+    retry_context: StructuredRetryContext | None,
+) -> None:
+    if retry_context is None:
+        return
+    logger.info(
+        "paper_structured_retry_job_summary: paper_id={} terminal_state={} "
+        "call_count={} rescued_leaf_count={}",
+        paper_id,
+        terminal_state,
+        retry_context.call_count,
+        len(retry_context.rescued_leaves),
+    )
 
 
 async def _mark_upload_failed_no_usable_spec(

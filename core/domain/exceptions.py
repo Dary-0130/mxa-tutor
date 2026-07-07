@@ -93,16 +93,42 @@ class OverviewGenerationError(MxaError):
 class PaperSpecGenerationError(MxaError):
     """PaperSpec 生成失败。"""
 
-    def __init__(self, message: str = "", *, reason_code: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        reason_code: str | None = None,
+        finish_reason: str | None = None,
+        leaf: str | None = None,
+        locator_namespace: str | None = None,
+        loc: tuple[str, ...] | None = None,
+    ) -> None:
         self.reason_code = reason_code
+        self.finish_reason = finish_reason
+        self.leaf = leaf
+        self.locator_namespace = locator_namespace
+        self.loc = loc
         super().__init__(message)
 
 
 class PaperPlanGenerationError(MxaError):
     """Paper plan 生成失败。"""
 
-    def __init__(self, message: str = "", *, reason_code: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        reason_code: str | None = None,
+        finish_reason: str | None = None,
+        leaf: str | None = None,
+        locator_namespace: str | None = None,
+        loc: tuple[str, ...] | None = None,
+    ) -> None:
         self.reason_code = reason_code
+        self.finish_reason = finish_reason
+        self.leaf = leaf
+        self.locator_namespace = locator_namespace
+        self.loc = loc
         super().__init__(message)
 
 

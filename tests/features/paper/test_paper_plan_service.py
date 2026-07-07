@@ -36,6 +36,10 @@ from features.paper.paper_plan_helpers import (
     ModelBuildStepDraft,
 )
 from features.paper.paper_plan_service import PaperPlanService
+from features.paper.structured_retry import (
+    REASON_CALL_CAP_EXCEEDED,
+    StructuredRetryContext,
+)
 
 
 class NoopTextProvider(TextProvider):
@@ -104,6 +108,29 @@ class PayloadPaperPlanService(PaperPlanService):
         if isinstance(payload, Exception):
             raise payload
         return copy.deepcopy(payload)
+
+
+class SequencedPayloadPaperPlanService(PaperPlanService):
+    def __init__(
+        self,
+        payloads: dict[str, list[dict[str, Any] | Exception] | dict[str, Any] | Exception],
+    ) -> None:
+        super().__init__(NoopTextProvider())
+        self.payloads = payloads
+        self.calls: list[str] = []
+
+    async def _call_llm_json(
+        self,
+        messages: list[LLMMessage],
+        role_name: str,
+    ) -> dict[str, Any]:
+        _ = messages
+        self.calls.append(role_name)
+        payload = self.payloads[role_name]
+        item = payload.pop(0) if isinstance(payload, list) else payload
+        if isinstance(item, Exception):
+            raise item
+        return copy.deepcopy(item)
 
 
 class RecordingEvidenceTagger(EvidenceTagger):
@@ -253,6 +280,91 @@ async def test_step2_build_step_planner_awaits_plan_composer_block_recommendatio
             return _build_step_drafts()
 
     await OrderedService().generate(_spec(), "PAPER-001")
+
+
+@pytest.mark.asyncio
+async def test_plan_composer_structured_retry_reruns_leaf_and_preserves_mscript() -> None:
+    payloads: dict[str, list[dict[str, Any] | Exception] | dict[str, Any] | Exception] = _payloads()
+    payloads["plan_composer"] = [
+        PaperPlanGenerationError(
+            "validation_failed",
+            reason_code="schema_validation",
+            finish_reason="stop",
+            leaf="plan_composer",
+            loc=("library_choice",),
+        ),
+        _plan_payload(),
+    ]
+    service = SequencedPayloadPaperPlanService(payloads)
+    context = StructuredRetryContext()
+
+    plan, _, _ = await service.generate(_spec(), "PAPER-001", retry_context=context)
+
+    assert plan.plan_id == "PLAN-PAPER-001"
+    assert service.calls == [
+        "plan_composer",
+        "mscript_drafter",
+        "plan_composer",
+        "missing_detector",
+        "build_step_planner",
+    ]
+    assert context.rescued_leaves == {"plan_composer"}
+
+
+@pytest.mark.asyncio
+async def test_missing_detector_structured_retry_preserves_build_steps_result() -> None:
+    payloads: dict[str, list[dict[str, Any] | Exception] | dict[str, Any] | Exception] = _payloads()
+    payloads["missing_detector"] = [
+        PaperPlanGenerationError(
+            "validation_failed",
+            reason_code="schema_validation",
+            finish_reason="stop",
+            leaf="missing_detector",
+            loc=("missing_prompts",),
+        ),
+        {"missing_prompts": [_missing_prompt_payload()]},
+    ]
+    service = SequencedPayloadPaperPlanService(payloads)
+    context = StructuredRetryContext()
+
+    plan, missing_prompts, _ = await service.generate(
+        _spec(),
+        "PAPER-001",
+        retry_context=context,
+    )
+
+    assert plan.build_steps is not None
+    assert [prompt.prompt_id for prompt in missing_prompts] == ["MISS-001"]
+    assert service.calls == [
+        "plan_composer",
+        "mscript_drafter",
+        "missing_detector",
+        "build_step_planner",
+        "missing_detector",
+    ]
+    assert context.rescued_leaves == {"missing_detector"}
+
+
+@pytest.mark.asyncio
+async def test_length_finish_reason_does_not_use_outer_structured_retry() -> None:
+    payloads: dict[str, list[dict[str, Any] | Exception] | dict[str, Any] | Exception] = _payloads()
+    payloads["plan_composer"] = [
+        PaperPlanGenerationError(
+            "validation_failed",
+            reason_code="schema_validation",
+            finish_reason="length",
+            leaf="plan_composer",
+            loc=("library_choice",),
+        ),
+        _plan_payload(),
+    ]
+    service = SequencedPayloadPaperPlanService(payloads)
+
+    with pytest.raises(PaperPlanGenerationError) as exc_info:
+        await service.generate(_spec(), "PAPER-001", retry_context=StructuredRetryContext())
+
+    assert exc_info.value.finish_reason == "length"
+    assert service.calls == ["plan_composer", "mscript_drafter"]
 
 
 @pytest.mark.asyncio
@@ -767,7 +879,7 @@ async def test_evidence_tagger_validates_plan_evidence() -> None:
         _spec(), "PAPER-001"
     )
 
-    assert tagger.calls[1] == plan.evidence
+    assert tagger.calls[0] == plan.evidence
 
 
 @pytest.mark.asyncio
@@ -777,7 +889,7 @@ async def test_evidence_tagger_validates_block_recommendations_paper_reference()
         _spec(), "PAPER-001"
     )
 
-    assert tagger.calls[2] == [plan.block_recommendations[0].paper_reference]
+    assert tagger.calls[1] == [plan.block_recommendations[0].paper_reference]
 
 
 @pytest.mark.asyncio
@@ -787,8 +899,7 @@ async def test_evidence_tagger_validates_missing_prompts_paper_reference() -> No
         _payloads(), evidence_tagger=tagger
     ).generate(_spec(), "PAPER-001")
 
-    assert tagger.calls[0] == [missing_prompts[0].paper_reference]
-    assert tagger.calls[3] == [missing_prompts[0].paper_reference]
+    assert tagger.calls[2] == [missing_prompts[0].paper_reference]
 
 
 @pytest.mark.asyncio
@@ -835,6 +946,20 @@ async def test_invalid_json_retries_once_then_returns_valid_payload() -> None:
 
     assert data == {"ok": True}
     assert len(provider.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_call_llm_json_counts_decode_retry_against_job_cap() -> None:
+    provider = QueueTextProvider(["not json", '{"ok": true}'])
+    service = PaperPlanService(provider)
+    context = StructuredRetryContext(warning_call_count=1, hard_call_count=1)
+
+    with pytest.raises(PaperPlanGenerationError) as exc_info:
+        await service.generate(_spec(), "PAPER-001", retry_context=context)
+
+    assert exc_info.value.reason_code == REASON_CALL_CAP_EXCEEDED
+    assert len(provider.calls) == 1
+    assert context.call_count == 1
 
 
 @pytest.mark.asyncio
