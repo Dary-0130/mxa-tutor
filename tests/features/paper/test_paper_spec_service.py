@@ -20,6 +20,7 @@ from core.interfaces.document_parser import (
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.paper import InMemoryPaperSpecCache, PaperSpecService
 from features.paper.paper_spec_service import MAX_PAPER_RAW_TEXT_CHARS
+from features.paper.structured_retry import StructuredRetryContext
 
 
 class FakeParser(DocumentParser):
@@ -56,6 +57,28 @@ class FakeTextProvider(TextProvider):
         if self._error is not None:
             raise self._error
         return _response(self._payload)
+
+    def capability(self) -> ModelCapability:
+        return ModelCapability(model_name="fake", supports_json=True)
+
+
+class SequencedTextProvider(TextProvider):
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        self.responses = responses
+        self.calls = 0
+        self.messages: list[list[LLMMessage]] = []
+
+    def chat(
+        self,
+        messages: list[LLMMessage],
+        json_mode: bool = False,
+        timeout: float = 30.0,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        _ = json_mode, timeout, max_tokens
+        self.calls += 1
+        self.messages.append(messages)
+        return self.responses.pop(0)
 
     def capability(self) -> ModelCapability:
         return ModelCapability(model_name="fake", supports_json=True)
@@ -145,6 +168,57 @@ def test_schema_error_raises_generation_error() -> None:
         _service(FakeTextProvider())._parse_and_validate(_response(payload), _parsed_document())
 
     assert exc_info.value.reason_code == "schema_validation"
+
+
+@pytest.mark.asyncio
+async def test_spec_structured_retry_recovers_schema_validation_without_echoing_value() -> None:
+    bad_payload = _valid_payload()
+    bad_payload["domain"] = "general"
+    provider = SequencedTextProvider(
+        [
+            _response(bad_payload),
+            _response(_valid_payload()),
+        ]
+    )
+    service = _service(provider)
+
+    spec = await service.extract_parsed_uncached(
+        _parsed_document(),
+        "paper-1",
+        display_filename="paper.pdf",
+        retry_context=StructuredRetryContext(),
+    )
+
+    assert spec.domain == "motor_control"
+    assert provider.calls == 2
+    retry_hint = provider.messages[1][-1].content
+    assert "问题路径:domain" in retry_hint
+    assert "schema_shape_invalid" in retry_hint
+    assert "general" not in retry_hint
+
+
+@pytest.mark.asyncio
+async def test_spec_length_finish_reason_does_not_retry() -> None:
+    bad_payload = _valid_payload()
+    bad_payload["domain"] = "general"
+    provider = SequencedTextProvider(
+        [
+            _response(bad_payload, finish_reason="length"),
+            _response(_valid_payload()),
+        ]
+    )
+    service = _service(provider)
+
+    with pytest.raises(PaperSpecGenerationError) as exc_info:
+        await service.extract_parsed_uncached(
+            _parsed_document(),
+            "paper-1",
+            display_filename="paper.pdf",
+            retry_context=StructuredRetryContext(),
+        )
+
+    assert exc_info.value.finish_reason == "length"
+    assert provider.calls == 1
 
 
 def test_parse_and_validate_enriches_single_document_identity_and_filename() -> None:
@@ -259,7 +333,7 @@ async def test_llm_error_propagates(
         await _service(provider).extract(tmp_path / "paper.pdf", "paper-1")
 
 
-def _service(provider: FakeTextProvider) -> PaperSpecService:
+def _service(provider: TextProvider) -> PaperSpecService:
     return PaperSpecService(
         cache=InMemoryPaperSpecCache(),
         text_provider=provider,
@@ -332,9 +406,16 @@ def _valid_payload() -> dict[str, Any]:
     }
 
 
-def _response(payload: dict[str, Any]) -> LLMResponse:
-    return _response_text(json.dumps(copy.deepcopy(payload), ensure_ascii=False))
+def _response(payload: dict[str, Any], finish_reason: str | None = None) -> LLMResponse:
+    return _response_text(json.dumps(copy.deepcopy(payload), ensure_ascii=False), finish_reason)
 
 
-def _response_text(text: str) -> LLMResponse:
-    return LLMResponse(text=text, prompt_tokens=1, completion_tokens=1, model="fake", latency_ms=1)
+def _response_text(text: str, finish_reason: str | None = None) -> LLMResponse:
+    return LLMResponse(
+        text=text,
+        prompt_tokens=1,
+        completion_tokens=1,
+        model="fake",
+        latency_ms=1,
+        finish_reason=finish_reason,
+    )

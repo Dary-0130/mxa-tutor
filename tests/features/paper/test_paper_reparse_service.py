@@ -195,8 +195,9 @@ class _FakeSpecService:
         paper_id: str,
         display_filename: str | None = None,
         document_id: str = "DOC-001",
+        retry_context: object | None = None,
     ) -> PaperSpec:
-        _ = paper_id
+        _ = paper_id, retry_context
         self.calls.append(document_id)
         if self.started is not None:
             self.started.set()
@@ -227,7 +228,9 @@ class _FakePlanService:
         self,
         spec: PaperSpec,
         paper_id: str,
+        retry_context: object | None = None,
     ) -> tuple[ModelGenerationPlan, list[MissingParameterPrompt], list[MissingParameterBinding]]:
+        _ = retry_context
         self.calls.append(spec)
         if self.started is not None:
             self.started.set()

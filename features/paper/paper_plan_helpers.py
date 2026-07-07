@@ -1096,7 +1096,11 @@ def _label_starts(text: str, label: str) -> list[int]:
 
 
 def _raise_plan_generation_error(reason_code: str) -> NoReturn:
-    raise PaperPlanGenerationError(reason_code, reason_code=reason_code)
+    raise PaperPlanGenerationError(
+        reason_code,
+        reason_code=reason_code,
+        locator_namespace=_locator_namespace_for_reason(reason_code),
+    )
 
 
 def _raise_semantic(reason_code: str) -> NoReturn:
@@ -1105,3 +1109,13 @@ def _raise_semantic(reason_code: str) -> NoReturn:
 
 def _raise_redline(reason_code: str) -> NoReturn:
     raise BuildStepsRedLineError(reason_code)
+
+
+def _locator_namespace_for_reason(reason_code: str) -> str | None:
+    if reason_code in {"equation_locator_invalid", "equation_id_outside_whitelist"}:
+        return "equation_id"
+    if reason_code in {"paper_section_locator_invalid", "paper_section_id_outside_whitelist"}:
+        return "paper_section_id"
+    if reason_code in {"figure_locator_invalid", "figure_id_outside_whitelist"}:
+        return "figure_id"
+    return None
