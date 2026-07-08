@@ -7,6 +7,14 @@ from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
 from core.domain.paper_spec import PaperSpec
 
+GuidanceStatus = Literal[
+    "not_generated",
+    "generated",
+    "stale_pending_regeneration",
+    "generation_failed",
+    "no_document_basis",
+]
+
 
 @dataclass(frozen=True)
 class BlockRecommendation:
@@ -175,6 +183,7 @@ class ModelGenerationPlan:
     evidence: list[PaperEvidenceEntry]
     build_steps: list[ModelBuildStep] | None = None
     build_guidance: BuildGuidance | None = None
+    guidance_status: GuidanceStatus = "not_generated"
 
 
 @dataclass(frozen=True)

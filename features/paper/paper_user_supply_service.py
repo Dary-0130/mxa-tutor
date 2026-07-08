@@ -9,6 +9,7 @@ from core.domain.exceptions import PaperPlanGenerationError, PaperUserSupplyErro
 from core.domain.paper_evidence import EvidenceSource
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import ModelGenerationPlan, ParameterMapping
+from features.paper.build_guidance_lifecycle import mark_guidance_stale_for_parameter_change
 from features.paper.paper_plan_cache import PaperPlanCache, PaperPlanRecord
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
@@ -58,6 +59,7 @@ class UserSupplyService:
         except PaperPlanGenerationError:
             raise PaperUserSupplyError("user_supplied_evidence_invalid") from None
 
+        plan_copy = mark_guidance_stale_for_parameter_change(plan_copy)
         await self._cache.set(
             paper_id,
             PaperPlanRecord(

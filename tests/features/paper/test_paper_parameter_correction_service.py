@@ -10,6 +10,9 @@ from core.domain.paper_missing import MissingParameterBinding, MissingParameterP
 from core.domain.paper_parameter_correction import PaperParameterCorrection
 from core.domain.paper_plan import (
     BlockRecommendation,
+    BuildGuidance,
+    GuidanceAssessment,
+    GuidanceDetail,
     ModelBuildStep,
     ModelGenerationPlan,
     PaperPlanRecord,
@@ -53,6 +56,35 @@ async def test_apply_first_correction_updates_plan_and_inserts_overlay() -> None
     assert result.view.can_undo is True
     assert result.record.plan.evidence[-1].user_action is UserEvidenceAction.CORRECT_EXTRACTED
     assert result.record.plan.evidence[-1].parameter_correction_id == correction.correction_id
+
+
+@pytest.mark.asyncio
+async def test_apply_correction_marks_guidance_stale_and_preserves_snapshot() -> None:
+    record = _record(m_script_skeleton="old script", build_steps=[])
+    old_guidance = _build_guidance()
+    store = _FakeBundleStore(
+        replace(
+            record,
+            plan=replace(
+                record.plan,
+                build_guidance=old_guidance,
+                guidance_status="generated",
+            ),
+        )
+    )
+
+    result = await ParameterCorrectionService(store).apply(
+        "paper-1",
+        target=_target(expected_value="3.5", expected_unit="s"),
+        corrected_value="4.0",
+        corrected_unit=None,
+        corrected_unit_supplied=False,
+    )
+
+    assert result.record.plan.build_steps is None
+    assert result.record.plan.m_script_skeleton is None
+    assert result.record.plan.guidance_status == "stale_pending_regeneration"
+    assert result.record.plan.build_guidance == old_guidance
 
 
 @pytest.mark.asyncio
@@ -125,6 +157,36 @@ async def test_undo_restores_original_and_deletes_evidence_and_overlay() -> None
         entry.user_action is UserEvidenceAction.CORRECT_EXTRACTED for entry in updated.plan.evidence
     )
     assert store.undo_calls == [applied.correction.correction_id]
+
+
+@pytest.mark.asyncio
+async def test_undo_correction_marks_guidance_stale_and_preserves_snapshot() -> None:
+    old_guidance = _build_guidance()
+    store = _FakeBundleStore(
+        replace(
+            _record(),
+            plan=replace(
+                _record().plan,
+                build_guidance=old_guidance,
+                guidance_status="generated",
+            ),
+        )
+    )
+    service = ParameterCorrectionService(store)
+    applied = await service.apply(
+        "paper-1",
+        target=_target(expected_value="3.5", expected_unit="s"),
+        corrected_value="4.0",
+        corrected_unit=None,
+        corrected_unit_supplied=False,
+    )
+
+    undone = await service.undo("paper-1", applied.correction.correction_id)
+
+    assert undone.plan.build_steps is None
+    assert undone.plan.m_script_skeleton is None
+    assert undone.plan.guidance_status == "stale_pending_regeneration"
+    assert undone.plan.build_guidance == old_guidance
 
 
 @pytest.mark.asyncio
@@ -587,6 +649,32 @@ def _record_with_filled_missing() -> PaperPlanRecord:
                 model_param_name="Synchronous Machine.H",
             )
         ],
+    )
+
+
+def _build_guidance() -> BuildGuidance:
+    return BuildGuidance(
+        version="v1",
+        assessment=GuidanceAssessment(
+            content_status="outline_only",
+            environment_status="not_checked",
+            overall_status="outline_only",
+            blocking_gap_ids=[],
+        ),
+        details=[
+            GuidanceDetail(
+                detail_id="GD-001",
+                step_id="STEP-001",
+                detail_kind="parameter_value",
+                basis="document_extracted",
+                actionability="actionable",
+                display_text="Use the documented machine inertia.",
+                evidence=[_document_evidence()],
+                convention_code=None,
+                confirmation_reason_code=None,
+            )
+        ],
+        gaps=[],
     )
 
 

@@ -28,6 +28,7 @@ from core.domain.paper_plan import (
     GuidanceAssessment,
     GuidanceDetail,
     GuidanceGap,
+    GuidanceStatus,
     ModelBuildStep,
     ModelGenerationPlan,
     ParameterMapping,
@@ -52,6 +53,7 @@ from core.domain.paper_tuning import (
     ParameterDirectionValue,
     TuningSuggestion,
 )
+from features.paper.build_guidance_lifecycle import normalize_guidance_lifecycle
 
 
 class _StrictBaseModel(BaseModel):
@@ -549,25 +551,56 @@ class ModelGenerationPlanModel(_StrictBaseModel):
     evidence: list[PaperEvidenceEntryModel] = Field(min_length=1)
     build_steps: list[ModelBuildStepModel] | None = Field(default=None, min_length=1)
     build_guidance: BuildGuidanceModel | None = None
+    guidance_status: GuidanceStatus = "not_generated"
+
+    @classmethod
+    def from_domain(cls, entry: object) -> Self:
+        if isinstance(entry, ModelGenerationPlan):
+            entry = normalize_guidance_lifecycle(entry)
+        return cls.model_validate(entry)
+
+    @model_validator(mode="after")
+    def validate_guidance_lifecycle_state(self) -> Self:
+        if self.guidance_status == "generated":
+            if self.build_guidance is None:
+                raise ValueError("generated guidance requires build_guidance")
+            if not self.build_guidance.details:
+                raise ValueError("generated guidance requires details")
+            if not any(
+                detail.basis == "document_extracted" and detail.evidence
+                for detail in self.build_guidance.details
+            ):
+                raise ValueError("generated guidance requires document detail evidence")
+            return self
+        if self.guidance_status in {
+            "not_generated",
+            "generation_failed",
+            "no_document_basis",
+        } and self.build_guidance is not None:
+            raise ValueError("guidance_status requires build_guidance null")
+        return self
 
     def to_domain(self) -> ModelGenerationPlan:
-        return ModelGenerationPlan(
-            plan_id=self.plan_id,
-            paper_spec_id=self.paper_spec_id,
-            library_choice=self.library_choice,
-            block_recommendations=[entry.to_domain() for entry in self.block_recommendations],
-            parameter_mapping=[entry.to_domain() for entry in self.parameter_mapping],
-            subsystem_breakdown=self.subsystem_breakdown,
-            m_script_skeleton=self.m_script_skeleton,
-            evidence=[entry.to_domain() for entry in self.evidence],
-            build_steps=(
-                [entry.to_domain() for entry in self.build_steps]
-                if self.build_steps is not None
-                else None
-            ),
-            build_guidance=(
-                self.build_guidance.to_domain() if self.build_guidance is not None else None
-            ),
+        return normalize_guidance_lifecycle(
+            ModelGenerationPlan(
+                plan_id=self.plan_id,
+                paper_spec_id=self.paper_spec_id,
+                library_choice=self.library_choice,
+                block_recommendations=[entry.to_domain() for entry in self.block_recommendations],
+                parameter_mapping=[entry.to_domain() for entry in self.parameter_mapping],
+                subsystem_breakdown=self.subsystem_breakdown,
+                m_script_skeleton=self.m_script_skeleton,
+                evidence=[entry.to_domain() for entry in self.evidence],
+                build_steps=(
+                    [entry.to_domain() for entry in self.build_steps]
+                    if self.build_steps is not None
+                    else None
+                ),
+                build_guidance=(
+                    self.build_guidance.to_domain() if self.build_guidance is not None else None
+                ),
+                guidance_status=self.guidance_status,
+            )
         )
 
 

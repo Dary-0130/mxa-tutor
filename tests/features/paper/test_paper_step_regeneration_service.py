@@ -21,7 +21,10 @@ from core.domain.paper_parameter_correction import (
 )
 from core.domain.paper_plan import (
     BlockRecommendation,
+    BuildGuidance,
     ConfigurationHint,
+    GuidanceAssessment,
+    GuidanceDetail,
     ModelGenerationPlan,
     PaperPlanRecord,
     ParameterMapping,
@@ -91,6 +94,45 @@ async def test_nothing_to_regenerate_raises_400_without_llm() -> None:
     assert plan_service.build_calls == 0
     assert plan_service.mscript_calls == 0
     assert plan_cache.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_stale_guidance_status_triggers_regeneration_and_refreshes_guidance() -> None:
+    old_guidance = _build_guidance("Old frozen guidance.")
+    record = _record(build_steps=_derived_build_steps(), mscript="clear; clc;")
+    record = replace(
+        record,
+        plan=replace(
+            record.plan,
+            build_guidance=old_guidance,
+            guidance_status="stale_pending_regeneration",
+        ),
+    )
+    refreshed_guidance = _build_guidance("Fresh guidance.")
+    plan_service = _FakePlanService(
+        build_results=[_build_step_drafts()],
+        mscript_results=["clear; clc;"],
+        guidance_results=[
+            replace(
+                record.plan,
+                build_guidance=refreshed_guidance,
+                guidance_status="generated",
+            )
+        ],
+    )
+    store = _FakeBundleStore(record)
+    plan_cache = _FakePlanCache()
+
+    updated = await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+
+    assert plan_service.build_calls == 1
+    assert plan_service.mscript_calls == 1
+    assert plan_service.guidance_calls == 1
+    assert plan_service.guidance_inputs[0].guidance_status == "stale_pending_regeneration"
+    assert plan_service.guidance_inputs[0].build_guidance is None
+    assert updated.guidance_status == "generated"
+    assert updated.build_guidance == refreshed_guidance
+    assert plan_cache.set_calls[0].plan.guidance_status == "generated"
 
 
 @pytest.mark.asyncio
@@ -529,15 +571,19 @@ class _FakePlanService:
         *,
         build_results: list[list[ModelBuildStepDraft] | Exception] | None = None,
         mscript_results: list[str | None | Exception] | None = None,
+        guidance_results: list[ModelGenerationPlan | Exception] | None = None,
         build_started: asyncio.Event | None = None,
         build_release: asyncio.Event | None = None,
     ) -> None:
         self.build_results = list(build_results or [])
         self.mscript_results = list(mscript_results or [])
+        self.guidance_results = list(guidance_results or [])
         self.build_started = build_started
         self.build_release = build_release
         self.build_calls = 0
         self.mscript_calls = 0
+        self.guidance_calls = 0
+        self.guidance_inputs: list[ModelGenerationPlan] = []
 
     async def _llm_build_steps_for_regeneration(self, *args: object) -> list[ModelBuildStepDraft]:
         _ = args
@@ -559,6 +605,21 @@ class _FakePlanService:
         if not self.mscript_results:
             raise AssertionError("unexpected mscript regeneration call")
         result = self.mscript_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def generate_build_guidance_for_plan(
+        self,
+        spec: PaperSpec,
+        plan: ModelGenerationPlan,
+    ) -> ModelGenerationPlan:
+        _ = spec
+        self.guidance_calls += 1
+        self.guidance_inputs.append(plan)
+        if not self.guidance_results:
+            return plan
+        result = self.guidance_results.pop(0)
         if isinstance(result, Exception):
             raise result
         return result
@@ -734,6 +795,32 @@ def _derived_build_steps():
         _build_step_drafts(),
         _record().plan.parameter_mapping,
         _record().plan.block_recommendations,
+    )
+
+
+def _build_guidance(display_text: str = "Use the documented machine inertia.") -> BuildGuidance:
+    return BuildGuidance(
+        version="v1",
+        assessment=GuidanceAssessment(
+            content_status="outline_only",
+            environment_status="not_checked",
+            overall_status="outline_only",
+            blocking_gap_ids=[],
+        ),
+        details=[
+            GuidanceDetail(
+                detail_id="GD-001",
+                step_id="STEP-001",
+                detail_kind="parameter_value",
+                basis="document_extracted",
+                actionability="actionable",
+                display_text=display_text,
+                evidence=[_document_evidence()],
+                convention_code=None,
+                confirmation_reason_code=None,
+            )
+        ],
+        gaps=[],
     )
 
 

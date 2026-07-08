@@ -815,6 +815,18 @@
         }
       ],
       "default": null
+    },
+    "guidance_status": {
+      "default": "not_generated",
+      "enum": [
+        "not_generated",
+        "generated",
+        "stale_pending_regeneration",
+        "generation_failed",
+        "no_document_basis"
+      ],
+      "title": "Guidance Status",
+      "type": "string"
     }
   },
   "required": [

@@ -89,6 +89,19 @@ export type GuidanceGapKind =
   | "insufficient_document_evidence";
 export type GuidanceScope = "plan" | "step" | "subsystem";
 export type GuidanceSeverity = "blocking" | "warning";
+export type GuidanceStatus =
+  | "not_generated"
+  | "generated"
+  | "stale_pending_regeneration"
+  | "generation_failed"
+  | "no_document_basis";
+export type GuidanceViewState =
+  | "current"
+  | "stale_with_snapshot"
+  | "stale_empty"
+  | "failed_retryable"
+  | "no_basis"
+  | "not_generated";
 
 export type PaperCitationTarget =
   | SectionTarget
@@ -287,6 +300,23 @@ export interface ModelGenerationPlan {
   evidence: PaperEvidenceEntry[];
   build_steps: ModelBuildStep[] | null;
   build_guidance: BuildGuidance | null;
+  guidance_status: GuidanceStatus;
+}
+
+export function guidanceViewState(plan: ModelGenerationPlan): GuidanceViewState {
+  if (plan.guidance_status === "generated") {
+    return "current";
+  }
+  if (plan.guidance_status === "stale_pending_regeneration") {
+    return plan.build_guidance ? "stale_with_snapshot" : "stale_empty";
+  }
+  if (plan.guidance_status === "generation_failed") {
+    return "failed_retryable";
+  }
+  if (plan.guidance_status === "no_document_basis") {
+    return "no_basis";
+  }
+  return "not_generated";
 }
 
 export interface MissingParameterPrompt {
@@ -396,7 +426,7 @@ export interface PaperStatusResponse {
   documents: PaperJobDocumentStatus[];
 }
 
-export interface RerunPlanRequest {}
+export type RerunPlanRequest = Record<string, never>;
 
 export interface RerunPlanResponse {
   paper_id: string;

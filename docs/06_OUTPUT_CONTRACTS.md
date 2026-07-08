@@ -482,7 +482,8 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 | `m_script_skeleton` | string \| null | 可空 | 尽力交付的 `.m` 骨架 |
 | `evidence` | array[`PaperEvidenceEntry`] | 至少 1 个 | 路线图证据 |
 | `build_steps` | array[`ModelBuildStep`] \| null | `null` 或至少 1 个;`[]` 非法 | 结构化人工建模步骤;TASK-507-A 阶段恒为 `null`,TASK-507-B 才开始非空生成 |
-| `build_guidance` | `BuildGuidance` \| null | 默认 `null` | 建模指导细节与缺口契约 substrate;TASK-528-A 阶段端到端恒为 `null`,后续卡再接生成 / 校验 / 渲染 |
+| `build_guidance` | `BuildGuidance` \| null | 默认 `null` | 建模指导细节与缺口契约 substrate;TASK-528-B 接入生成 / grounding gate / 缺口合成,暂不渲染 |
+| `guidance_status` | `Literal["not_generated","generated","stale_pending_regeneration","generation_failed","no_document_basis"]` | 默认 `not_generated` | `build_guidance` 生命周期状态,additive 写入 `plan_json`;不新增表/列,不要求 schema version bump |
 
 子项草稿:
 
@@ -513,7 +514,9 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - 嵌套的 `PaperEvidenceEntry` 同样携带 `document_id`;PlanComposer/MissingDetector/BuildStepPlanner 的 LLM 原始输出只能引用后端提供的私有 `source_ref`,不得直接产出 `document_id` 或 locator。后端在 schema 校验前把 `source_ref` 解析为唯一 `(document_id, canonical locator)`,写入 `document_id` 和 locator 字段后剥离 `source_ref`;该私有字段不进入 domain / schema / 持久化。
 - 无法解析回单一 `(document_id, canonical locator)` 的 LLM evidence 必须丢弃。丢弃后重新运行 schema / provenance / per-doc locator 校验;若 plan evidence 为空、缺 required evidence 位或不满足最小证据数量,不得存 ready bundle,必须 fail-fast 并返回脱敏错误。
 - 若 `PaperSpec.parameter_conflicts` 非空,冲突参数不得进入 `parameter_mapping`,不得在 `m_script_skeleton` 中被赋具体候选值,也不得在 `build_steps.display_text` / `configuration_hints.instruction` / tuning `parameter_directions` 中作为已定值出现。读回旧 ready bundle 时同样执行该守门;命中则视为 stale plan,不得当合法 ready bundle 返回。
-- `BuildGuidance.version` 目前唯一合法值为 `"v1"`;`build_guidance` 在 TASK-528-A 阶段不接生成器,所有运行路径保持 `null`。
+- `BuildGuidance.version` 目前唯一合法值为 `"v1"`;TASK-528-B 接入生成器后,`guidance_status="generated"` 必须携带非空 `build_guidance.details`,且至少一条 `document_extracted` detail 带可解析 `PaperEvidenceEntry` evidence。
+- `guidance_status="not_generated"` / `"generation_failed"` / `"no_document_basis"` 时,`build_guidance` 必须为 `null`;`"stale_pending_regeneration"` 可保留旧 `build_guidance` 作为冻结快照,也可为空表示 step-bound 指导已清空等待重算。
+- `document_extracted` guidance 只允许来自后端 guidance evidence handle 解析后的论文证据;不得用 `display_text`、library choice、原始 build_steps 文案、LLM 摘要或未 resolved 引用作为论文真值。
 - `GuidanceAssessment.content_status` 取值:`reproducible_candidate` / `outline_with_gaps` / `outline_only`。
 - `GuidanceAssessment.environment_status` 取值:`not_checked` / `compatible` / `missing_toolbox` / `incompatible`。
 - `GuidanceAssessment.overall_status` 取值:`reproducible_ready` / `reproducible_candidate_env_unchecked` / `outline_with_gaps` / `outline_only`。
@@ -522,9 +525,9 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - `GuidanceDetail.actionability` 取值:`actionable` / `notice_only` / `blocked_pending_confirmation`。
 - `GuidanceGap.gap_kind` 取值:`missing_support_component` / `missing_parameter_value` / `toolbox_unverified` / `library_variant_unresolved` / `missing_connection_detail` / `missing_configuration_detail` / `insufficient_document_evidence`。
 - `GuidanceGap.scope` 取值:`plan` / `step` / `subsystem`;`GuidanceGap.severity` 取值:`blocking` / `warning`。
-- `GuidanceDetail.evidence` 复用 `PaperEvidenceEntry`,不使用讲解体系 `SourceRef`;TASK-528-A 只做类型 / 枚举 / 必填结构约束,不实现 basis、evidence、gap、severity 等组合语义校验。
+- `GuidanceDetail.evidence` 复用 `PaperEvidenceEntry`,不使用讲解体系 `SourceRef`;TASK-528-B 已实现生成当场最小 grounding / resolver / no-basis 护栏,更穷尽的语义硬门留给后续卡。
 
-**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)→ v0.8(2026-07-01;TASK-521-C 对外 PaperAskCitation 追加可空 document_id/document_label,LLM ask prompt payload 仍不含 document 维度)→ v0.9(2026-07-08;TASK-528-A 追加 `build_guidance` 契约 substrate,端到端恒为 null)
+**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)→ v0.8(2026-07-01;TASK-521-C 对外 PaperAskCitation 追加可空 document_id/document_label,LLM ask prompt payload 仍不含 document 维度)→ v0.9(2026-07-08;TASK-528-A 追加 `build_guidance` 契约 substrate,端到端恒为 null)→ v0.10(2026-07-08;TASK-528-B 追加 `guidance_status`,接入 guidance 生成 / grounding gate / lifecycle,仍不渲染)
 
 ### 12.5.1 Regenerate build steps endpoint
 
@@ -549,6 +552,7 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - `build_steps` 生成成功时会替换为新的完整步骤;若暂未生成成功,可以仍为 `null`。
 - `m_script_skeleton` 生成失败不阻断 `build_steps`;失败时保持原值或 `null`。
 - `build_steps` 的表述可能与上一版不同,但必须继续遵守 evidence 双源契约与冲突参数守门。
+- `guidance_status="stale_pending_regeneration"` 本身即构成重生成工作;补参保留旧 `build_guidance` 冻结快照,纠错继续清 `build_steps` / `m_script_skeleton` 但保留快照,步骤重生成会清空旧 step-bound guidance 并重新生成。
 
 ### 12.6 TuningSuggestion schema
 

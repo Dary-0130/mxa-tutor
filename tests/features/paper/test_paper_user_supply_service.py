@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from core.domain.exceptions import PaperPlanGenerationError, PaperUserSupplyError
@@ -7,6 +9,9 @@ from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserE
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
     BlockRecommendation,
+    BuildGuidance,
+    GuidanceAssessment,
+    GuidanceDetail,
     ModelGenerationPlan,
     ParameterMapping,
 )
@@ -189,6 +194,33 @@ async def test_successful_merge_writes_updated_record_to_cache() -> None:
     assert cached.plan.parameter_mapping[0].source is EvidenceSource.USER_SUPPLIED
 
 
+@pytest.mark.asyncio
+async def test_successful_merge_marks_guidance_stale_and_preserves_snapshot() -> None:
+    cache = InMemoryPaperPlanCache()
+    record = _record()
+    old_guidance = _build_guidance()
+    await cache.set(
+        "paper-1",
+        replace(
+            record,
+            plan=replace(
+                record.plan,
+                build_guidance=old_guidance,
+                guidance_status="generated",
+            ),
+        ),
+    )
+
+    updated = await UserSupplyService(cache).merge("paper-1", [_response()])
+
+    cached = await cache.get("paper-1")
+    assert updated.guidance_status == "stale_pending_regeneration"
+    assert updated.build_guidance == old_guidance
+    assert cached is not None
+    assert cached.plan.guidance_status == "stale_pending_regeneration"
+    assert cached.plan.build_guidance == old_guidance
+
+
 def _record(
     *,
     mapping_value: str = MISSING_VALUE_SENTINEL,
@@ -322,6 +354,32 @@ def _response(
         user_supplied_value=user_supplied_value,
         user_supplied_unit=user_supplied_unit,
         user_supplied_note=None,
+    )
+
+
+def _build_guidance() -> BuildGuidance:
+    return BuildGuidance(
+        version="v1",
+        assessment=GuidanceAssessment(
+            content_status="outline_only",
+            environment_status="not_checked",
+            overall_status="outline_only",
+            blocking_gap_ids=[],
+        ),
+        details=[
+            GuidanceDetail(
+                detail_id="GD-001",
+                step_id="STEP-001",
+                detail_kind="parameter_value",
+                basis="document_extracted",
+                actionability="actionable",
+                display_text="Use the documented machine inertia.",
+                evidence=[_document_evidence()],
+                convention_code=None,
+                confirmation_reason_code=None,
+            )
+        ],
+        gaps=[],
     )
 
 

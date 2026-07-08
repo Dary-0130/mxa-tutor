@@ -22,6 +22,9 @@ from core.domain.paper_parameter_correction import (
 )
 from core.domain.paper_plan import (
     BlockRecommendation,
+    BuildGuidance,
+    GuidanceAssessment,
+    GuidanceDetail,
     ModelGenerationPlan,
     PaperPlanRecord,
     ParameterMapping,
@@ -45,6 +48,28 @@ async def test_save_ready_bundle_round_trips_across_connections(
     fresh_store = SqlitePaperBundleStore(initialized_db_path)
     assert await fresh_store.get_spec("paper-1") == record.spec
     assert await fresh_store.get_plan_record("paper-1") == record
+
+
+async def test_save_ready_bundle_normalizes_terminal_guidance_before_write(
+    initialized_db_path: str,
+) -> None:
+    record = _record()
+    dirty_record = replace(
+        record,
+        plan=replace(
+            record.plan,
+            build_guidance=_build_guidance(),
+            guidance_status="generation_failed",
+        ),
+    )
+    store = SqlitePaperBundleStore(initialized_db_path)
+
+    await store.save_ready_bundle(dirty_record)
+
+    fresh_record = await SqlitePaperBundleStore(initialized_db_path).get_plan_record("paper-1")
+    assert fresh_record is not None
+    assert fresh_record.plan.guidance_status == "generation_failed"
+    assert fresh_record.plan.build_guidance is None
 
 
 async def test_save_ready_bundle_with_source_round_trips_minimal_source(
@@ -676,6 +701,7 @@ async def test_legacy_plan_and_missing_json_migrates_nested_evidence(
     assert record.plan.evidence[0].document_id == "DOC-001"
     assert record.plan.block_recommendations[0].paper_reference.document_id == "DOC-001"
     assert record.plan.build_guidance is None
+    assert record.plan.guidance_status == "not_generated"
     assert record.plan.build_steps is not None
     assert record.plan.build_steps[0].evidence[0].document_id == "DOC-001"
     assert record.plan.build_steps[0].block_refs[0].paper_reference is not None
@@ -1118,6 +1144,32 @@ def _record(*, title: str = "Short-circuit report") -> PaperPlanRecord:
                 model_param_name="Synchronous Machine.H",
             )
         ],
+    )
+
+
+def _build_guidance() -> BuildGuidance:
+    return BuildGuidance(
+        version="v1",
+        assessment=GuidanceAssessment(
+            content_status="outline_only",
+            environment_status="not_checked",
+            overall_status="outline_only",
+            blocking_gap_ids=[],
+        ),
+        details=[
+            GuidanceDetail(
+                detail_id="GD-001",
+                step_id="STEP-001",
+                detail_kind="parameter_value",
+                basis="document_extracted",
+                actionability="actionable",
+                display_text="Use the documented machine inertia.",
+                evidence=[_document_evidence()],
+                convention_code=None,
+                confirmation_reason_code=None,
+            )
+        ],
+        gaps=[],
     )
 
 

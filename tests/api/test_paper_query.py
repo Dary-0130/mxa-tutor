@@ -205,6 +205,11 @@ def test_user_supply_updates_sqlite_view_then_get_and_tuning_read_updated_record
     assert supply_response.status_code == 200
     assert plan_response.status_code == 200
     assert tuning_response.status_code == 200
+    updated_plan = supply_response.json()["updated_plan"]
+    assert updated_plan["guidance_status"] == "stale_pending_regeneration"
+    assert updated_plan["build_guidance"] is None
+    plan_payload = plan_response.json()["plan"]
+    assert plan_payload["guidance_status"] == "stale_pending_regeneration"
     assert [
         prompt["prompt_id"] for prompt in plan_response.json()["remaining_missing_prompts"]
     ] == ["MISS-2"]

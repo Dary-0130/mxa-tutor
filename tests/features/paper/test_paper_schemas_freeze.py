@@ -362,6 +362,15 @@ def test_model_generation_plan_micro_patch_constraints_are_frozen() -> None:
     )
     assert ModelGenerationPlanModel.model_fields["build_guidance"].default is None
     assert fields(ModelGenerationPlan)[9].type == BuildGuidance | None
+    assert get_args(ModelGenerationPlanModel.model_fields["guidance_status"].annotation) == (
+        "not_generated",
+        "generated",
+        "stale_pending_regeneration",
+        "generation_failed",
+        "no_document_basis",
+    )
+    assert ModelGenerationPlanModel.model_fields["guidance_status"].default == "not_generated"
+    assert fields(ModelGenerationPlan)[10].name == "guidance_status"
 
 
 def test_document_identity_fields_are_required_but_nullable_where_expected() -> None:
@@ -497,11 +506,46 @@ def test_build_guidance_none_missing_and_object_roundtrip() -> None:
 
     assert legacy_model.build_guidance is None
     assert legacy_model.to_domain().build_guidance is None
+    assert legacy_model.guidance_status == "not_generated"
     assert explicit_none_model.to_domain().build_guidance is None
     assert with_guidance_model.to_domain().build_guidance == _build_guidance()
     assert with_guidance_model.model_dump(mode="json")["build_guidance"] == (
         _build_guidance_payload()
     )
+    assert with_guidance_model.guidance_status == "generated"
+
+
+def test_guidance_status_lifecycle_combinations_are_enforced() -> None:
+    generated_payload = {
+        **_plan_payload(),
+        "build_guidance": _build_guidance_payload(),
+        "guidance_status": "generated",
+    }
+    stale_payload = {
+        **_plan_payload(),
+        "build_guidance": _build_guidance_payload(),
+        "guidance_status": "stale_pending_regeneration",
+    }
+
+    assert ModelGenerationPlanModel.model_validate(generated_payload).guidance_status == (
+        "generated"
+    )
+    assert ModelGenerationPlanModel.model_validate(stale_payload).build_guidance is not None
+
+    with pytest.raises(ValidationError):
+        ModelGenerationPlanModel.model_validate(
+            {**_plan_payload(), "build_guidance": _build_guidance_payload()}
+        )
+    with pytest.raises(ValidationError):
+        ModelGenerationPlanModel.model_validate({**_plan_payload(), "guidance_status": "generated"})
+    with pytest.raises(ValidationError):
+        ModelGenerationPlanModel.model_validate(
+            {
+                **_plan_payload(),
+                "build_guidance": _build_guidance_payload(),
+                "guidance_status": "generation_failed",
+            }
+        )
 
 
 def test_build_guidance_literals_required_nullable_fields_and_schema_are_frozen() -> None:
@@ -1150,6 +1194,7 @@ def _plan_domain(*, build_steps: bool, build_guidance: bool = False) -> ModelGen
         evidence=[evidence],
         build_steps=_build_steps() if build_steps else None,
         build_guidance=_build_guidance() if build_guidance else None,
+        guidance_status="generated" if build_guidance else "not_generated",
     )
 
 
