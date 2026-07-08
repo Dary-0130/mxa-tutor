@@ -482,6 +482,7 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 | `m_script_skeleton` | string \| null | 可空 | 尽力交付的 `.m` 骨架 |
 | `evidence` | array[`PaperEvidenceEntry`] | 至少 1 个 | 路线图证据 |
 | `build_steps` | array[`ModelBuildStep`] \| null | `null` 或至少 1 个;`[]` 非法 | 结构化人工建模步骤;TASK-507-A 阶段恒为 `null`,TASK-507-B 才开始非空生成 |
+| `build_guidance` | `BuildGuidance` \| null | 默认 `null` | 建模指导细节与缺口契约 substrate;TASK-528-A 阶段端到端恒为 `null`,后续卡再接生成 / 校验 / 渲染 |
 
 子项草稿:
 
@@ -494,6 +495,10 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 | `ConnectionHint` | `from_block_ref` / `from_port` / `to_block_ref` / `to_port` / `signal_meaning` |
 | `ConfigurationHint` | `target` / `setting_name` / `instruction` / `evidence` |
 | `ModelBuildStep` | `step_id` / `title` / `intent` / `block_refs` / `parameter_refs` / `connection_hints` / `configuration_hints` / `depends_on` / `evidence` / `display_text` |
+| `BuildGuidance` | `version` / `assessment` / `details` / `gaps` |
+| `GuidanceAssessment` | `content_status` / `environment_status` / `overall_status` / `blocking_gap_ids` |
+| `GuidanceDetail` | `detail_id` / `step_id` / `detail_kind` / `basis` / `actionability` / `display_text` / `evidence` / `convention_code` / `confirmation_reason_code` |
+| `GuidanceGap` | `gap_id` / `gap_kind` / `scope` / `step_id` / `basis` / `severity` / `display_text` |
 
 **子项约束补充**(v0.3.2 微补丁,基于样本包实测驱动):
 
@@ -508,8 +513,18 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - 嵌套的 `PaperEvidenceEntry` 同样携带 `document_id`;PlanComposer/MissingDetector/BuildStepPlanner 的 LLM 原始输出只能引用后端提供的私有 `source_ref`,不得直接产出 `document_id` 或 locator。后端在 schema 校验前把 `source_ref` 解析为唯一 `(document_id, canonical locator)`,写入 `document_id` 和 locator 字段后剥离 `source_ref`;该私有字段不进入 domain / schema / 持久化。
 - 无法解析回单一 `(document_id, canonical locator)` 的 LLM evidence 必须丢弃。丢弃后重新运行 schema / provenance / per-doc locator 校验;若 plan evidence 为空、缺 required evidence 位或不满足最小证据数量,不得存 ready bundle,必须 fail-fast 并返回脱敏错误。
 - 若 `PaperSpec.parameter_conflicts` 非空,冲突参数不得进入 `parameter_mapping`,不得在 `m_script_skeleton` 中被赋具体候选值,也不得在 `build_steps.display_text` / `configuration_hints.instruction` / tuning `parameter_directions` 中作为已定值出现。读回旧 ready bundle 时同样执行该守门;命中则视为 stale plan,不得当合法 ready bundle 返回。
+- `BuildGuidance.version` 目前唯一合法值为 `"v1"`;`build_guidance` 在 TASK-528-A 阶段不接生成器,所有运行路径保持 `null`。
+- `GuidanceAssessment.content_status` 取值:`reproducible_candidate` / `outline_with_gaps` / `outline_only`。
+- `GuidanceAssessment.environment_status` 取值:`not_checked` / `compatible` / `missing_toolbox` / `incompatible`。
+- `GuidanceAssessment.overall_status` 取值:`reproducible_ready` / `reproducible_candidate_env_unchecked` / `outline_with_gaps` / `outline_only`。
+- `GuidanceDetail.detail_kind` 取值:`block_selection` / `subsystem_internal_structure` / `connection` / `parameter_value` / `configuration` / `verification` / `gap_notice`。
+- `GuidanceDetail.basis` 取值:`document_extracted` / `engineering_convention` / `user_confirmation_required`;`GuidanceGap.basis` 只允许 `engineering_convention` / `user_confirmation_required`。
+- `GuidanceDetail.actionability` 取值:`actionable` / `notice_only` / `blocked_pending_confirmation`。
+- `GuidanceGap.gap_kind` 取值:`missing_support_component` / `missing_parameter_value` / `toolbox_unverified` / `library_variant_unresolved` / `missing_connection_detail` / `missing_configuration_detail` / `insufficient_document_evidence`。
+- `GuidanceGap.scope` 取值:`plan` / `step` / `subsystem`;`GuidanceGap.severity` 取值:`blocking` / `warning`。
+- `GuidanceDetail.evidence` 复用 `PaperEvidenceEntry`,不使用讲解体系 `SourceRef`;TASK-528-A 只做类型 / 枚举 / 必填结构约束,不实现 basis、evidence、gap、severity 等组合语义校验。
 
-**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)→ v0.8(2026-07-01;TASK-521-C 对外 PaperAskCitation 追加可空 document_id/document_label,LLM ask prompt payload 仍不含 document 维度)
+**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)→ v0.8(2026-07-01;TASK-521-C 对外 PaperAskCitation 追加可空 document_id/document_label,LLM ask prompt payload 仍不含 document 维度)→ v0.9(2026-07-08;TASK-528-A 追加 `build_guidance` 契约 substrate,端到端恒为 null)
 
 ### 12.5.1 Regenerate build steps endpoint
 

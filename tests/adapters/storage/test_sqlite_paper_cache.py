@@ -675,6 +675,7 @@ async def test_legacy_plan_and_missing_json_migrates_nested_evidence(
     assert record is not None
     assert record.plan.evidence[0].document_id == "DOC-001"
     assert record.plan.block_recommendations[0].paper_reference.document_id == "DOC-001"
+    assert record.plan.build_guidance is None
     assert record.plan.build_steps is not None
     assert record.plan.build_steps[0].evidence[0].document_id == "DOC-001"
     assert record.plan.build_steps[0].block_refs[0].paper_reference is not None

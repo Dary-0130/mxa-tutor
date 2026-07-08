@@ -49,6 +49,46 @@ export type PaperUploadNextAction =
   | "open_result"
   | "none"
   | "contact_support";
+export type GuidanceContentStatus =
+  | "reproducible_candidate"
+  | "outline_with_gaps"
+  | "outline_only";
+export type GuidanceEnvironmentStatus =
+  | "not_checked"
+  | "compatible"
+  | "missing_toolbox"
+  | "incompatible";
+export type GuidanceOverallStatus =
+  | "reproducible_ready"
+  | "reproducible_candidate_env_unchecked"
+  | "outline_with_gaps"
+  | "outline_only";
+export type GuidanceDetailKind =
+  | "block_selection"
+  | "subsystem_internal_structure"
+  | "connection"
+  | "parameter_value"
+  | "configuration"
+  | "verification"
+  | "gap_notice";
+export type GuidanceBasis =
+  | "document_extracted"
+  | "engineering_convention"
+  | "user_confirmation_required";
+export type GuidanceActionability =
+  | "actionable"
+  | "notice_only"
+  | "blocked_pending_confirmation";
+export type GuidanceGapKind =
+  | "missing_support_component"
+  | "missing_parameter_value"
+  | "toolbox_unverified"
+  | "library_variant_unresolved"
+  | "missing_connection_detail"
+  | "missing_configuration_detail"
+  | "insufficient_document_evidence";
+export type GuidanceScope = "plan" | "step" | "subsystem";
+export type GuidanceSeverity = "blocking" | "warning";
 
 export type PaperCitationTarget =
   | SectionTarget
@@ -200,6 +240,42 @@ export interface ModelBuildStep {
   display_text: string;
 }
 
+export interface GuidanceAssessment {
+  content_status: GuidanceContentStatus;
+  environment_status: GuidanceEnvironmentStatus;
+  overall_status: GuidanceOverallStatus;
+  blocking_gap_ids: string[];
+}
+
+export interface GuidanceDetail {
+  detail_id: string;
+  step_id: string;
+  detail_kind: GuidanceDetailKind;
+  basis: GuidanceBasis;
+  actionability: GuidanceActionability;
+  display_text: string;
+  evidence: PaperEvidenceEntry[];
+  convention_code: string | null;
+  confirmation_reason_code: string | null;
+}
+
+export interface GuidanceGap {
+  gap_id: string;
+  gap_kind: GuidanceGapKind;
+  scope: GuidanceScope;
+  step_id: string | null;
+  basis: Exclude<GuidanceBasis, "document_extracted">;
+  severity: GuidanceSeverity;
+  display_text: string;
+}
+
+export interface BuildGuidance {
+  version: "v1";
+  assessment: GuidanceAssessment;
+  details: GuidanceDetail[];
+  gaps: GuidanceGap[];
+}
+
 export interface ModelGenerationPlan {
   plan_id: string;
   paper_spec_id: string;
@@ -210,6 +286,7 @@ export interface ModelGenerationPlan {
   m_script_skeleton?: string | null;
   evidence: PaperEvidenceEntry[];
   build_steps: ModelBuildStep[] | null;
+  build_guidance: BuildGuidance | null;
 }
 
 export interface MissingParameterPrompt {

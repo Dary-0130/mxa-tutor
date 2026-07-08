@@ -169,6 +169,7 @@ def test_sqlite_get_plan_record_reads_legacy_plan_without_build_steps(
 
     assert record is not None
     assert record.plan.build_steps is None
+    assert record.plan.build_guidance is None
 
 
 def test_user_supply_updates_sqlite_view_then_get_and_tuning_read_updated_record(
@@ -254,6 +255,7 @@ async def _insert_legacy_ready_bundle(db_path: str) -> None:
     plan_payload = TypeAdapter(ModelGenerationPlan).dump_python(record.plan, mode="json")
     assert isinstance(plan_payload, dict)
     plan_payload.pop("build_steps")
+    plan_payload.pop("build_guidance")
     async with open_connection(db_path) as conn:
         await conn.execute(
             """

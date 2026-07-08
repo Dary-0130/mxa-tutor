@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import fields
 from typing import Any, get_args
 
@@ -18,8 +19,12 @@ from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserE
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_plan import (
     BlockRecommendation,
+    BuildGuidance,
     ConfigurationHint,
     ConnectionHint,
+    GuidanceAssessment,
+    GuidanceDetail,
+    GuidanceGap,
     ModelBuildStep,
     ModelGenerationPlan,
     ParameterMapping,
@@ -49,10 +54,14 @@ from features.paper.paper_ask_schemas import (
 )
 from features.paper.paper_schemas import (
     BlockRecommendationModel,
+    BuildGuidanceModel,
     ConfigurationHintModel,
     ConnectionHintModel,
     EquationEntryModel,
     FigureRefModel,
+    GuidanceAssessmentModel,
+    GuidanceDetailModel,
+    GuidanceGapModel,
     MissingParameterPromptModel,
     ModelBuildStepModel,
     ModelGenerationPlanModel,
@@ -107,6 +116,10 @@ NESTED_MODELS = (
     ConnectionHintModel,
     ConfigurationHintModel,
     ModelBuildStepModel,
+    GuidanceAssessmentModel,
+    GuidanceDetailModel,
+    GuidanceGapModel,
+    BuildGuidanceModel,
     ParameterDirectionModel,
     PaperAskCitationModel,
     SectionTargetModel,
@@ -218,6 +231,10 @@ def test_nested_model_count_and_names_are_frozen() -> None:
         "ConnectionHintModel",
         "ConfigurationHintModel",
         "ModelBuildStepModel",
+        "GuidanceAssessmentModel",
+        "GuidanceDetailModel",
+        "GuidanceGapModel",
+        "BuildGuidanceModel",
         "ParameterDirectionModel",
         "PaperAskCitationModel",
         "SectionTargetModel",
@@ -299,6 +316,16 @@ def test_nested_field_order_matches_domain() -> None:
     assert tuple(ModelBuildStepModel.model_fields) == tuple(
         field.name for field in fields(ModelBuildStep)
     )
+    assert tuple(GuidanceAssessmentModel.model_fields) == tuple(
+        field.name for field in fields(GuidanceAssessment)
+    )
+    assert tuple(GuidanceDetailModel.model_fields) == tuple(
+        field.name for field in fields(GuidanceDetail)
+    )
+    assert tuple(GuidanceGapModel.model_fields) == tuple(field.name for field in fields(GuidanceGap))
+    assert tuple(BuildGuidanceModel.model_fields) == tuple(
+        field.name for field in fields(BuildGuidance)
+    )
     assert tuple(ParameterDirectionModel.model_fields) == tuple(
         field.name for field in fields(ParameterDirection)
     )
@@ -328,6 +355,11 @@ def test_model_generation_plan_micro_patch_constraints_are_frozen() -> None:
         list[ModelBuildStepModel] | None
     )
     assert fields(ModelGenerationPlan)[8].type == list[ModelBuildStep] | None
+    assert ModelGenerationPlanModel.model_fields["build_guidance"].annotation == (
+        BuildGuidanceModel | None
+    )
+    assert ModelGenerationPlanModel.model_fields["build_guidance"].default is None
+    assert fields(ModelGenerationPlan)[9].type == BuildGuidance | None
 
 
 def test_document_identity_fields_are_required_but_nullable_where_expected() -> None:
@@ -448,6 +480,95 @@ def test_build_steps_empty_rejected_and_json_schema_has_min_items() -> None:
 
     build_steps_schema = ModelGenerationPlanModel.model_json_schema()["properties"]["build_steps"]
     assert build_steps_schema["anyOf"][0]["minItems"] == 1
+
+
+def test_build_guidance_none_missing_and_object_roundtrip() -> None:
+    legacy_payload = _plan_payload()
+
+    legacy_model = ModelGenerationPlanModel.model_validate(legacy_payload)
+    explicit_none_model = ModelGenerationPlanModel.model_validate(
+        {**legacy_payload, "build_guidance": None}
+    )
+    with_guidance_model = ModelGenerationPlanModel.from_domain(
+        _plan_domain(build_steps=False, build_guidance=True)
+    )
+
+    assert legacy_model.build_guidance is None
+    assert legacy_model.to_domain().build_guidance is None
+    assert explicit_none_model.to_domain().build_guidance is None
+    assert with_guidance_model.to_domain().build_guidance == _build_guidance()
+    assert with_guidance_model.model_dump(mode="json")["build_guidance"] == (
+        _build_guidance_payload()
+    )
+
+
+def test_build_guidance_literals_required_nullable_fields_and_schema_are_frozen() -> None:
+    payload = _build_guidance_payload()
+    model = BuildGuidanceModel.model_validate(payload)
+
+    assert model.to_domain() == _build_guidance()
+
+    invalid_payloads = []
+    invalid = deepcopy(payload)
+    invalid["version"] = "v2"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["assessment"]["content_status"] = "ready"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["assessment"]["environment_status"] = "unknown"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["assessment"]["overall_status"] = "ready"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["details"][0]["detail_kind"] = "free_text"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["details"][0]["basis"] = "source_ref"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["details"][0]["actionability"] = "maybe"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["gaps"][0]["gap_kind"] = "unknown_gap"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["gaps"][0]["scope"] = "paper"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["gaps"][0]["basis"] = "document_extracted"
+    invalid_payloads.append(invalid)
+    invalid = deepcopy(payload)
+    invalid["gaps"][0]["severity"] = "fatal"
+    invalid_payloads.append(invalid)
+
+    for invalid_payload in invalid_payloads:
+        with pytest.raises(ValidationError):
+            BuildGuidanceModel.model_validate(invalid_payload)
+
+    missing_nullable_detail = deepcopy(payload)
+    del missing_nullable_detail["details"][0]["convention_code"]
+    with pytest.raises(ValidationError):
+        BuildGuidanceModel.model_validate(missing_nullable_detail)
+
+    missing_nullable_gap = deepcopy(payload)
+    del missing_nullable_gap["gaps"][0]["step_id"]
+    with pytest.raises(ValidationError):
+        BuildGuidanceModel.model_validate(missing_nullable_gap)
+
+    convention_payload = deepcopy(payload)
+    convention_payload["details"][0]["basis"] = "engineering_convention"
+    convention_payload["details"][0]["convention_code"] = "simulink_standard_component"
+    assert BuildGuidanceModel.model_validate(convention_payload).details[0].basis == (
+        "engineering_convention"
+    )
+
+    schema = BuildGuidanceModel.model_json_schema()
+    assert schema["properties"]["version"]["const"] == "v1"
+    assert set(schema["required"]) == {"version", "assessment", "details", "gaps"}
+    assert "convention_code" in schema["$defs"]["GuidanceDetailModel"]["required"]
+    assert "step_id" in schema["$defs"]["GuidanceGapModel"]["required"]
 
 
 def test_paper_ask_defaults_and_literals_are_frozen() -> None:
@@ -971,7 +1092,50 @@ def _build_step_payload() -> dict[str, object]:
     }
 
 
-def _plan_domain(*, build_steps: bool) -> ModelGenerationPlan:
+def _build_guidance_payload() -> dict[str, object]:
+    return {
+        "version": "v1",
+        "assessment": {
+            "content_status": "reproducible_candidate",
+            "environment_status": "not_checked",
+            "overall_status": "reproducible_candidate_env_unchecked",
+            "blocking_gap_ids": ["GAP-001"],
+        },
+        "details": [
+            {
+                "detail_id": "GD-001",
+                "step_id": "STEP-001",
+                "detail_kind": "block_selection",
+                "basis": "document_extracted",
+                "actionability": "actionable",
+                "display_text": "Use the machine block supported by the extracted source.",
+                "evidence": [
+                    {
+                        **_document_evidence_payload(),
+                        "user_action": None,
+                        "parameter_correction_id": None,
+                        "correction_param_key": None,
+                    }
+                ],
+                "convention_code": None,
+                "confirmation_reason_code": None,
+            }
+        ],
+        "gaps": [
+            {
+                "gap_id": "GAP-001",
+                "gap_kind": "toolbox_unverified",
+                "scope": "step",
+                "step_id": "STEP-001",
+                "basis": "user_confirmation_required",
+                "severity": "blocking",
+                "display_text": "Confirm the toolbox variant before treating this as ready.",
+            }
+        ],
+    }
+
+
+def _plan_domain(*, build_steps: bool, build_guidance: bool = False) -> ModelGenerationPlan:
     evidence = _document_evidence()
     return ModelGenerationPlan(
         plan_id="PLAN-1",
@@ -983,6 +1147,7 @@ def _plan_domain(*, build_steps: bool) -> ModelGenerationPlan:
         m_script_skeleton=None,
         evidence=[evidence],
         build_steps=_build_steps() if build_steps else None,
+        build_guidance=_build_guidance() if build_guidance else None,
     )
 
 
@@ -1030,6 +1195,43 @@ def _build_steps() -> list[ModelBuildStep]:
             display_text="Place the machine block and route its measurement output.",
         )
     ]
+
+
+def _build_guidance() -> BuildGuidance:
+    evidence = _document_evidence()
+    return BuildGuidance(
+        version="v1",
+        assessment=GuidanceAssessment(
+            content_status="reproducible_candidate",
+            environment_status="not_checked",
+            overall_status="reproducible_candidate_env_unchecked",
+            blocking_gap_ids=["GAP-001"],
+        ),
+        details=[
+            GuidanceDetail(
+                detail_id="GD-001",
+                step_id="STEP-001",
+                detail_kind="block_selection",
+                basis="document_extracted",
+                actionability="actionable",
+                display_text="Use the machine block supported by the extracted source.",
+                evidence=[evidence],
+                convention_code=None,
+                confirmation_reason_code=None,
+            )
+        ],
+        gaps=[
+            GuidanceGap(
+                gap_id="GAP-001",
+                gap_kind="toolbox_unverified",
+                scope="step",
+                step_id="STEP-001",
+                basis="user_confirmation_required",
+                severity="blocking",
+                display_text="Confirm the toolbox variant before treating this as ready.",
+            )
+        ],
+    )
 
 
 def _document_evidence() -> PaperEvidenceEntry:
