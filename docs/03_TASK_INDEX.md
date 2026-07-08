@@ -395,6 +395,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-525-B | 论文上传作业化:异步执行 + 文件生命周期收口 + 僵尸恢复 | ✅ | Codex | 已合并;异步上传 + 文件生命周期收口 + 僵尸三段恢复 + rerun CAS 扩源;两 PR:B1 #176 / B2 #177 |
 | TASK-526 | LLM 结构化输出稳定性 | ✅ | Codex | 阶段一诊断 + 526-A 可观测打底(reason_code / finish_reason) + 526-B 结构化重试主体均已完成;526 线收尾;526-A PR #179,526-B PR #181 |
 | TASK-528-A | 建模指导契约 substrate | ✅ | Codex | 已完成;只加 build_guidance 契约 / schema / TS / fixtures;端到端恒 null,不接生成、不渲染、不做语义校验 |
+| TASK-528-B | 建模指导细化层生成(后处理) | ✅ | Codex | 已合并 main(PR #187 / 3c434e4);带来源标注指导生成 + grounding 白名单 + 不编造护栏;遗留:主路真机未跑热(上游 build_steps 降级)、混合型论文护栏验证待补 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
