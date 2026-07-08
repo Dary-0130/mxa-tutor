@@ -16,9 +16,7 @@ GuidanceViewState = Literal[
     "not_generated",
 ]
 
-TERMINAL_EMPTY_STATUSES = frozenset(
-    {"not_generated", "generation_failed", "no_document_basis"}
-)
+TERMINAL_EMPTY_STATUSES = frozenset({"not_generated", "generation_failed", "no_document_basis"})
 
 
 def normalize_guidance_lifecycle(plan: ModelGenerationPlan) -> ModelGenerationPlan:

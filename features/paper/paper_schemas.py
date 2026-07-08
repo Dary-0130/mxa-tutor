@@ -572,11 +572,15 @@ class ModelGenerationPlanModel(_StrictBaseModel):
             ):
                 raise ValueError("generated guidance requires document detail evidence")
             return self
-        if self.guidance_status in {
-            "not_generated",
-            "generation_failed",
-            "no_document_basis",
-        } and self.build_guidance is not None:
+        if (
+            self.guidance_status
+            in {
+                "not_generated",
+                "generation_failed",
+                "no_document_basis",
+            }
+            and self.build_guidance is not None
+        ):
             raise ValueError("guidance_status requires build_guidance null")
         return self
 

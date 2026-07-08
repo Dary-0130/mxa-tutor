@@ -69,6 +69,12 @@ DetailBasis = Literal[
     "engineering_convention",
     "user_confirmation_required",
 ]
+GuidanceContentStatus = Literal["reproducible_candidate", "outline_with_gaps", "outline_only"]
+GeneratedGuidanceOverallStatus = Literal[
+    "reproducible_candidate_env_unchecked",
+    "outline_with_gaps",
+    "outline_only",
+]
 
 CONVENTION_TEMPLATES: dict[str, tuple[DetailKind, Literal["actionable", "notice_only"]]] = {
     "pi_controller_standard_structure": ("subsystem_internal_structure", "actionable"),
@@ -504,10 +510,12 @@ def build_guidance_evidence_pool(
                     add_validated(entry, linked=True)
 
     for mapping in plan.parameter_mapping:
-        entry = _resolved_parameter_mapping_evidence(mapping, spec, tagger)
-        if entry is not None:
-            parameter_mapping_evidence[(mapping.paper_param_name, mapping.model_param_name)] = entry
-            entries.append((entry, True, entry.excerpt or ""))
+        mapping_entry = _resolved_parameter_mapping_evidence(mapping, spec, tagger)
+        if mapping_entry is not None:
+            parameter_mapping_evidence[(mapping.paper_param_name, mapping.model_param_name)] = (
+                mapping_entry
+            )
+            entries.append((mapping_entry, True, mapping_entry.excerpt or ""))
 
     seen: set[tuple[object, ...]] = set()
     cards: list[GuidanceEvidenceCard] = []
@@ -561,7 +569,10 @@ class GroundingTruthIndex:
             if card.evidence.excerpt:
                 truth_texts.append(card.evidence.excerpt)
         for mapping in plan.parameter_mapping:
-            if (mapping.paper_param_name, mapping.model_param_name) in pool.parameter_mapping_evidence:
+            if (
+                mapping.paper_param_name,
+                mapping.model_param_name,
+            ) in pool.parameter_mapping_evidence:
                 truth_texts.extend(_mapping_truth_texts(mapping))
         for block in plan.block_recommendations:
             if _evidence_key(block.paper_reference) in {
@@ -739,7 +750,10 @@ def synthesize_guidance_gaps(
     for detail in details:
         if detail.actionability != "blocked_pending_confirmation":
             continue
-        if any(gap.step_id == detail.step_id and gap.gap_kind == "insufficient_document_evidence" for gap in gaps):
+        if any(
+            gap.step_id == detail.step_id and gap.gap_kind == "insufficient_document_evidence"
+            for gap in gaps
+        ):
             continue
         gaps.append(
             _gap_from_rule(
@@ -771,12 +785,14 @@ def compute_guidance_assessment(
         and any(step.step_id == detail.step_id for step in critical_steps)
     )
     if blocking_gap_ids:
-        content_status = "outline_with_gaps"
-    elif pool.has_build_step_linked_evidence and critical_steps and critical_confirmation_count == 0:
+        content_status: GuidanceContentStatus = "outline_with_gaps"
+    elif (
+        pool.has_build_step_linked_evidence and critical_steps and critical_confirmation_count == 0
+    ):
         content_status = "reproducible_candidate"
     else:
         content_status = "outline_only"
-    overall_status = (
+    overall_status: GeneratedGuidanceOverallStatus = (
         "reproducible_candidate_env_unchecked"
         if content_status == "reproducible_candidate"
         else content_status
@@ -878,9 +894,7 @@ def _confirmation_detail_from_draft(
     reason_code = draft.confirmation_reason_code
     if reason_code not in CONFIRMATION_REASON_TEMPLATES:
         return None
-    direction_hint = (
-        None if _unsafe_direction_hint(draft.direction_hint) else draft.direction_hint
-    )
+    direction_hint = None if _unsafe_direction_hint(draft.direction_hint) else draft.direction_hint
     target = targets.label(draft.step_id, draft.target)
     text = CONFIRMATION_REASON_TEMPLATES[reason_code].format(target=target)
     if direction_hint:
@@ -979,7 +993,9 @@ def _critical_steps(build_steps: list[ModelBuildStep]) -> list[ModelBuildStep]:
 def _is_critical_step(step: ModelBuildStep) -> bool:
     if step.parameter_refs or step.configuration_hints:
         return True
-    if step.connection_hints and not all(_connection_is_display_only(step, hint) for hint in step.connection_hints):
+    if step.connection_hints and not all(
+        _connection_is_display_only(step, hint) for hint in step.connection_hints
+    ):
         return True
     if not step.block_refs:
         return False
@@ -988,9 +1004,7 @@ def _is_critical_step(step: ModelBuildStep) -> bool:
 
 def _block_ref_is_real(block_ref: StepBlockRef) -> bool:
     text = " ".join(
-        part
-        for part in (block_ref.block_type, block_ref.purpose, block_ref.library_path)
-        if part
+        part for part in (block_ref.block_type, block_ref.purpose, block_ref.library_path) if part
     ).casefold()
     if any(term in text for term in REAL_BLOCK_ALLOW_TERMS):
         return True
@@ -998,9 +1012,7 @@ def _block_ref_is_real(block_ref: StepBlockRef) -> bool:
 
 
 def _connection_is_display_only(step: ModelBuildStep, hint: ConnectionHint) -> bool:
-    refs = {
-        block_ref.block_ref_id: block_ref for block_ref in step.block_refs
-    }
+    refs = {block_ref.block_ref_id: block_ref for block_ref in step.block_refs}
     blocks = [refs.get(hint.from_block_ref), refs.get(hint.to_block_ref)]
     present = [block for block in blocks if block is not None]
     return bool(present) and all(not _block_ref_is_real(block) for block in present)
@@ -1051,7 +1063,9 @@ def _gap_text(gap_kind: str, step_id: str, object_key: str) -> str:
     if gap_kind == "missing_parameter_value":
         return f"Step {step_id} needs confirmed document support for parameter object {object_key}."
     if gap_kind == "missing_connection_detail":
-        return f"Step {step_id} needs confirmed document support for connection object {object_key}."
+        return (
+            f"Step {step_id} needs confirmed document support for connection object {object_key}."
+        )
     if gap_kind == "missing_configuration_detail":
         return f"Step {step_id} needs confirmed document support for configuration object {object_key}."
     if gap_kind == "missing_support_component":
@@ -1091,7 +1105,9 @@ def _entry_from_source_ref(source_ref: PlanEvidenceSourceRef) -> PaperEvidenceEn
     return PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
         document_id=source_ref.document_id,
-        paper_section_id=source_ref.locator_id if source_ref.locator_kind == "paper_section_id" else None,
+        paper_section_id=source_ref.locator_id
+        if source_ref.locator_kind == "paper_section_id"
+        else None,
         equation_id=source_ref.locator_id if source_ref.locator_kind == "equation_id" else None,
         figure_id=source_ref.locator_id if source_ref.locator_kind == "figure_id" else None,
         excerpt=source_ref.excerpt,

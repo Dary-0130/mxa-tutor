@@ -163,7 +163,9 @@ async def test_raw_document_claim_with_unresolved_handle_never_becomes_no_basis(
         ]
     )
 
-    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan_without_linked_evidence())
+    updated = await BuildGuidanceGenerator(provider).generate(
+        _spec(), _plan_without_linked_evidence()
+    )
 
     assert updated.guidance_status == "generation_failed"
     assert guidance_view_state(updated) == "failed_retryable"
@@ -205,7 +207,9 @@ async def test_raw_document_claim_with_grounding_failure_never_becomes_no_basis(
 async def test_no_basis_requires_zero_raw_document_claims_and_unlinked_evidence_pool() -> None:
     provider = QueueProvider([{"details": [], "gaps": []}, {"details": [], "gaps": []}])
 
-    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan_without_linked_evidence())
+    updated = await BuildGuidanceGenerator(provider).generate(
+        _spec(), _plan_without_linked_evidence()
+    )
 
     assert updated.guidance_status == "no_document_basis"
     assert guidance_view_state(updated) == "no_basis"
@@ -257,7 +261,9 @@ def test_guidance_lifecycle_view_states_and_terminal_clear() -> None:
         build_guidance=guidance,
         guidance_status="stale_pending_regeneration",
     )
-    stale_empty = replace(_plan(), build_guidance=None, guidance_status="stale_pending_regeneration")
+    stale_empty = replace(
+        _plan(), build_guidance=None, guidance_status="stale_pending_regeneration"
+    )
     failed = normalize_guidance_lifecycle(
         replace(_plan(), build_guidance=guidance, guidance_status="generation_failed")
     )

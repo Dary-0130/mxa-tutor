@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Protocol
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
@@ -44,8 +45,11 @@ from ._prompt_loader import load_prompt_template
 
 
 class _GuidanceEvidenceCardLike(Protocol):
-    handle: str
-    summary: str
+    @property
+    def handle(self) -> str: ...
+
+    @property
+    def summary(self) -> str: ...
 
 
 def build_messages(parsed: ParsedDocument) -> list[LLMMessage]:
@@ -412,7 +416,7 @@ def build_messages_for_tuning_suggest(
 
 def build_messages_for_build_guidance(
     plan: ModelGenerationPlan,
-    evidence_cards: list[_GuidanceEvidenceCardLike],
+    evidence_cards: Sequence[_GuidanceEvidenceCardLike],
 ) -> list[LLMMessage]:
     """Build BuildGuidanceGenerator messages with guidance-only evidence cards."""
 
@@ -615,7 +619,7 @@ def _build_guidance_steps_json(plan: ModelGenerationPlan) -> str:
     return _json_dumps(payload)
 
 
-def _guidance_evidence_cards_json(evidence_cards: list[_GuidanceEvidenceCardLike]) -> str:
+def _guidance_evidence_cards_json(evidence_cards: Sequence[_GuidanceEvidenceCardLike]) -> str:
     payload = []
     for card in evidence_cards:
         payload.append(
