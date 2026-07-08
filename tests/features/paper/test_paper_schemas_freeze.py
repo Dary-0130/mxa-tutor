@@ -322,7 +322,9 @@ def test_nested_field_order_matches_domain() -> None:
     assert tuple(GuidanceDetailModel.model_fields) == tuple(
         field.name for field in fields(GuidanceDetail)
     )
-    assert tuple(GuidanceGapModel.model_fields) == tuple(field.name for field in fields(GuidanceGap))
+    assert tuple(GuidanceGapModel.model_fields) == tuple(
+        field.name for field in fields(GuidanceGap)
+    )
     assert tuple(BuildGuidanceModel.model_fields) == tuple(
         field.name for field in fields(BuildGuidance)
     )
