@@ -47,7 +47,9 @@ def test_expected_model_generation_plan_roundtrip_matches_sample_json() -> None:
     data = _load(PLAN_PATH)
     model = ModelGenerationPlanModel.model_validate(data)
     assert data["build_steps"] is None
+    assert data["build_guidance"] is None
     assert model.build_steps is None
+    assert model.build_guidance is None
     assert _json_dump(ModelGenerationPlanModel.from_domain(model.to_domain())) == data
 
 
@@ -71,7 +73,9 @@ def test_expected_updated_plan_roundtrip_matches_sample_json() -> None:
     data = _load(UPDATED_PLAN_PATH)
     model = ModelGenerationPlanModel.model_validate(data)
     assert data["build_steps"] is None
+    assert data["build_guidance"] is None
     assert model.build_steps is None
+    assert model.build_guidance is None
     assert _json_dump(ModelGenerationPlanModel.from_domain(model.to_domain())) == data
 
 

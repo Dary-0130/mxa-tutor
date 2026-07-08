@@ -25,6 +25,41 @@
       "title": "BlockRecommendationModel",
       "type": "object"
     },
+    "BuildGuidanceModel": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": "v1",
+          "title": "Version",
+          "type": "string"
+        },
+        "assessment": {
+          "$ref": "#/$defs/GuidanceAssessmentModel"
+        },
+        "details": {
+          "items": {
+            "$ref": "#/$defs/GuidanceDetailModel"
+          },
+          "title": "Details",
+          "type": "array"
+        },
+        "gaps": {
+          "items": {
+            "$ref": "#/$defs/GuidanceGapModel"
+          },
+          "title": "Gaps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "version",
+        "assessment",
+        "details",
+        "gaps"
+      ],
+      "title": "BuildGuidanceModel",
+      "type": "object"
+    },
     "ConfigurationHintModel": {
       "additionalProperties": false,
       "properties": {
@@ -135,6 +170,226 @@
       ],
       "title": "EvidenceSource",
       "type": "string"
+    },
+    "GuidanceAssessmentModel": {
+      "additionalProperties": false,
+      "properties": {
+        "content_status": {
+          "enum": [
+            "reproducible_candidate",
+            "outline_with_gaps",
+            "outline_only"
+          ],
+          "title": "Content Status",
+          "type": "string"
+        },
+        "environment_status": {
+          "enum": [
+            "not_checked",
+            "compatible",
+            "missing_toolbox",
+            "incompatible"
+          ],
+          "title": "Environment Status",
+          "type": "string"
+        },
+        "overall_status": {
+          "enum": [
+            "reproducible_ready",
+            "reproducible_candidate_env_unchecked",
+            "outline_with_gaps",
+            "outline_only"
+          ],
+          "title": "Overall Status",
+          "type": "string"
+        },
+        "blocking_gap_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Blocking Gap Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "content_status",
+        "environment_status",
+        "overall_status",
+        "blocking_gap_ids"
+      ],
+      "title": "GuidanceAssessmentModel",
+      "type": "object"
+    },
+    "GuidanceDetailModel": {
+      "additionalProperties": false,
+      "properties": {
+        "detail_id": {
+          "minLength": 1,
+          "title": "Detail Id",
+          "type": "string"
+        },
+        "step_id": {
+          "minLength": 1,
+          "title": "Step Id",
+          "type": "string"
+        },
+        "detail_kind": {
+          "enum": [
+            "block_selection",
+            "subsystem_internal_structure",
+            "connection",
+            "parameter_value",
+            "configuration",
+            "verification",
+            "gap_notice"
+          ],
+          "title": "Detail Kind",
+          "type": "string"
+        },
+        "basis": {
+          "enum": [
+            "document_extracted",
+            "engineering_convention",
+            "user_confirmation_required"
+          ],
+          "title": "Basis",
+          "type": "string"
+        },
+        "actionability": {
+          "enum": [
+            "actionable",
+            "notice_only",
+            "blocked_pending_confirmation"
+          ],
+          "title": "Actionability",
+          "type": "string"
+        },
+        "display_text": {
+          "minLength": 1,
+          "title": "Display Text",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/PaperEvidenceEntryModel"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "convention_code": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Convention Code"
+        },
+        "confirmation_reason_code": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Confirmation Reason Code"
+        }
+      },
+      "required": [
+        "detail_id",
+        "step_id",
+        "detail_kind",
+        "basis",
+        "actionability",
+        "display_text",
+        "evidence",
+        "convention_code",
+        "confirmation_reason_code"
+      ],
+      "title": "GuidanceDetailModel",
+      "type": "object"
+    },
+    "GuidanceGapModel": {
+      "additionalProperties": false,
+      "properties": {
+        "gap_id": {
+          "minLength": 1,
+          "title": "Gap Id",
+          "type": "string"
+        },
+        "gap_kind": {
+          "enum": [
+            "missing_support_component",
+            "missing_parameter_value",
+            "toolbox_unverified",
+            "library_variant_unresolved",
+            "missing_connection_detail",
+            "missing_configuration_detail",
+            "insufficient_document_evidence"
+          ],
+          "title": "Gap Kind",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "plan",
+            "step",
+            "subsystem"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "step_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Step Id"
+        },
+        "basis": {
+          "enum": [
+            "engineering_convention",
+            "user_confirmation_required"
+          ],
+          "title": "Basis",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "blocking",
+            "warning"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "display_text": {
+          "minLength": 1,
+          "title": "Display Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "gap_id",
+        "gap_kind",
+        "scope",
+        "step_id",
+        "basis",
+        "severity",
+        "display_text"
+      ],
+      "title": "GuidanceGapModel",
+      "type": "object"
     },
     "ModelBuildStepModel": {
       "additionalProperties": false,
@@ -549,6 +804,17 @@
       ],
       "default": null,
       "title": "Build Steps"
+    },
+    "build_guidance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BuildGuidanceModel"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

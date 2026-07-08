@@ -168,6 +168,7 @@ async def test_generate_happy_path_returns_plan_missing_bindings() -> None:
     assert plan.plan_id == "PLAN-PAPER-001"
     assert plan.paper_spec_id == "PAPER-001"
     assert plan.build_steps is not None
+    assert plan.build_guidance is None
     assert len(plan.build_steps) == 3
     assert plan.subsystem_breakdown == [step.display_text for step in plan.build_steps]
     assert (

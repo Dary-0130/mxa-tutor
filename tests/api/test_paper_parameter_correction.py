@@ -50,6 +50,7 @@ def test_post_parameter_correction_returns_wrapper_and_get_list() -> None:
     assert body["updated_plan"]["parameter_mapping"][0]["value"] == "4.0"
     assert body["updated_plan"]["parameter_mapping"][0]["source"] == "user_supplied"
     assert body["updated_plan"]["build_steps"] is None
+    assert body["updated_plan"]["build_guidance"] is None
     assert body["correction"]["original"]["value"] == "3.5"
     assert body["correction"]["original"]["document_label"] == "paper.pdf"
     assert list_response.status_code == 200

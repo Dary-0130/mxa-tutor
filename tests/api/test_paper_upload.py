@@ -485,6 +485,7 @@ def test_upload_response_contains_plan_and_missing_prompts(
     assert response.status_code == 200
     assert body["plan"]["plan_id"] == f"PLAN-{body['paper_id']}"
     assert body["plan"]["build_steps"] is None
+    assert body["plan"]["build_guidance"] is None
     assert body["missing_prompts"][0]["prompt_id"] == "MISS-1"
     assert "missing_bindings" not in body
 

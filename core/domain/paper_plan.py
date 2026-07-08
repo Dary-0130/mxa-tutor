@@ -1,6 +1,7 @@
 """Pure Python ModelGenerationPlan domain contract."""
 
 from dataclasses import dataclass
+from typing import Literal
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
@@ -84,6 +85,83 @@ class ModelBuildStep:
 
 
 @dataclass(frozen=True)
+class GuidanceAssessment:
+    """Machine-coded assessment summary for build guidance."""
+
+    content_status: Literal["reproducible_candidate", "outline_with_gaps", "outline_only"]
+    environment_status: Literal["not_checked", "compatible", "missing_toolbox", "incompatible"]
+    overall_status: Literal[
+        "reproducible_ready",
+        "reproducible_candidate_env_unchecked",
+        "outline_with_gaps",
+        "outline_only",
+    ]
+    blocking_gap_ids: list[str]
+
+
+@dataclass(frozen=True)
+class GuidanceDetail:
+    """One structured build guidance detail."""
+
+    detail_id: str
+    step_id: str
+    detail_kind: Literal[
+        "block_selection",
+        "subsystem_internal_structure",
+        "connection",
+        "parameter_value",
+        "configuration",
+        "verification",
+        "gap_notice",
+    ]
+    basis: Literal[
+        "document_extracted",
+        "engineering_convention",
+        "user_confirmation_required",
+    ]
+    actionability: Literal[
+        "actionable",
+        "notice_only",
+        "blocked_pending_confirmation",
+    ]
+    display_text: str
+    evidence: list[PaperEvidenceEntry]
+    convention_code: str | None
+    confirmation_reason_code: str | None
+
+
+@dataclass(frozen=True)
+class GuidanceGap:
+    """Machine-coded gap surfaced by build guidance."""
+
+    gap_id: str
+    gap_kind: Literal[
+        "missing_support_component",
+        "missing_parameter_value",
+        "toolbox_unverified",
+        "library_variant_unresolved",
+        "missing_connection_detail",
+        "missing_configuration_detail",
+        "insufficient_document_evidence",
+    ]
+    scope: Literal["plan", "step", "subsystem"]
+    step_id: str | None
+    basis: Literal["engineering_convention", "user_confirmation_required"]
+    severity: Literal["blocking", "warning"]
+    display_text: str
+
+
+@dataclass(frozen=True)
+class BuildGuidance:
+    """Structured build guidance contract for later generation phases."""
+
+    version: Literal["v1"]
+    assessment: GuidanceAssessment
+    details: list[GuidanceDetail]
+    gaps: list[GuidanceGap]
+
+
+@dataclass(frozen=True)
 class ModelGenerationPlan:
     """Route-map style model generation plan."""
 
@@ -96,6 +174,7 @@ class ModelGenerationPlan:
     m_script_skeleton: str | None
     evidence: list[PaperEvidenceEntry]
     build_steps: list[ModelBuildStep] | None = None
+    build_guidance: BuildGuidance | None = None
 
 
 @dataclass(frozen=True)

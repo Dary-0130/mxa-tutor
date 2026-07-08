@@ -22,8 +22,12 @@ from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_parameter_conflicts import validate_parameter_conflicts_materialized
 from core.domain.paper_plan import (
     BlockRecommendation,
+    BuildGuidance,
     ConfigurationHint,
     ConnectionHint,
+    GuidanceAssessment,
+    GuidanceDetail,
+    GuidanceGap,
     ModelBuildStep,
     ModelGenerationPlan,
     ParameterMapping,
@@ -364,6 +368,120 @@ class ModelBuildStepModel(_StrictBaseModel):
         )
 
 
+class GuidanceAssessmentModel(_StrictBaseModel):
+    content_status: Literal[
+        "reproducible_candidate",
+        "outline_with_gaps",
+        "outline_only",
+    ]
+    environment_status: Literal[
+        "not_checked",
+        "compatible",
+        "missing_toolbox",
+        "incompatible",
+    ]
+    overall_status: Literal[
+        "reproducible_ready",
+        "reproducible_candidate_env_unchecked",
+        "outline_with_gaps",
+        "outline_only",
+    ]
+    blocking_gap_ids: list[str]
+
+    def to_domain(self) -> GuidanceAssessment:
+        return GuidanceAssessment(
+            content_status=self.content_status,
+            environment_status=self.environment_status,
+            overall_status=self.overall_status,
+            blocking_gap_ids=self.blocking_gap_ids,
+        )
+
+
+class GuidanceDetailModel(_StrictBaseModel):
+    detail_id: str = Field(min_length=1)
+    step_id: str = Field(min_length=1)
+    detail_kind: Literal[
+        "block_selection",
+        "subsystem_internal_structure",
+        "connection",
+        "parameter_value",
+        "configuration",
+        "verification",
+        "gap_notice",
+    ]
+    basis: Literal[
+        "document_extracted",
+        "engineering_convention",
+        "user_confirmation_required",
+    ]
+    actionability: Literal[
+        "actionable",
+        "notice_only",
+        "blocked_pending_confirmation",
+    ]
+    display_text: str = Field(min_length=1)
+    evidence: list[PaperEvidenceEntryModel]
+    convention_code: str | None = Field(min_length=1)
+    confirmation_reason_code: str | None = Field(min_length=1)
+
+    def to_domain(self) -> GuidanceDetail:
+        return GuidanceDetail(
+            detail_id=self.detail_id,
+            step_id=self.step_id,
+            detail_kind=self.detail_kind,
+            basis=self.basis,
+            actionability=self.actionability,
+            display_text=self.display_text,
+            evidence=[entry.to_domain() for entry in self.evidence],
+            convention_code=self.convention_code,
+            confirmation_reason_code=self.confirmation_reason_code,
+        )
+
+
+class GuidanceGapModel(_StrictBaseModel):
+    gap_id: str = Field(min_length=1)
+    gap_kind: Literal[
+        "missing_support_component",
+        "missing_parameter_value",
+        "toolbox_unverified",
+        "library_variant_unresolved",
+        "missing_connection_detail",
+        "missing_configuration_detail",
+        "insufficient_document_evidence",
+    ]
+    scope: Literal["plan", "step", "subsystem"]
+    step_id: str | None = Field(min_length=1)
+    basis: Literal["engineering_convention", "user_confirmation_required"]
+    severity: Literal["blocking", "warning"]
+    display_text: str = Field(min_length=1)
+
+    def to_domain(self) -> GuidanceGap:
+        return GuidanceGap(
+            gap_id=self.gap_id,
+            gap_kind=self.gap_kind,
+            scope=self.scope,
+            step_id=self.step_id,
+            basis=self.basis,
+            severity=self.severity,
+            display_text=self.display_text,
+        )
+
+
+class BuildGuidanceModel(_StrictBaseModel):
+    version: Literal["v1"]
+    assessment: GuidanceAssessmentModel
+    details: list[GuidanceDetailModel]
+    gaps: list[GuidanceGapModel]
+
+    def to_domain(self) -> BuildGuidance:
+        return BuildGuidance(
+            version=self.version,
+            assessment=self.assessment.to_domain(),
+            details=[entry.to_domain() for entry in self.details],
+            gaps=[entry.to_domain() for entry in self.gaps],
+        )
+
+
 class ParameterDirectionModel(_StrictBaseModel):
     param_name: str = Field(min_length=1)
     direction: ParameterDirectionValue
@@ -430,6 +548,7 @@ class ModelGenerationPlanModel(_StrictBaseModel):
     m_script_skeleton: str | None = None
     evidence: list[PaperEvidenceEntryModel] = Field(min_length=1)
     build_steps: list[ModelBuildStepModel] | None = Field(default=None, min_length=1)
+    build_guidance: BuildGuidanceModel | None = None
 
     def to_domain(self) -> ModelGenerationPlan:
         return ModelGenerationPlan(
@@ -445,6 +564,9 @@ class ModelGenerationPlanModel(_StrictBaseModel):
                 [entry.to_domain() for entry in self.build_steps]
                 if self.build_steps is not None
                 else None
+            ),
+            build_guidance=(
+                self.build_guidance.to_domain() if self.build_guidance is not None else None
             ),
         )
 
