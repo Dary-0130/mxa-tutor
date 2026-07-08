@@ -7,6 +7,7 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Awaitable
+from dataclasses import replace
 from typing import Annotated, Any, Literal, NoReturn, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
@@ -36,6 +37,7 @@ from features.paper._prompt_builder import (
     build_messages_for_regenerate_build_steps,
     build_messages_for_subsystem_plan,
 )
+from features.paper.build_guidance_generator import BuildGuidanceGenerator
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     BuildStepsDtoValidationError,
@@ -101,12 +103,18 @@ class PaperPlanService:
         text_provider: TextProvider,
         evidence_tagger: EvidenceTagger | None = None,
         plan_assembler: PlanAssembler | None = None,
+        build_guidance_generator: BuildGuidanceGenerator | None = None,
         timeout: float = DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS,
         max_tokens: int = DEFAULT_PAPER_PLAN_MAX_TOKENS,
     ) -> None:
         self._text_provider = text_provider
         self._evidence_tagger = evidence_tagger or EvidenceTagger()
         self._plan_assembler = plan_assembler or PlanAssembler()
+        self._build_guidance_generator = build_guidance_generator or BuildGuidanceGenerator(
+            text_provider,
+            timeout=timeout,
+            max_tokens=max_tokens,
+        )
         self._timeout = timeout
         self._max_tokens = max_tokens
 
@@ -261,8 +269,33 @@ class PaperPlanService:
             paper_id=paper_id,
             build_steps=build_steps,
         )
+        assembled_plan = await self._generate_build_guidance(spec, assembled_plan)
 
         return assembled_plan, missing_prompts, missing_bindings
+
+    async def _generate_build_guidance(
+        self,
+        spec: PaperSpec,
+        plan: ModelGenerationPlan,
+    ) -> ModelGenerationPlan:
+        try:
+            return await self._build_guidance_generator.generate(spec, plan)
+        except Exception as exc:
+            logger.warning(
+                "paper_build_guidance_unhandled_fail_closed reason_code=%s exc_type=%s",
+                "guidance_generator_exception",
+                type(exc).__name__,
+            )
+            return replace(plan, build_guidance=None, guidance_status="generation_failed")
+
+    async def generate_build_guidance_for_plan(
+        self,
+        spec: PaperSpec,
+        plan: ModelGenerationPlan,
+    ) -> ModelGenerationPlan:
+        """Regenerate only build guidance for an already assembled plan."""
+
+        return await self._generate_build_guidance(spec, plan)
 
     async def _call_llm_json(
         self,

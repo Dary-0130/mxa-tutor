@@ -23,6 +23,10 @@ from core.domain.exceptions import (
 from core.domain.paper_parameter_correction import PaperParameterCorrection
 from core.domain.paper_plan import ModelBuildStep, ModelGenerationPlan, PaperPlanRecord
 from core.interfaces.paper_cache import PaperBundleStore, PaperPlanCache
+from features.paper.build_guidance_lifecycle import (
+    guidance_status_requires_regeneration,
+    mark_guidance_stale_for_step_regeneration,
+)
 from features.paper.paper_plan_helpers import (
     BuildStepsDtoValidationError,
     BuildStepsEvidenceError,
@@ -109,6 +113,7 @@ class PaperStepRegenerationService:
                     build_steps=build_steps,
                     mscript=mscript,
                 )
+                updated_plan = await self._regenerate_build_guidance(record, updated_plan)
                 result_kind = _result_kind(
                     build_steps_generated=build_steps is not None,
                     mscript_generated=mscript is not None,
@@ -221,6 +226,17 @@ class PaperStepRegenerationService:
             return
         await asyncio.sleep(self._retry_backoff_base_seconds * (2**attempt))
 
+    async def _regenerate_build_guidance(
+        self,
+        record: PaperPlanRecord,
+        updated_plan: ModelGenerationPlan,
+    ) -> ModelGenerationPlan:
+        stale_plan = mark_guidance_stale_for_step_regeneration(updated_plan)
+        generator = getattr(self._plan_service, "generate_build_guidance_for_plan", None)
+        if generator is None:
+            return stale_plan
+        return await generator(record.spec, stale_plan)
+
     def _validate_regenerated_plan_before_write(
         self,
         updated_plan: ModelGenerationPlan,
@@ -276,7 +292,10 @@ def _has_regeneration_work(
     corrections: list[PaperParameterCorrection],
 ) -> bool:
     return bool(
-        corrections or record.plan.build_steps is None or record.plan.m_script_skeleton is None
+        corrections
+        or record.plan.build_steps is None
+        or record.plan.m_script_skeleton is None
+        or guidance_status_requires_regeneration(record.plan.guidance_status)
     )
 
 

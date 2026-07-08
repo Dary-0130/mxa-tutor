@@ -19,6 +19,7 @@ from core.domain.paper_parameter_correction import (
 from core.domain.paper_plan import ModelGenerationPlan, PaperPlanRecord, ParameterMapping
 from core.domain.paper_spec import PaperDocument, PaperSpec, ParameterConflict
 from core.interfaces.paper_cache import PaperBundleStore
+from features.paper.build_guidance_lifecycle import mark_guidance_stale_for_parameter_change
 from features.paper.paper_parameter_correction_schemas import CorrectionTargetRequest
 
 CanUndoReason = Literal["active", "target_stale", "missing_mapping"]
@@ -184,12 +185,14 @@ class ParameterCorrectionService:
             for entry in plan_copy.evidence
             if not _is_evidence_for_correction(entry, correction.correction_id)
         ]
-        plan_copy = replace(
-            plan_copy,
-            parameter_mapping=parameter_mapping,
-            evidence=evidence,
-            m_script_skeleton=None,
-            build_steps=None,
+        plan_copy = mark_guidance_stale_for_parameter_change(
+            replace(
+                plan_copy,
+                parameter_mapping=parameter_mapping,
+                evidence=evidence,
+                m_script_skeleton=None,
+                build_steps=None,
+            )
         )
         updated_record = replace(record, plan=plan_copy)
 
@@ -306,12 +309,14 @@ class ParameterCorrectionService:
                 correction_param_key=correction.param_key,
             )
         )
-        plan_copy = replace(
-            plan_copy,
-            parameter_mapping=parameter_mapping,
-            evidence=evidence,
-            m_script_skeleton=None,
-            build_steps=None,
+        plan_copy = mark_guidance_stale_for_parameter_change(
+            replace(
+                plan_copy,
+                parameter_mapping=parameter_mapping,
+                evidence=evidence,
+                m_script_skeleton=None,
+                build_steps=None,
+            )
         )
         return replace(record, plan=plan_copy)
 

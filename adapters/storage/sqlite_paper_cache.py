@@ -46,6 +46,7 @@ from core.domain.paper_upload_job import (
 from core.interfaces.paper_cache import PaperBundleStore, PaperPlanCache, PaperSpecCache
 from core.interfaces.paper_reparse_store import PaperReparseStore
 from core.interfaces.paper_upload_job_store import PaperUploadJobStore
+from features.paper.build_guidance_lifecycle import normalize_guidance_lifecycle
 
 T = TypeVar("T")
 ConnectionFactory = Callable[[str], AbstractAsyncContextManager[aiosqlite.Connection]]
@@ -1422,6 +1423,8 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJob
                 spec = cast(PaperSpec, value)
                 validate_paper_spec_document_identity(spec)
                 validate_parameter_conflicts_materialized(spec)
+            if adapter is self._PLAN_ADAPTER:
+                value = cast(T, normalize_guidance_lifecycle(cast(ModelGenerationPlan, value)))
             return adapter.dump_json(value).decode("utf-8")
         except (TypeError, ValueError) as exc:
             logger.error(
@@ -1473,7 +1476,10 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJob
         try:
             raw = json.loads(payload)
             migrated = _migrate_nested_evidence_payloads(raw)
-            return adapter.validate_python(migrated)
+            loaded = adapter.validate_python(migrated)
+            if adapter is self._PLAN_ADAPTER:
+                return cast(T, normalize_guidance_lifecycle(cast(ModelGenerationPlan, loaded)))
+            return loaded
         except (TypeError, ValueError) as exc:
             logger.error(
                 "SqlitePaperBundleStore deserialize failed: error_code={} exception={}",

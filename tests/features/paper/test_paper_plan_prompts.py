@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,6 +24,7 @@ from core.domain.paper_spec import (
 from features.paper._prompt_builder import (
     _dedupe_evidence,
     _shared_paper_plan_constraints,
+    build_messages_for_build_guidance,
     build_messages_for_build_steps,
     build_messages_for_missing_detect,
     build_messages_for_mscript_draft,
@@ -40,6 +42,7 @@ PAPER_PLAN_PROMPTS = [
     "paper_plan_composer.yaml",
     "paper_plan_build_steps.yaml",
     "paper_plan_build_steps_regenerate.yaml",
+    "paper_build_guidance.yaml",
     "paper_plan_subsystem.yaml",
     "paper_plan_mscript.yaml",
     "paper_plan_mscript_from_mapping.yaml",
@@ -95,6 +98,15 @@ def test_load_paper_plan_build_steps_regenerate_yaml() -> None:
     assert "{allowed_user_evidence_json}" in template.user
     assert "{resolved_prompt_ids_json}" in template.user
     assert "correct_extracted" in template.system
+
+
+def test_load_paper_build_guidance_yaml() -> None:
+    template = load_prompt_template("paper_build_guidance.yaml")
+
+    assert template.version == "v0.1"
+    assert "BuildGuidanceGenerator" in template.system
+    assert "{build_steps_skeleton_json}" in template.user
+    assert "{guidance_evidence_cards_json}" in template.user
 
 
 def test_load_paper_plan_mscript_yaml() -> None:
@@ -340,6 +352,29 @@ def test_build_messages_for_build_steps_includes_blocks_params_and_evidence() ->
     assert '"paper_param_name": "H 惯性时间常数"' in user
     assert '"paper_section_id": "S1"' in user
     assert '"source_ref": "REF-001"' in user
+
+
+def test_build_messages_for_build_guidance_uses_private_evidence_cards_only() -> None:
+    messages = build_messages_for_build_guidance(
+        _record_with_resolved_prompt().plan,
+        [
+            SimpleNamespace(
+                handle="GEV-001",
+                summary="Document states the machine parameter.",
+            )
+        ],
+    )
+    system = messages[0].content
+    user = messages[1].content
+
+    assert "guidance evidence handle 契约" in system
+    assert '"handle": "GEV-001"' in user
+    assert "Document states the machine parameter." in user
+    assert "document_id" not in user
+    assert "paper_section_id" not in user
+    assert "equation_id" not in user
+    assert "figure_id" not in user
+    assert "source_ref" not in user
 
 
 def test_mscript_drafter_system_allows_null_output() -> None:

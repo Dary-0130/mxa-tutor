@@ -439,5 +439,6 @@
     }
   ],
   "build_steps": null,
-  "build_guidance": null
+  "build_guidance": null,
+  "guidance_status": "not_generated"
 }

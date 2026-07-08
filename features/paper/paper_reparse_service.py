@@ -20,6 +20,7 @@ from core.domain.paper_plan import PaperPlanRecord
 from core.domain.paper_reparse_source import PaperReparseSource
 from core.interfaces.paper_cache import PaperBundleStore
 from core.interfaces.paper_reparse_store import PaperReparseStore
+from features.paper.build_guidance_lifecycle import mark_guidance_not_generated
 from features.paper.paper_fusion import SuccessfulPaperSpec, fuse_successful_specs
 from features.paper.paper_plan_service import PaperPlanService
 from features.paper.paper_reparse_source import parsed_document_from_source
@@ -130,6 +131,7 @@ class PaperReparseService:
             spec,
             paper_id,
         )
+        plan = mark_guidance_not_generated(plan)
         record = PaperPlanRecord(
             paper_id=paper_id,
             spec=spec,

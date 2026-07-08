@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from typing import Protocol
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_parameter_conflicts import (
@@ -12,7 +14,12 @@ from core.domain.paper_parameter_conflicts import (
     without_conflicted_parameter_entries,
 )
 from core.domain.paper_parameter_correction import PaperParameterCorrection
-from core.domain.paper_plan import BlockRecommendation, PaperPlanRecord, ParameterMapping
+from core.domain.paper_plan import (
+    BlockRecommendation,
+    ModelGenerationPlan,
+    PaperPlanRecord,
+    ParameterMapping,
+)
 from core.domain.paper_spec import EquationEntry, PaperSpec, ParameterConflict, ParameterEntry
 from core.interfaces.document_parser import FigurePlaceholder, ParsedDocument
 from core.interfaces.llm_provider import LLMMessage
@@ -35,6 +42,14 @@ from features.paper.paper_schemas import (
 )
 
 from ._prompt_loader import load_prompt_template
+
+
+class _GuidanceEvidenceCardLike(Protocol):
+    @property
+    def handle(self) -> str: ...
+
+    @property
+    def summary(self) -> str: ...
 
 
 def build_messages(parsed: ParsedDocument) -> list[LLMMessage]:
@@ -399,6 +414,39 @@ def build_messages_for_tuning_suggest(
     return _role_messages(template.system, user)
 
 
+def build_messages_for_build_guidance(
+    plan: ModelGenerationPlan,
+    evidence_cards: Sequence[_GuidanceEvidenceCardLike],
+) -> list[LLMMessage]:
+    """Build BuildGuidanceGenerator messages with guidance-only evidence cards."""
+
+    template = load_prompt_template("paper_build_guidance.yaml")
+    user = _render_user(
+        template.user,
+        {
+            "library_choice": plan.library_choice,
+            "block_recommendations_json": _json_dumps(
+                [
+                    {
+                        "block_type": block.block_type,
+                        "purpose": block.purpose,
+                    }
+                    for block in plan.block_recommendations
+                ]
+            ),
+            "parameter_mapping_json": _json_dumps(
+                [
+                    ParameterMappingModel.from_domain(mapping).model_dump(mode="json")
+                    for mapping in plan.parameter_mapping
+                ]
+            ),
+            "build_steps_skeleton_json": _build_guidance_steps_json(plan),
+            "guidance_evidence_cards_json": _guidance_evidence_cards_json(evidence_cards),
+        },
+    )
+    return _role_messages(template.system, user, shared_constraints=_build_guidance_constraints())
+
+
 def _user_evidence_entry_is_resolved(
     entry: PaperEvidenceEntry,
     resolved_user_refs: set[UserEvidenceRef],
@@ -476,6 +524,111 @@ def _regeneration_constraints() -> str:
 - 工程推断字段只在 SimPowerSystems 工程惯例下推断;若已有,直接复用,不重新编
 - 缺参时只保留 value 字面 "null";不编值
 - plan_id / paper_spec_id 不要自生成"""
+
+
+def _build_guidance_constraints() -> str:
+    return """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
+只返回有效 JSON 对象;不要 markdown,不要解释文字。
+
+【guidance evidence handle 契约】:
+- guidance_evidence_cards_json 只给私有 handle + 摘要;你只能引用 handle,不得输出 document_id / locator / 文件路径
+- document_extracted detail 必须至少引用一个 supporting_evidence_refs handle
+- 没有 handle 或不确定时,只能输出 user_confirmation_required 或白名单 engineering_convention
+- 不得把 library_choice、build_steps_skeleton_json、display_text 或自己的总结当作论文真值
+
+【防编造红线】:
+- claim_text 一条只写一个原子主张
+- 参数值、单位、block type、库路径、端口、连接端点、solver、采样时间、toolbox 变体,以及 anti-windup/限幅/离散连续/微分滤波/缩放/相序/角度来源/PWM/器件类型/控制器变体等工程决定,只有在 evidence handle 摘要明确支持时才可放入 document_extracted claim
+- 不确定、依赖版本/工具箱/精确参数/采样时间/solver/初值/开关频率/仿真时长/接线细节时,输出 user_confirmation_required
+- direction_hint 只说往哪查,不得包含数值+单位、精确库路径、端口、solver、采样时间或 toolbox 变体
+
+【engineering_convention 白名单】:
+- pi_controller_standard_structure / pid_controller_standard_structure:只允许误差求和 + P/I(/D) 环节;禁止 anti-windup/限幅/离散/微分滤波/变体
+- clarke_transform_structure / park_transform_structure:只允许基础结构提示;缩放/相序/角度来源必须确认
+- 白名单外不要输出 engineering_convention;电源/逆变器/主功率器件/物理 plant 不走 convention
+
+【输出顶层 JSON】:
+{
+  "details": [
+    {
+      "step_id": "STEP-001",
+      "detail_kind": "block_selection|subsystem_internal_structure|connection|parameter_value|configuration|verification|gap_notice",
+      "basis": "document_extracted|engineering_convention|user_confirmation_required",
+      "claim_text": "...",
+      "supporting_evidence_refs": ["GEV-001"],
+      "convention_code": "..." | null,
+      "target": "STEP-001|B1|paper_param::model_param|plan|..." | null,
+      "confirmation_reason_code": "missing_parameter_value|library_variant_unresolved|toolbox_unverified|solver_unverified|sample_time_unverified|connection_detail_missing|initial_condition_unverified|switching_frequency_unverified|simulation_time_unverified|configuration_unverified|document_evidence_unverified|engineering_decision_unverified" | null,
+      "direction_hint": "..." | null
+    }
+  ],
+  "gaps": []
+}
+
+【不要输出】:
+- 不要输出 final display_text、detail_id、gap_id、severity、assessment;这些由后端确定性生成
+- 不要输出裸 build_steps 文案来冒充指导"""
+
+
+def _build_guidance_steps_json(plan: ModelGenerationPlan) -> str:
+    steps = plan.build_steps or []
+    payload = []
+    for step in steps:
+        payload.append(
+            {
+                "step_id": step.step_id,
+                "title": step.title,
+                "intent": step.intent,
+                "block_refs": [
+                    {
+                        "block_ref_id": block.block_ref_id,
+                        "block_type": block.block_type,
+                        "library_path": block.library_path,
+                        "purpose": block.purpose,
+                    }
+                    for block in step.block_refs
+                ],
+                "parameter_refs": [
+                    {
+                        "paper_param_name": ref.paper_param_name,
+                        "model_param_name": ref.model_param_name,
+                        "target": f"{ref.paper_param_name}::{ref.model_param_name}",
+                    }
+                    for ref in step.parameter_refs
+                ],
+                "connection_hints": [
+                    {
+                        "from_block_ref": hint.from_block_ref,
+                        "from_port": hint.from_port,
+                        "to_block_ref": hint.to_block_ref,
+                        "to_port": hint.to_port,
+                        "signal_meaning": hint.signal_meaning,
+                    }
+                    for hint in step.connection_hints
+                ],
+                "configuration_hints": [
+                    {
+                        "target": hint.target,
+                        "setting_name": hint.setting_name,
+                    }
+                    for hint in step.configuration_hints
+                ],
+                "depends_on": step.depends_on,
+            }
+        )
+    return _json_dumps(payload)
+
+
+def _guidance_evidence_cards_json(evidence_cards: Sequence[_GuidanceEvidenceCardLike]) -> str:
+    payload = []
+    for card in evidence_cards:
+        payload.append(
+            {
+                "handle": card.handle,
+                "summary": card.summary,
+            }
+        )
+    return _json_dumps(payload)
 
 
 def _mapping_hits_conflict(
