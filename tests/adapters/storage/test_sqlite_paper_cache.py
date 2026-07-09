@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta
+from typing import Any
 
 import aiosqlite
 import pytest
@@ -25,9 +26,12 @@ from core.domain.paper_plan import (
     BuildGuidance,
     GuidanceAssessment,
     GuidanceDetail,
+    GuidanceGap,
+    ModelBuildStep,
     ModelGenerationPlan,
     PaperPlanRecord,
     ParameterMapping,
+    StepBlockRef,
 )
 from core.domain.paper_reparse_source import (
     PaperReparseDocumentSource,
@@ -710,6 +714,115 @@ async def test_legacy_plan_and_missing_json_migrates_nested_evidence(
     assert record.missing_prompts[0].paper_reference.document_id == "DOC-001"
 
 
+async def test_readback_downgrades_hand_edited_document_display_text(
+    initialized_db_path: str,
+) -> None:
+    # T3/P0-1 source: readback checks document display_text high-risk tokens against
+    # inline evidence via shared grounding rules, without a generic number scan.
+    record = _record_with_build_guidance()
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.save_ready_bundle(record)
+    payload = await _stored_plan_payload(initialized_db_path, record.paper_id)
+    payload["build_guidance"]["details"][0]["display_text"] = "Use the 7 kW machine inertia."
+    await _replace_plan_payload(initialized_db_path, record.paper_id, payload)
+
+    loaded = await store.get_plan_record(record.paper_id)
+
+    assert loaded is not None
+    assert loaded.plan.guidance_status == "generation_failed"
+    assert loaded.plan.build_guidance is None
+
+
+async def test_readback_scrubs_legacy_guidance_missing_status_and_nullable_fields(
+    initialized_db_path: str,
+) -> None:
+    # T3 source: raw scrub repairs old nested guidance fields before dataclass typing,
+    # then semantic validation keeps the valid document detail instead of clearing it.
+    record = _record_with_build_guidance()
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.save_ready_bundle(record)
+    payload = await _stored_plan_payload(initialized_db_path, record.paper_id)
+    payload.pop("guidance_status")
+    payload["build_guidance"]["details"][0].pop("convention_code")
+    payload["build_guidance"]["details"][0].pop("confirmation_reason_code")
+    await _replace_plan_payload(initialized_db_path, record.paper_id, payload)
+
+    loaded = await store.get_plan_record(record.paper_id)
+
+    assert loaded is not None
+    assert loaded.plan.guidance_status == "generated"
+    assert loaded.plan.build_guidance is not None
+    assert loaded.plan.build_guidance.details[0].basis == "document_extracted"
+    assert loaded.plan.build_guidance.details[0].convention_code is None
+    assert loaded.plan.build_guidance.details[0].confirmation_reason_code is None
+
+
+async def test_readback_stale_snapshot_ignores_changed_step_membership(
+    initialized_db_path: str,
+) -> None:
+    # T3/P1-1 source: stale snapshots are frozen display payloads; current build_steps
+    # membership is not re-applied to old detail/gap step IDs.
+    record = _record_with_build_guidance(status="stale_pending_regeneration")
+    stale_plan = replace(record.plan, build_steps=[_build_step(step_id="STEP-NEW")])
+    stale_record = replace(record, plan=stale_plan)
+    store = SqlitePaperBundleStore(initialized_db_path)
+
+    await store.save_ready_bundle(stale_record)
+    loaded = await store.get_plan_record(record.paper_id)
+
+    assert loaded is not None
+    assert loaded.plan.guidance_status == "stale_pending_regeneration"
+    assert loaded.plan.build_guidance is not None
+    assert loaded.plan.build_guidance.details[0].step_id == "STEP-001"
+
+
+async def test_readback_schema_invalid_gap_basis_is_isolated(
+    initialized_db_path: str,
+) -> None:
+    # T3/T2 source: GuidanceGap.basis=document_extracted is schema-invalid old JSON;
+    # raw scrub drops that gap, preserving the rest of the package.
+    record = _record_with_build_guidance(gaps=[_stored_gap()])
+    store = SqlitePaperBundleStore(initialized_db_path)
+    await store.save_ready_bundle(record)
+    payload = await _stored_plan_payload(initialized_db_path, record.paper_id)
+    payload["build_guidance"]["gaps"][0]["basis"] = "document_extracted"
+    await _replace_plan_payload(initialized_db_path, record.paper_id, payload)
+
+    loaded = await store.get_plan_record(record.paper_id)
+
+    assert loaded is not None
+    assert loaded.plan.guidance_status == "generated"
+    assert loaded.plan.build_guidance is not None
+    assert loaded.plan.build_guidance.details[0].basis == "document_extracted"
+    assert loaded.plan.build_guidance.gaps == []
+
+
+async def test_readback_generator_impossible_gap_is_dropped_not_whole_package(
+    initialized_db_path: str,
+) -> None:
+    # T3 high-risk point 4 source: domain-legal but generator-impossible gaps are
+    # outside shared GAP_SYNTHESIS_RULES, so only that gap is dropped.
+    record = _record_with_build_guidance(
+        gaps=[
+            _stored_gap(
+                gap_kind="toolbox_unverified",
+                display_text="Confirm the toolbox variant before treating this as ready.",
+            )
+        ]
+    )
+    store = SqlitePaperBundleStore(initialized_db_path)
+
+    await store.save_ready_bundle(record)
+    loaded = await store.get_plan_record(record.paper_id)
+
+    assert loaded is not None
+    assert loaded.plan.guidance_status == "generated"
+    assert loaded.plan.build_guidance is not None
+    assert loaded.plan.build_guidance.details[0].basis == "document_extracted"
+    assert loaded.plan.build_guidance.gaps == []
+    assert loaded.plan.build_guidance.assessment.blocking_gap_ids == []
+
+
 async def test_new_bad_spec_json_without_nested_document_id_fails(
     initialized_db_path: str,
 ) -> None:
@@ -832,6 +945,30 @@ async def _insert_bundle(
                 """,
                 ("paper-1", plan_json, missing_prompts_json),
             )
+        await conn.commit()
+
+
+async def _stored_plan_payload(db_path: str, paper_id: str) -> dict[str, Any]:
+    async with open_connection(db_path) as conn:
+        row = await (
+            await conn.execute(
+                "SELECT plan_json FROM paper_plan_cache WHERE paper_id=?",
+                (paper_id,),
+            )
+        ).fetchone()
+    return json.loads(row["plan_json"])
+
+
+async def _replace_plan_payload(
+    db_path: str,
+    paper_id: str,
+    payload: dict[str, Any],
+) -> None:
+    async with open_connection(db_path) as conn:
+        await conn.execute(
+            "UPDATE paper_plan_cache SET plan_json=? WHERE paper_id=?",
+            (_json(payload), paper_id),
+        )
         await conn.commit()
 
 
@@ -1147,14 +1284,73 @@ def _record(*, title: str = "Short-circuit report") -> PaperPlanRecord:
     )
 
 
-def _build_guidance() -> BuildGuidance:
+def _record_with_build_guidance(
+    *,
+    status: str = "generated",
+    gaps: list[GuidanceGap] | None = None,
+) -> PaperPlanRecord:
+    record = _record()
+    guidance = _build_guidance(gaps=[] if gaps is None else gaps)
+    return replace(
+        record,
+        plan=replace(
+            record.plan,
+            build_steps=[_build_step()],
+            build_guidance=guidance,
+            guidance_status=status,  # type: ignore[arg-type]
+        ),
+    )
+
+
+def _build_step(*, step_id: str = "STEP-001") -> ModelBuildStep:
+    evidence = _document_evidence()
+    return ModelBuildStep(
+        step_id=step_id,
+        title="Place machine",
+        intent="Create the machine subsystem.",
+        block_refs=[
+            StepBlockRef(
+                block_ref_id="B1",
+                block_type="Synchronous Machine",
+                library_path=None,
+                purpose="Model the generator.",
+                paper_reference=evidence,
+            )
+        ],
+        parameter_refs=[],
+        connection_hints=[],
+        configuration_hints=[],
+        depends_on=[],
+        evidence=[evidence],
+        display_text="Place machine.",
+    )
+
+
+def _stored_gap(
+    *,
+    gap_kind: str = "insufficient_document_evidence",
+    display_text: str = "Step STEP-001 has a detail that requires confirmation before reproduction.",
+) -> GuidanceGap:
+    return GuidanceGap(
+        gap_id="GAP-001",
+        gap_kind=gap_kind,  # type: ignore[arg-type]
+        scope="step",
+        step_id="STEP-001",
+        basis="user_confirmation_required",
+        severity="blocking",
+        display_text=display_text,
+    )
+
+
+def _build_guidance(*, gaps: list[GuidanceGap] | None = None) -> BuildGuidance:
+    resolved_gaps = [] if gaps is None else gaps
     return BuildGuidance(
         version="v1",
         assessment=GuidanceAssessment(
-            content_status="outline_only",
+            content_status="outline_with_gaps" if resolved_gaps else "outline_only",
             environment_status="not_checked",
-            overall_status="outline_only",
-            blocking_gap_ids=[],
+            overall_status="outline_with_gaps" if resolved_gaps else "outline_only",
+            blocking_gap_ids=[gap.gap_id for gap in resolved_gaps if gap.severity == "blocking"],
         ),
         details=[
             GuidanceDetail(
@@ -1169,7 +1365,7 @@ def _build_guidance() -> BuildGuidance:
                 confirmation_reason_code=None,
             )
         ],
-        gaps=[],
+        gaps=resolved_gaps,
     )
 
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
+from typing import Any, cast
 
 import pytest
 
@@ -12,6 +14,7 @@ from core.domain.paper_plan import (
     ConnectionHint,
     GuidanceAssessment,
     GuidanceDetail,
+    GuidanceGap,
     ModelBuildStep,
     ModelGenerationPlan,
     ParameterMapping,
@@ -30,6 +33,9 @@ from features.paper.build_guidance_generator import (
 from features.paper.build_guidance_lifecycle import (
     guidance_view_state,
     normalize_guidance_lifecycle,
+)
+from features.paper.build_guidance_semantic_validator import (
+    validate_build_guidance_semantics,
 )
 
 
@@ -216,6 +222,183 @@ async def test_no_basis_requires_zero_raw_document_claims_and_unlinked_evidence_
     assert updated.build_guidance is None
 
 
+@pytest.mark.asyncio
+async def test_semantic_validator_passes_generated_guidance_without_changes() -> None:
+    # T1 source: parse_and_ground_guidance_draft + shared CONVENTION_TEMPLATES /
+    # CONFIRMATION_REASON_TEMPLATES / GAP_SYNTHESIS_RULES must round-trip unchanged.
+    provider = QueueProvider(
+        [
+            {
+                "details": [
+                    {
+                        "step_id": "STEP-001",
+                        "detail_kind": "parameter_value",
+                        "basis": "document_extracted",
+                        "claim_text": "Use the 5 kW load from the paper.",
+                        "supporting_evidence_refs": ["GEV-001"],
+                        "convention_code": None,
+                        "target": "PL::Load.P",
+                        "confirmation_reason_code": None,
+                        "direction_hint": None,
+                    },
+                    {
+                        "step_id": "STEP-001",
+                        "detail_kind": "subsystem_internal_structure",
+                        "basis": "engineering_convention",
+                        "claim_text": "Use the standard PI convention.",
+                        "supporting_evidence_refs": [],
+                        "convention_code": "pi_controller_standard_structure",
+                        "target": "B1",
+                        "confirmation_reason_code": None,
+                        "direction_hint": None,
+                    },
+                    {
+                        "step_id": "STEP-001",
+                        "detail_kind": "configuration",
+                        "basis": "user_confirmation_required",
+                        "claim_text": "Confirm configuration.",
+                        "supporting_evidence_refs": [],
+                        "convention_code": None,
+                        "target": "STEP-001",
+                        "confirmation_reason_code": "configuration_unverified",
+                        "direction_hint": "Check source model setup",
+                    },
+                ],
+                "gaps": [],
+            }
+        ]
+    )
+
+    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan())
+    validation = validate_build_guidance_semantics(_spec(), updated)
+
+    assert updated.guidance_status == "generated"
+    assert validation.plan == updated
+    assert validation.changed is False
+    assert validation.item_actions == []
+    assert validation.machine_codes == []
+    assert validation.whole_action == "keep"
+
+
+@pytest.mark.parametrize(
+    ("_source_note", "mutate", "expected_code"),
+    [
+        pytest.param(
+            "document_extracted evidence: generator _document_detail_from_draft requires resolved evidence",
+            lambda plan: _replace_first_detail(plan, evidence=[]),
+            "guidance_validator_document_evidence_missing",
+            id="source=_document_detail_from_draft/document-evidence-required",
+        ),
+        pytest.param(
+            "document_extracted actionability: legal matrix requires actionable",
+            lambda plan: _replace_first_detail(plan, actionability=cast(Any, "notice_only")),
+            "guidance_validator_document_actionability_invalid",
+            id="source=legal-matrix/document-actionability",
+        ),
+        pytest.param(
+            "engineering_convention evidence: generator _convention_detail_from_draft emits []",
+            lambda plan: _with_extra_detail(
+                plan,
+                _convention_detail(evidence=[_evidence()]),
+            ),
+            "guidance_validator_convention_evidence",
+            id="source=_convention_detail_from_draft/evidence-empty",
+        ),
+        pytest.param(
+            "engineering_convention code: shared CONVENTION_TEMPLATES whitelist",
+            lambda plan: _with_extra_detail(
+                plan,
+                _convention_detail(convention_code=None),
+            ),
+            "guidance_validator_convention_code_invalid",
+            id="source=CONVENTION_TEMPLATES/code-required",
+        ),
+        pytest.param(
+            "engineering_convention code: shared CONVENTION_TEMPLATES whitelist",
+            lambda plan: _with_extra_detail(
+                plan,
+                _convention_detail(convention_code="unsupported_convention"),
+            ),
+            "guidance_validator_convention_code_invalid",
+            id="source=CONVENTION_TEMPLATES/code-whitelist",
+        ),
+        pytest.param(
+            "user_confirmation evidence: generator _confirmation_detail_from_draft emits []",
+            lambda plan: _with_extra_detail(
+                plan,
+                _confirmation_detail(evidence=[_evidence()]),
+            ),
+            "guidance_validator_confirmation_evidence",
+            id="source=_confirmation_detail_from_draft/evidence-empty",
+        ),
+        pytest.param(
+            "user_confirmation text: shared unsafe filter rejects numeric units/paths",
+            lambda plan: _with_extra_detail(
+                plan,
+                _confirmation_detail(display_text="Confirm 7 kW at simulink/Unsafe/Path."),
+            ),
+            "guidance_validator_confirmation_unsafe",
+            id="source=_unsafe_direction_hint/confirmation-display",
+        ),
+        pytest.param(
+            "GuidanceGap basis: domain literal excludes document_extracted for gaps",
+            lambda plan: _with_gap(
+                plan,
+                _gap(basis=cast(Any, "document_extracted")),
+            ),
+            "guidance_validator_gap_rule_invalid",
+            id="source=GuidanceGap.basis/domain-legal-matrix",
+        ),
+        pytest.param(
+            "GuidanceGap scope: plan gaps cannot carry step_id",
+            lambda plan: _with_gap(plan, _gap(scope="plan", step_id="STEP-001")),
+            "guidance_validator_gap_plan_step",
+            id="source=gap-scope-structure/plan-step-none",
+        ),
+        pytest.param(
+            "GuidanceGap scope: step/subsystem gaps require step_id",
+            lambda plan: _with_gap(plan, _gap(scope="step", step_id=None)),
+            "guidance_validator_gap_scoped_step_missing",
+            id="source=gap-scope-structure/scoped-step-required",
+        ),
+        pytest.param(
+            "GuidanceGap synthesis: shared GAP_SYNTHESIS_RULES table is authoritative",
+            lambda plan: _with_gap(
+                plan,
+                _gap(gap_kind="toolbox_unverified", severity="blocking"),
+            ),
+            "guidance_validator_gap_rule_invalid",
+            id="source=GAP_SYNTHESIS_RULES/signature-whitelist",
+        ),
+    ],
+)
+def test_semantic_validator_mutation_redlines(
+    _source_note: str,
+    mutate: Callable[[ModelGenerationPlan], ModelGenerationPlan],
+    expected_code: str,
+) -> None:
+    # T2 source notes are carried in the parametrized case ids and _source_note values.
+    plan = mutate(_generated_plan())
+
+    validation = validate_build_guidance_semantics(_spec(), plan)
+
+    assert validation.changed is True
+    assert expected_code in _action_codes(validation.item_actions)
+
+
+def test_semantic_validator_all_document_details_lost_is_generation_failed() -> None:
+    # T2/P0-2 source: document grounding failures downgrade per item; if all document
+    # details are lost, readback corruption is generation_failed, not no_document_basis.
+    plan = _replace_first_detail(_generated_plan(), evidence=[])
+
+    validation = validate_build_guidance_semantics(_spec(), plan)
+
+    assert validation.plan.guidance_status == "generation_failed"
+    assert validation.plan.build_guidance is None
+    assert validation.whole_action == "mark_generation_failed"
+    assert "guidance_validator_all_document_details_lost" in validation.machine_codes
+
+
 def test_high_risk_terms_include_non_numeric_engineering_decisions() -> None:
     tokens = high_risk_claim_tokens(
         "Use SVPWM with anti-windup and 5 kW load.",
@@ -283,6 +466,105 @@ def test_guidance_lifecycle_view_states_and_terminal_clear() -> None:
     assert no_basis.build_guidance is None
     assert guidance_view_state(not_generated) == "not_generated"
     assert not_generated.build_guidance is None
+
+
+def _generated_plan() -> ModelGenerationPlan:
+    return replace(_plan(), build_guidance=_build_guidance(), guidance_status="generated")
+
+
+def _replace_first_detail(plan: ModelGenerationPlan, **changes: Any) -> ModelGenerationPlan:
+    assert plan.build_guidance is not None
+    details = list(plan.build_guidance.details)
+    details[0] = replace(details[0], **changes)
+    return replace(plan, build_guidance=replace(plan.build_guidance, details=details))
+
+
+def _with_extra_detail(plan: ModelGenerationPlan, detail: GuidanceDetail) -> ModelGenerationPlan:
+    assert plan.build_guidance is not None
+    return replace(
+        plan,
+        build_guidance=replace(
+            plan.build_guidance,
+            details=[*plan.build_guidance.details, detail],
+        ),
+    )
+
+
+def _with_gap(plan: ModelGenerationPlan, gap: GuidanceGap) -> ModelGenerationPlan:
+    assert plan.build_guidance is not None
+    assessment = GuidanceAssessment(
+        content_status="outline_with_gaps",
+        environment_status="not_checked",
+        overall_status="outline_with_gaps",
+        blocking_gap_ids=[gap.gap_id] if gap.severity == "blocking" else [],
+    )
+    return replace(
+        plan,
+        build_guidance=replace(
+            plan.build_guidance,
+            assessment=assessment,
+            gaps=[gap],
+        ),
+    )
+
+
+def _convention_detail(
+    *,
+    evidence: list[PaperEvidenceEntry] | None = None,
+    convention_code: str | None = "pi_controller_standard_structure",
+) -> GuidanceDetail:
+    return GuidanceDetail(
+        detail_id="GD-900",
+        step_id="STEP-001",
+        detail_kind="subsystem_internal_structure",
+        basis="engineering_convention",
+        actionability="actionable",
+        display_text="Use a standard PI structure for step STEP-001.",
+        evidence=[] if evidence is None else evidence,
+        convention_code=convention_code,
+        confirmation_reason_code=None,
+    )
+
+
+def _confirmation_detail(
+    *,
+    evidence: list[PaperEvidenceEntry] | None = None,
+    display_text: str = "Confirm the configuration detail for step STEP-001.",
+) -> GuidanceDetail:
+    return GuidanceDetail(
+        detail_id="GD-901",
+        step_id="STEP-001",
+        detail_kind="configuration",
+        basis="user_confirmation_required",
+        actionability="blocked_pending_confirmation",
+        display_text=display_text,
+        evidence=[] if evidence is None else evidence,
+        convention_code=None,
+        confirmation_reason_code="configuration_unverified",
+    )
+
+
+def _gap(
+    *,
+    gap_kind: str = "insufficient_document_evidence",
+    scope: str = "step",
+    step_id: str | None = "STEP-001",
+    basis: str = "user_confirmation_required",
+    severity: str = "blocking",
+) -> GuidanceGap:
+    return GuidanceGap(
+        gap_id="GAP-900",
+        gap_kind=cast(Any, gap_kind),
+        scope=cast(Any, scope),
+        step_id=step_id,
+        basis=cast(Any, basis),
+        severity=cast(Any, severity),
+        display_text="Step STEP-001 has a detail that requires confirmation before reproduction.",
+    )
+
+
+def _action_codes(actions: list[object]) -> set[str]:
+    return {cast(Any, action).machine_code for action in actions}
 
 
 def _spec() -> PaperSpec:
