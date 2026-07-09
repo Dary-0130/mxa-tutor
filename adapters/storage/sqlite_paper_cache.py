@@ -47,6 +47,11 @@ from core.interfaces.paper_cache import PaperBundleStore, PaperPlanCache, PaperS
 from core.interfaces.paper_reparse_store import PaperReparseStore
 from core.interfaces.paper_upload_job_store import PaperUploadJobStore
 from features.paper.build_guidance_lifecycle import normalize_guidance_lifecycle
+from features.paper.build_guidance_semantic_validator import (
+    guidance_validation_telemetry,
+    scrub_build_guidance_payload,
+    validate_build_guidance_semantics,
+)
 
 T = TypeVar("T")
 ConnectionFactory = Callable[[str], AbstractAsyncContextManager[aiosqlite.Connection]]
@@ -723,14 +728,40 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJob
 
         if row is None:
             raise StoreError("paper_bundle_incomplete")
+        spec = self._load(
+            self._SPEC_ADAPTER,
+            row["paper_spec_json"],
+            "paper_spec_deserialize_failed",
+        )
+        plan = self._load(self._PLAN_ADAPTER, row["plan_json"], "paper_plan_deserialize_failed")
+        guidance_validation = validate_build_guidance_semantics(spec, plan)
+        if guidance_validation.changed:
+            telemetry = guidance_validation_telemetry(guidance_validation)
+            logger.info(
+                "paper_build_guidance_validator event_code={} machine_codes={} "
+                "guidance_validator_detail_downgraded_count={} "
+                "guidance_validator_detail_dropped_count={} "
+                "guidance_validator_gap_dropped_count={} "
+                "guidance_validator_all_document_details_lost={} "
+                "guidance_validator_template_version_mismatch={} "
+                "guidance_validator_display_text_grounding_failed={} "
+                "guidance_validator_stale_snapshot_step_ref_ignored={} "
+                "guidance_validator_generated_output_changed={}",
+                "guidance_validator_readback_changed",
+                guidance_validation.machine_codes,
+                telemetry.detail_downgraded_count,
+                telemetry.detail_dropped_count,
+                telemetry.gap_dropped_count,
+                telemetry.all_document_details_lost,
+                telemetry.template_version_mismatch,
+                telemetry.display_text_grounding_failed,
+                telemetry.stale_snapshot_step_ref_ignored,
+                telemetry.generated_output_changed,
+            )
         return PaperPlanRecord(
             paper_id=paper_id,
-            spec=self._load(
-                self._SPEC_ADAPTER,
-                row["paper_spec_json"],
-                "paper_spec_deserialize_failed",
-            ),
-            plan=self._load(self._PLAN_ADAPTER, row["plan_json"], "paper_plan_deserialize_failed"),
+            spec=spec,
+            plan=guidance_validation.plan,
             missing_prompts=self._load(
                 self._PROMPTS_ADAPTER,
                 row["missing_prompts_json"],
@@ -1476,9 +1507,9 @@ class SqlitePaperBundleStore(PaperBundleStore, PaperReparseStore, PaperUploadJob
         try:
             raw = json.loads(payload)
             migrated = _migrate_nested_evidence_payloads(raw)
-            loaded = adapter.validate_python(migrated)
             if adapter is self._PLAN_ADAPTER:
-                return cast(T, normalize_guidance_lifecycle(cast(ModelGenerationPlan, loaded)))
+                migrated = scrub_build_guidance_payload(migrated).payload
+            loaded = adapter.validate_python(migrated)
             return loaded
         except (TypeError, ValueError) as exc:
             logger.error(
