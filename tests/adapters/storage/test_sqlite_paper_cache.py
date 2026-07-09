@@ -55,6 +55,29 @@ async def test_save_ready_bundle_round_trips_across_connections(
     assert await fresh_store.get_plan_record("paper-1") == record
 
 
+async def test_plan_json_preserves_null_block_ref_paper_reference(
+    initialized_db_path: str,
+) -> None:
+    record = _record()
+    step = _build_step()
+    block_ref = replace(step.block_refs[0], paper_reference=None)
+    record = replace(
+        record,
+        plan=replace(
+            record.plan,
+            build_steps=[replace(step, block_refs=[block_ref])],
+        ),
+    )
+    store = SqlitePaperBundleStore(initialized_db_path)
+
+    await store.save_ready_bundle(record)
+
+    payload = await _stored_plan_payload(initialized_db_path, record.paper_id)
+    block_ref_payload = payload["build_steps"][0]["block_refs"][0]
+    assert "paper_reference" in block_ref_payload
+    assert block_ref_payload["paper_reference"] is None
+
+
 async def test_save_ready_bundle_normalizes_terminal_guidance_before_write(
     initialized_db_path: str,
 ) -> None:

@@ -436,6 +436,28 @@ def test_gap_synthesis_excludes_pure_display_steps_and_keeps_connection_keys_dis
     assert connection_gaps[0].display_text != connection_gaps[1].display_text
 
 
+def test_none_block_ref_paper_reference_stays_uncovered_and_out_of_document_pool() -> None:
+    step = replace(
+        _build_step(evidence=[], include_block_reference=False),
+        parameter_refs=[],
+    )
+    plan = replace(_plan(build_steps=[step]), parameter_mapping=[])
+    pool = build_guidance_evidence_pool(_spec(), plan)
+    truth = GroundingTruthIndex.from_spec_plan(_spec(), plan, pool)
+
+    gaps = synthesize_guidance_gaps(
+        build_steps=plan.build_steps or [],
+        details=[],
+        pool=pool,
+        truth_index=truth,
+    )
+
+    assert not any(card.linked_to_build_steps for card in pool.cards)
+    assert any(
+        gap.gap_kind == "missing_support_component" and gap.step_id == "STEP-001" for gap in gaps
+    )
+
+
 def test_guidance_lifecycle_view_states_and_terminal_clear() -> None:
     guidance = _build_guidance()
     generated = replace(_plan(), build_guidance=guidance, guidance_status="generated")
