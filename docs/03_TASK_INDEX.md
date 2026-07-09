@@ -397,6 +397,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-528-A | 建模指导契约 substrate | ✅ | Codex | 已完成;只加 build_guidance 契约 / schema / TS / fixtures;端到端恒 null,不接生成、不渲染、不做语义校验 |
 | TASK-528-B | 建模指导细化层生成(后处理) | ✅ | Codex | 已合并 main(PR #187 / 3c434e4);带来源标注指导生成 + grounding 白名单 + 不编造护栏;遗留:主路真机未跑热(上游 build_steps 降级)、混合型论文护栏验证待补 |
 | TASK-528-C | 建模指导语义校验闸(独立穷尽语义硬门 + 读回校验 + 红线测试) | ✅ | Codex | additive;未 bump v9;读回走当场现算;四处过严高危点已焊测试 |
+| TASK-529 | build_steps draft DTO 容忍缺省 paper_reference(修 dto_invalid 主因) | ✅ | Codex | 已合并 main(PR #191 / commit 3e07e5d);私有 _StepBlockRefDraftModel 容忍 LLM 省略 paper_reference→None,公共/域/schema/TS 契约零改、export 零 diff;红线/证据不放松、命门测试反向验证过;真机 dto_invalid 归零(样本小,2 case×3);build_steps 残余降级=截断+下游校验,归后续卡 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
