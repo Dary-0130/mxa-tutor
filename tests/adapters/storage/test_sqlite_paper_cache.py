@@ -39,6 +39,7 @@ from core.domain.paper_reparse_source import (
     PaperReparseSource,
 )
 from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec, ParameterEntry
+from features.paper.build_guidance_semantic_validator import validate_build_guidance_semantics
 
 
 async def test_save_ready_bundle_round_trips_across_connections(
@@ -774,6 +775,45 @@ async def test_readback_stale_snapshot_ignores_changed_step_membership(
     assert loaded.plan.guidance_status == "stale_pending_regeneration"
     assert loaded.plan.build_guidance is not None
     assert loaded.plan.build_guidance.details[0].step_id == "STEP-001"
+
+
+async def test_readback_stale_snapshot_null_build_steps_keeps_snapshot(
+    initialized_db_path: str,
+) -> None:
+    # T3/P1-1 source: parameter correction can clear current build_steps while
+    # preserving old build_guidance as a stale frozen snapshot. The validator must
+    # not re-apply current step membership to that snapshot.
+    record = _record_with_build_guidance(status="stale_pending_regeneration")
+    assert record.plan.build_guidance is not None
+    frozen_guidance = record.plan.build_guidance
+    stale_record = replace(record, plan=replace(record.plan, build_steps=None))
+    store = SqlitePaperBundleStore(initialized_db_path)
+
+    await store.save_ready_bundle(stale_record)
+    loaded = await store.get_plan_record(record.paper_id)
+
+    assert loaded is not None
+    assert loaded.plan.guidance_status == "stale_pending_regeneration"
+    assert loaded.plan.build_steps is None
+    assert loaded.plan.build_guidance == frozen_guidance
+    validation = validate_build_guidance_semantics(loaded.spec, loaded.plan)
+    step_ref_actions = [
+        action
+        for action in validation.item_actions
+        if action.machine_code
+        in {
+            "guidance_validator_detail_step_missing",
+            "guidance_validator_gap_step_missing",
+            "guidance_validator_stale_snapshot_step_ref_ignored",
+        }
+    ]
+    assert validation.plan == loaded.plan
+    assert validation.changed is False
+    assert all(
+        action.action == "keep"
+        and action.machine_code == "guidance_validator_stale_snapshot_step_ref_ignored"
+        for action in step_ref_actions
+    )
 
 
 async def test_readback_schema_invalid_gap_basis_is_isolated(
