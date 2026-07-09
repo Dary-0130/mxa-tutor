@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 import features.paper.paper_plan_service as service_module
 from core.domain.exceptions import LLMRateLimitError, PaperPlanGenerationError
@@ -36,6 +37,7 @@ from features.paper.paper_plan_helpers import (
     ModelBuildStepDraft,
 )
 from features.paper.paper_plan_service import PaperPlanService
+from features.paper.paper_schemas import ModelGenerationPlanModel, StepBlockRefModel
 from features.paper.structured_retry import (
     REASON_CALL_CAP_EXCEEDED,
     StructuredRetryContext,
@@ -183,6 +185,114 @@ async def test_generate_happy_path_returns_plan_missing_bindings() -> None:
             model_param_name="Synchronous Machine.H",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_build_step_planner_accepts_omitted_block_ref_paper_reference_without_fallback() -> (
+    None
+):
+    payloads = _payloads()
+    payloads["build_step_planner"]["build_steps"][0]["block_refs"][0].pop("paper_reference")
+    service = PayloadPaperPlanService(payloads)
+
+    plan, _, _ = await service.generate(_spec(), "PAPER-001")
+
+    assert plan.build_steps is not None
+    assert plan.build_steps[0].block_refs[0].paper_reference is None
+    assert "subsystem_planner" not in service.calls
+    public_payload = ModelGenerationPlanModel.from_domain(plan).model_dump(mode="json")
+    block_ref_payload = public_payload["build_steps"][0]["block_refs"][0]
+    assert "paper_reference" in block_ref_payload
+    assert block_ref_payload["paper_reference"] is None
+
+
+def test_omitted_and_explicit_null_block_ref_paper_reference_are_equivalent() -> None:
+    omitted_payload = _build_steps_payload()
+    omitted_payload["build_steps"][0]["block_refs"][0].pop("paper_reference")
+    null_payload = _build_steps_payload()
+    null_payload["build_steps"][0]["block_refs"][0]["paper_reference"] = None
+
+    omitted_drafts = _drafts_from_build_steps_payload(omitted_payload)
+    null_drafts = _drafts_from_build_steps_payload(null_payload)
+
+    assert omitted_drafts == null_drafts
+
+
+def test_build_step_block_ref_draft_accepts_legal_paper_reference() -> None:
+    drafts = _drafts_from_build_steps_payload(_build_steps_payload())
+
+    assert drafts[0].block_refs[0].paper_reference == _document_evidence()
+
+
+@pytest.mark.parametrize(
+    "case_name",
+    [
+        "invalid_paper_reference_shape",
+        "missing_required_field",
+        "extra_field",
+    ],
+)
+def test_block_ref_draft_rejects_invalid_payloads_fail_red(case_name: str) -> None:
+    payload = _build_steps_payload()
+    block_ref = payload["build_steps"][0]["block_refs"][0]
+    if case_name == "invalid_paper_reference_shape":
+        block_ref["paper_reference"]["source_ref"] = "REF-999"
+    elif case_name == "missing_required_field":
+        block_ref.pop("block_type")
+    elif case_name == "extra_field":
+        block_ref["unexpected_field"] = "forbidden"
+
+    with pytest.raises(ValidationError):
+        _drafts_from_build_steps_payload(payload)
+
+
+def test_block_ref_draft_keeps_public_field_set_aligned() -> None:
+    draft_fields = service_module._StepBlockRefDraftModel.model_fields
+    public_fields = StepBlockRefModel.model_fields
+
+    assert tuple(draft_fields) == tuple(public_fields)
+    assert draft_fields["paper_reference"].default is None
+    assert public_fields["paper_reference"].is_required()
+    for field_name in public_fields:
+        if field_name == "paper_reference":
+            continue
+        assert draft_fields[field_name].annotation == public_fields[field_name].annotation
+        assert draft_fields[field_name].is_required() == public_fields[field_name].is_required()
+
+
+@pytest.mark.asyncio
+async def test_omitted_block_ref_paper_reference_logs_metadata_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_info(*args: object, **kwargs: object) -> None:
+        info_calls.append((args, kwargs))
+
+    monkeypatch.setattr(service_module.logger, "info", fake_info)
+    payloads = _payloads()
+    payloads["build_step_planner"]["build_steps"][0]["block_refs"][0].pop("paper_reference")
+
+    await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
+
+    assert info_calls == [
+        (
+            (
+                "paper_plan_build_steps_draft_default_applied role=%s stage=%s field_path=%s "
+                "reason_code=%s count=%s",
+                "build_step_planner",
+                "llm_draft",
+                "build_steps.block_refs.paper_reference",
+                "omitted_paper_reference",
+                1,
+            ),
+            {},
+        )
+    ]
+    logged = repr(info_calls)
+    assert "The report states the machine parameter." not in logged
+    assert "source_ref" not in logged
+    assert "paper_reference" in logged
 
 
 @pytest.mark.asyncio
@@ -826,6 +936,19 @@ async def test_user_supplied_build_step_evidence_falls_back_to_legacy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_user_supplied_block_ref_paper_reference_falls_back_to_legacy() -> None:
+    payloads = _payloads()
+    payloads["build_step_planner"]["build_steps"][0]["block_refs"][0]["paper_reference"] = (
+        _user_evidence_payload()
+    )
+
+    plan, _, _ = await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
+
+    assert plan.build_steps is None
+    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+
+
+@pytest.mark.asyncio
 async def test_build_step_provider_error_propagates_without_legacy_fallback() -> None:
     payloads = _payloads()
     payloads["build_step_planner"] = LLMRateLimitError("rate")
@@ -1162,11 +1285,16 @@ def _build_steps_payload(
 
 
 def _build_step_drafts() -> list[ModelBuildStepDraft]:
-    payload = service_module.apply_plan_evidence_reference_bridge(
-        _build_steps_payload(),
+    return _drafts_from_build_steps_payload(_build_steps_payload())
+
+
+def _drafts_from_build_steps_payload(payload: dict[str, Any]) -> list[ModelBuildStepDraft]:
+    bridged_payload = service_module.apply_plan_evidence_reference_bridge(
+        payload,
         service_module.build_plan_evidence_source_refs(_spec()),
     )
-    return service_module._BuildStepsOutputModel.model_validate(payload).to_drafts()
+    service_module._preserve_present_invalid_block_ref_paper_references(payload, bridged_payload)
+    return service_module._BuildStepsOutputModel.model_validate(bridged_payload).to_drafts()
 
 
 def _plan_payload() -> dict[str, Any]:

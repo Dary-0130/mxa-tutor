@@ -25,6 +25,7 @@ from core.domain.paper_plan import (
     ModelBuildStep,
     ModelGenerationPlan,
     ParameterMapping,
+    StepBlockRef,
 )
 from core.domain.paper_spec import PaperSpec
 from core.interfaces.llm_provider import LLMMessage, TextProvider
@@ -60,7 +61,6 @@ from features.paper.paper_schemas import (
     PaperEvidenceEntryModel,
     ParameterMappingModel,
     ParameterMappingRefModel,
-    StepBlockRefModel,
 )
 from features.paper.structured_retry import (
     REASON_CALL_CAP_EXCEEDED,
@@ -504,7 +504,10 @@ class PaperPlanService:
             BUILD_STEP_ROLE_NAME,
         )
         source_refs = build_plan_evidence_source_refs(spec)
+        raw_data = data
         data = apply_plan_evidence_reference_bridge(data, source_refs)
+        _preserve_present_invalid_block_ref_paper_references(raw_data, data)
+        _log_omitted_build_step_block_reference_count(raw_data, role_name=BUILD_STEP_ROLE_NAME)
         if data.get("build_steps") == []:
             raise BuildStepsDtoValidationError("empty_steps")
         try:
@@ -540,7 +543,13 @@ class PaperPlanService:
             BUILD_STEP_REGENERATION_ROLE_NAME,
         )
         source_refs = build_plan_evidence_source_refs(spec)
+        raw_data = data
         data = apply_plan_evidence_reference_bridge(data, source_refs)
+        _preserve_present_invalid_block_ref_paper_references(raw_data, data)
+        _log_omitted_build_step_block_reference_count(
+            raw_data,
+            role_name=BUILD_STEP_REGENERATION_ROLE_NAME,
+        )
         if data.get("build_steps") == []:
             raise BuildStepsDtoValidationError("empty_steps")
         try:
@@ -955,13 +964,34 @@ class _MissingPromptDraftModel(BaseModel):
     source: Literal["user_supplied"] = "user_supplied"
 
 
+class _StepBlockRefDraftModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    block_ref_id: str = Field(min_length=1)
+    block_type: str = Field(min_length=1)
+    library_path: str | None = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+    paper_reference: PaperEvidenceEntryModel | None = None
+
+    def to_domain(self) -> StepBlockRef:
+        return StepBlockRef(
+            block_ref_id=self.block_ref_id,
+            block_type=self.block_type,
+            library_path=self.library_path,
+            purpose=self.purpose,
+            paper_reference=(
+                self.paper_reference.to_domain() if self.paper_reference is not None else None
+            ),
+        )
+
+
 class _ModelBuildStepDraftModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     step_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     intent: str = Field(min_length=1)
-    block_refs: list[StepBlockRefModel]
+    block_refs: list[_StepBlockRefDraftModel]
     parameter_refs: list[ParameterMappingRefModel]
     connection_hints: list[ConnectionHintModel]
     configuration_hints: list[ConfigurationHintModel]
@@ -989,3 +1019,71 @@ class _BuildStepsOutputModel(BaseModel):
 
     def to_drafts(self) -> list[ModelBuildStepDraft]:
         return [step.to_draft() for step in self.build_steps]
+
+
+def _log_omitted_build_step_block_reference_count(
+    data: object,
+    *,
+    role_name: str,
+) -> None:
+    omitted_count = _count_omitted_build_step_block_references(data)
+    if omitted_count == 0:
+        return
+    logger.info(
+        "paper_plan_build_steps_draft_default_applied role=%s stage=%s field_path=%s "
+        "reason_code=%s count=%s",
+        role_name,
+        "llm_draft",
+        "build_steps.block_refs.paper_reference",
+        "omitted_paper_reference",
+        omitted_count,
+    )
+
+
+def _count_omitted_build_step_block_references(data: object) -> int:
+    if not isinstance(data, dict):
+        return 0
+    build_steps = data.get("build_steps")
+    if not isinstance(build_steps, list):
+        return 0
+    omitted_count = 0
+    for step in build_steps:
+        if not isinstance(step, dict):
+            continue
+        block_refs = step.get("block_refs")
+        if not isinstance(block_refs, list):
+            continue
+        omitted_count += sum(
+            1
+            for block_ref in block_refs
+            if isinstance(block_ref, dict) and "paper_reference" not in block_ref
+        )
+    return omitted_count
+
+
+def _preserve_present_invalid_block_ref_paper_references(
+    raw_data: object,
+    bridged_data: object,
+) -> None:
+    if not isinstance(raw_data, dict) or not isinstance(bridged_data, dict):
+        return
+    raw_steps = raw_data.get("build_steps")
+    bridged_steps = bridged_data.get("build_steps")
+    if not isinstance(raw_steps, list) or not isinstance(bridged_steps, list):
+        return
+    for raw_step, bridged_step in zip(raw_steps, bridged_steps, strict=False):
+        if not isinstance(raw_step, dict) or not isinstance(bridged_step, dict):
+            continue
+        raw_refs = raw_step.get("block_refs")
+        bridged_refs = bridged_step.get("block_refs")
+        if not isinstance(raw_refs, list) or not isinstance(bridged_refs, list):
+            continue
+        for raw_ref, bridged_ref in zip(raw_refs, bridged_refs, strict=False):
+            if not isinstance(raw_ref, dict) or not isinstance(bridged_ref, dict):
+                continue
+            if (
+                "paper_reference" in raw_ref
+                and raw_ref["paper_reference"] is not None
+                and "paper_reference" not in bridged_ref
+            ):
+                bridged_ref["paper_reference"] = {"__invalid_paper_reference__": True}
