@@ -57,3 +57,33 @@
 - R4-P0-3 finalize 两阶段(`unresolved_adjudication_count == 0` 才生 final)
 - R4-P0-4 #13c eval db fixture bootstrap + `eval_db_build_manifest.json`
 - R4b 必改:Recording wrappers 生命周期内持续存在;`source_table_capture_mode` 2 enum;`citation_type_available_rate` 守门
+
+## paper-to-model 本地 PDF smoke lane
+
+`run_paper_pdf_smoke.py` 是本地真机 smoke lane,与 `eval/cases/paper_to_model/`
+里的 stripped-md golden 回归并存,默认不进 CI。它从本地论文目录读取 PDF,逐篇走同步
+`upload-document` 主路:upload → parse → spec → plan → guidance。运行时使用
+`eval/out/paper_pdf_smoke/<run_id>/_runtime/` 下的临时 SQLite DB 和临时上传目录,
+不会触碰 `data/mxa.db`;actual 与 summary 也落在 `eval/out/`,该目录已被 `.gitignore`
+排除。
+
+论文目录通过 `PAPER_EVAL_DIR` 或 `--paper-dir` 配置;未配置时默认 `E:\桌面\样例`。
+单篇单轮约 8-9 分钟,默认 `--rounds 1`,需要量方差时再手动调高。
+
+示例:
+
+```powershell
+$env:PAPER_EVAL_DIR = 'E:\桌面\样例'
+python eval/run_paper_pdf_smoke.py --rounds 1
+```
+
+输出:
+
+- `paper_pdf_smoke.summary.json`
+- `paper_pdf_smoke.summary.csv`
+- `actual/*.actual.json`
+
+summary 固定字段包含主路终态、build_steps 结果码、build_steps finish_reason 与 token/上限、
+guidance 是否触达与结果、`dto_invalid` 的脱敏 Pydantic `(loc,type)`,以及混合型候选论文的
+`no_document_basis` 护栏专项结论。CI 中默认拒绝真实运行;测试只 mock harness 管路,不跑 LLM
+或真实 PDF parse。
