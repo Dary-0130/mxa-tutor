@@ -452,8 +452,12 @@ def build_summary_row(
         arxiv_id=paper.arxiv_id,
         round_index=round_index,
         main_terminal_state=terminal_state,
-        paper_id=job_record.paper_id if job_record is not None else _payload_str(response_payload, "paper_id"),
-        job_id=job_record.job_id if job_record is not None else _payload_str(response_payload, "job_id"),
+        paper_id=job_record.paper_id
+        if job_record is not None
+        else _payload_str(response_payload, "paper_id"),
+        job_id=job_record.job_id
+        if job_record is not None
+        else _payload_str(response_payload, "job_id"),
         error_code=_error_code(job_record, response_payload, unexpected_error),
         failure_stage=job_record.failed_stage if job_record is not None else None,
         build_steps_result_code=result_code,
@@ -495,7 +499,9 @@ def classify_build_steps_result(
         "tuning_value_leak",
     }:
         return "redline"
-    if exc_type == BuildStepsEvidenceError.__name__ or (reason is not None and "evidence" in reason):
+    if exc_type == BuildStepsEvidenceError.__name__ or (
+        reason is not None and "evidence" in reason
+    ):
         return "evidence_invalid"
     return "其它"
 
