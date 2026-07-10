@@ -39,11 +39,11 @@ FALLBACK_MIN_RECOVERY_CJK = 50
 _ALLOWED_CONTROL_WHITESPACE = "\t\n\r\f\v"
 _PDFPLUMBER_FALLBACK_FAILED = "pdfplumber_fallback_failed"
 _EQUATION_RE = re.compile(r"(^|\s)[A-Za-z][A-Za-z0-9_]*(\s*=|\s*\()")
-PDF_SECURITY_MAX_NODES = 5000
+PDF_SECURITY_MAX_NODES = 10000
 PDF_SECURITY_MAX_DEPTH = 64
-PDF_SECURITY_MAX_ACTIONS = 1000
-PDF_SECURITY_MAX_OUTLINE_ITEMS = 1000
-PDF_SECURITY_MAX_FORM_FIELDS = 2000
+PDF_SECURITY_MAX_ACTIONS = 10000
+PDF_SECURITY_MAX_OUTLINE_ITEMS = 10000
+PDF_SECURITY_MAX_FORM_FIELDS = 10000
 PDF_SECURITY_MAX_SCAN_SECONDS = 10.0
 
 _ACTIVE_MEDIA_SUBTYPES = {"/RichMedia", "/Screen", "/Movie", "/Sound"}
@@ -171,7 +171,6 @@ class _PdfActiveContentScanner:
         self._action_roots = 0
         self._outline_items = 0
         self._form_fields = 0
-        self._visited_non_action: set[tuple[object, ...]] = set()
         self._visited_outlines: set[tuple[object, ...]] = set()
         self._visited_fields: set[tuple[object, ...]] = set()
         self._page_ref_ids = self._build_page_ref_ids()
@@ -179,11 +178,24 @@ class _PdfActiveContentScanner:
     def scan(self) -> None:
         catalog = self._as_dictionary(self._reader.root_object)
 
-        self._scan_non_action_active_objects(catalog, depth=0)
+        self._scan_non_action_active_entries(catalog)
         self._scan_catalog_action_roots(catalog)
         self._scan_acroform(catalog)
         self._scan_outlines(catalog)
         self._scan_pages()
+
+    def _scan_non_action_active_entries(self, catalog: DictionaryObject) -> None:
+        self._count_security_node(depth=0)
+        if "/Names" in catalog:
+            self._scan_catalog_names(catalog["/Names"], depth=1)
+
+    def _scan_catalog_names(self, names: object, depth: int) -> None:
+        self._count_security_node(depth=depth)
+        names = self._as_dictionary(names)
+        if "/JavaScript" in names:
+            self._reject("pdf_document_javascript_name_tree")
+        if "/EmbeddedFiles" in names:
+            self._reject("pdf_embedded_file_present")
 
     def _scan_catalog_action_roots(self, catalog: DictionaryObject) -> None:
         if "/OpenAction" in catalog:
@@ -287,8 +299,14 @@ class _PdfActiveContentScanner:
         subtype = self._name_value(annotation, "/Subtype")
         if subtype in _ACTIVE_MEDIA_SUBTYPES:
             self._reject("pdf_active_media_present")
+        if subtype == "/3D":
+            self._scan_3d_annotation(annotation)
         if subtype == "/FileAttachment":
             self._reject("pdf_embedded_file_present")
+        if "/AF" in annotation:
+            self._reject("pdf_embedded_file_present")
+        if "/FS" in annotation:
+            self._scan_file_spec(annotation["/FS"])
         if "/AA" in annotation:
             self._reject("pdf_additional_actions_unsupported")
         if "/A" in annotation:
@@ -296,38 +314,23 @@ class _PdfActiveContentScanner:
                 self._reject("pdf_annotation_action_unsupported")
             self._validate_action(annotation["/A"], context="annotation_click")
 
-    def _scan_non_action_active_objects(self, obj: object, depth: int) -> None:
-        self._guard_budget(depth=depth)
-        obj = self._resolve(obj)
-        key = self._visit_key(obj)
-        if key in self._visited_non_action:
+    def _scan_3d_annotation(self, annotation: DictionaryObject) -> None:
+        if "/OnInstantiate" in annotation:
+            self._reject("pdf_3d_script_present")
+        if "/3DD" not in annotation:
             return
-        self._visited_non_action.add(key)
-        self._scan_nodes += 1
-        if self._scan_nodes > PDF_SECURITY_MAX_NODES:
-            self._reject("pdf_structure_unverifiable")
+        self._count_security_node(depth=1)
+        three_d_data = self._as_dictionary(annotation["/3DD"])
+        if "/OnInstantiate" in three_d_data:
+            self._reject("pdf_3d_script_present")
 
-        if isinstance(obj, DictionaryObject):
-            if "/JavaScript" in obj:
-                self._reject("pdf_document_javascript_name_tree")
-            if "/XFA" in obj:
-                self._reject("pdf_xfa_present")
-            if "/OnInstantiate" in obj:
-                self._reject("pdf_3d_script_present")
-            if "/EmbeddedFiles" in obj or "/EF" in obj or "/AF" in obj:
-                self._reject("pdf_embedded_file_present")
-
-            subtype = self._name_value(obj, "/Subtype")
-            if subtype in _ACTIVE_MEDIA_SUBTYPES:
-                self._reject("pdf_active_media_present")
-            if subtype == "/FileAttachment":
-                self._reject("pdf_embedded_file_present")
-
-            for child in self._dictionary_values(obj):
-                self._scan_non_action_active_objects(child, depth=depth + 1)
-        elif isinstance(obj, ArrayObject):
-            for child in obj:
-                self._scan_non_action_active_objects(child, depth=depth + 1)
+    def _scan_file_spec(self, file_spec: object) -> None:
+        self._count_security_node(depth=1)
+        file_spec = self._resolve(file_spec)
+        if not isinstance(file_spec, DictionaryObject):
+            return
+        if "/EF" in file_spec:
+            self._reject("pdf_embedded_file_present")
 
     def _validate_action(self, action: object, *, context: str) -> None:
         self._action_roots += 1
@@ -454,15 +457,6 @@ class _PdfActiveContentScanner:
                 ref_ids.add(ref_id)
         return ref_ids
 
-    def _dictionary_values(self, obj: DictionaryObject) -> list[object]:
-        values: list[object] = []
-        for key in list(obj.keys()):
-            try:
-                values.append(obj[key])
-            except (PdfReadError, ValueError, KeyError, TypeError, RecursionError):
-                self._reject("pdf_structure_unverifiable")
-        return values
-
     def _name_value(self, obj: DictionaryObject, key: str) -> str | None:
         if key not in obj:
             return None
@@ -507,6 +501,12 @@ class _PdfActiveContentScanner:
 
     def _indirect_id(self, ref: IndirectObject) -> tuple[int, int]:
         return (int(ref.idnum), int(ref.generation))
+
+    def _count_security_node(self, *, depth: int) -> None:
+        self._guard_budget(depth=depth)
+        self._scan_nodes += 1
+        if self._scan_nodes > PDF_SECURITY_MAX_NODES:
+            self._reject("pdf_structure_unverifiable")
 
     def _guard_budget(self, *, depth: int) -> None:
         if depth > PDF_SECURITY_MAX_DEPTH:

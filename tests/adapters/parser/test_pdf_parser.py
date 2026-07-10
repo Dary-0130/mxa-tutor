@@ -314,11 +314,47 @@ def test_pdf_active_gate_rejects_budget_overrun(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pdf_parser, "PDF_SECURITY_MAX_NODES", 1)
+    monkeypatch.setattr(pdf_parser, "PDF_SECURITY_MAX_NODES", 0)
     writer, _ = _base_pdf_writer()
 
     with pytest.raises(DocumentParseError) as exc_info:
         PdfParser(min_text_chars=0).parse(_write_pdf(tmp_path, writer))
+
+    assert exc_info.value.args == ("active_pdf_content_not_supported",)
+
+
+def test_pdf_active_gate_ignores_large_harmless_object_graph(tmp_path: Path) -> None:
+    writer, _ = _base_pdf_writer()
+    writer._root_object[NameObject("/Harmless")] = ArrayObject(
+        [DictionaryObject({NameObject("/N"): NumberObject(index)}) for index in range(6000)]
+    )
+
+    parsed = PdfParser(min_text_chars=0).parse(_write_pdf(tmp_path, writer))
+
+    assert parsed.page_count == 1
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [
+        pytest.param(lambda tmp_path: _pdf_with_document_javascript(tmp_path), id="js-name-tree"),
+        pytest.param(lambda tmp_path: _pdf_with_xfa(tmp_path), id="xfa"),
+        pytest.param(lambda tmp_path: _pdf_with_3d_on_instantiate(tmp_path), id="3d-script"),
+        pytest.param(lambda tmp_path: _pdf_with_active_media(tmp_path), id="active-media"),
+        pytest.param(
+            lambda tmp_path: _pdf_with_embedded_files_name_tree(tmp_path), id="embedded-files"
+        ),
+        pytest.param(lambda tmp_path: _pdf_with_associated_file(tmp_path), id="af"),
+        pytest.param(lambda tmp_path: _pdf_with_file_attachment(tmp_path), id="file-attachment"),
+        pytest.param(lambda tmp_path: _pdf_with_annotation_filespec_ef(tmp_path), id="filespec-ef"),
+    ],
+)
+def test_pdf_active_gate_targeted_non_action_detectors_reject_specified_entries(
+    tmp_path: Path,
+    builder: Any,
+) -> None:
+    with pytest.raises(DocumentParseError) as exc_info:
+        PdfParser(min_text_chars=0).parse(builder(tmp_path))
 
     assert exc_info.value.args == ("active_pdf_content_not_supported",)
 
@@ -614,6 +650,34 @@ def _pdf_with_file_attachment(tmp_path: Path) -> Path:
                 NameObject("/Type"): NameObject("/Annot"),
                 NameObject("/Subtype"): NameObject("/FileAttachment"),
                 NameObject("/Rect"): _rect(),
+            }
+        ),
+    )
+    return _write_pdf(tmp_path, writer)
+
+
+def _pdf_with_annotation_filespec_ef(tmp_path: Path) -> Path:
+    writer, page = _base_pdf_writer()
+    filespec = writer._add_object(
+        DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Filespec"),
+                NameObject("/F"): TextStringObject("payload.bin"),
+                NameObject("/EF"): DictionaryObject(
+                    {NameObject("/F"): ByteStringObject(b"payload")}
+                ),
+            }
+        )
+    )
+    _attach_annotation(
+        writer,
+        page,
+        DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Annot"),
+                NameObject("/Subtype"): NameObject("/Text"),
+                NameObject("/Rect"): _rect(),
+                NameObject("/FS"): filespec,
             }
         ),
     )
