@@ -350,16 +350,18 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 22/23 (paper-to-model TASK-500~508 + TASK-520(🔍 追问子线) + TASK-521(🔍 多文件子线) + TASK-522(🔍 解析纠错子线) + TASK-526(✅ LLM 结构化输出稳定性收尾);MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 23/24 (paper-to-model TASK-500~508 + TASK-523/524/525/526/528/529 + TASK-530(PDF 活动内容闸)+ TASK-520/521/522(🔍 追问/多文件/解析纠错子线未完全收口);MATLAB bridge/engine TASK-510~519)
 
-总计: 53/56
+总计: 54/57
 ```
 
 ---
 
 ## 下一步
 
-**当前状态**:**paper-to-model v0.1 主线门槛 5 已解封**(2026-06-20;TASK-500/501/502 ✅,TASK-503 v0.2.4 + decision 25 验收通过)。TASK-503 完成 TuningSuggestion、持久化 PaperBundleStore、GET spec/plan 路由、D 根因方向 A、上传真事务与 evaluator 双轴判分改造;R6 true run 两 case 达标(material `succeeded + partial`,missing `succeeded + pass`),fixture 零 diff,R2 真值源已入 main。Week 5+ paper-to-model 线当前 7/8(TASK-500~506 ✅,TASK-507-A 🔍);MATLAB bridge/engine 线 TASK-510~514 均已合并并验收通过,TASK-516 run-state 采集 + 独立通道契约已合并 main(PR #118 / df383c8)并验收完;TASK-517 b3-2a = 517-A substrate(PR #120)+517-B enforcement(PR #121)均已合并 main;TASK-518-A substrate 已合并 main(PR #123),TASK-518-B wiring 已合并 main(PR #124);TASK-519-A run-state 单轮陪调实现完成,等待验收。总进度为 47/50。下一步进入 TASK-507-A 验收 / TASK-519-A review / v0.2 多 case 评测规划,judge 仍按 decision 25 留到 v0.2 多 case。
+当前状态:paper-to-model v0.1 单篇主路已打通到「真论文进得来」——TASK-530 已修好 PDF 活动内容闸(此前 8 篇真 arXiv 有 7 篇被误拦在 active_pdf_content_not_supported、连 spec 都抽不出),配套评测 PDF 试车道(PR #193)已入仓,可对本地论文集同批同口径量效果。真机 8 篇复跑:7 篇历史被拒篇全部越过活动内容闸进入抽取,2 篇(2110.10333 / 2510.12335)一路跑通 spec + build_steps(其中 2510 已生成 guidance)——项目首次有真论文从头跑到指导层。
+已完成主体:paper-to-model 主线 TASK-500~508 ✅、修复卡 523/524 ✅、上传作业化 525-A/B ✅、结构化输出稳定性 526 ✅、建模指导三层 528-A/B/C ✅、draft DTO 容忍 529 ✅、PDF 闸 530 ✅;MATLAB bridge/engine 线 510~519 ✅(517/518/519 各 A/B 子块均合并)。追问子线 520(剩 520-E)、多文件子线 521(剩解析纠错相关)、解析纠错子线 522(剩 522-A 诚实提示 / 522-D2 消解冲突)仍🔍未完全收口。
+下一步:主路瓶颈前移到 spec 生成——8 篇越闸后 5 篇栽在 spec(经诊断分三类:2 篇 abstract 字段 max_length 约束太紧卡掉[非截断]、3 篇 spec JSON 撞 8000 token 上限截断、1 篇[2409]raw_text 超 80k 硬闸在调 LLM 前即拒)。按决策 15 先诊断后修:abstract 约束卡先单独修(约束放宽),截断与 build_steps 截断合并成截断卡(抬 max_tokens / 瘦 prompt / 分段,沾 526-B),80k 闸独立评估。528-B 遗留的混合型护栏(2110 触发 no_document_basis)待 spec 通后回验。528-D 上屏继续后置至主路跑热。
 
 ## Week 5+:paper-to-model 主线占位
 
@@ -398,6 +400,8 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-528-B | 建模指导细化层生成(后处理) | ✅ | Codex | 已合并 main(PR #187 / 3c434e4);带来源标注指导生成 + grounding 白名单 + 不编造护栏;遗留:主路真机未跑热(上游 build_steps 降级)、混合型论文护栏验证待补 |
 | TASK-528-C | 建模指导语义校验闸(独立穷尽语义硬门 + 读回校验 + 红线测试) | ✅ | Codex | additive;未 bump v9;读回走当场现算;四处过严高危点已焊测试 |
 | TASK-529 | build_steps draft DTO 容忍缺省 paper_reference(修 dto_invalid 主因) | ✅ | Codex | 已合并 main(PR #191 / commit 3e07e5d);私有 _StepBlockRefDraftModel 容忍 LLM 省略 paper_reference→None,公共/域/schema/TS 契约零改、export 零 diff;红线/证据不放松、命门测试反向验证过;真机 dto_invalid 归零(样本小,2 case×3);build_steps 残余降级=截断+下游校验,归后续卡 |
+| TASK-530 | PDF 活动内容闸从三词字节拒改为对象语义白名单放行 | ✅ | Codex | 已合并 main(PR #194 / commit 59ba116);闸从 raw-byte 搜 /JavaScript·/JS·/OpenAction 命中即拒,改为基于 pypdf 规范化对象图的语义白名单:仅放行本文档内 /GoTo 翻页(OpenAction/书签/点击注解)+ 点击型 link URI,危险动作(脚本//Launch/远程/自动跳外链/附件//AA//Next/未知)全 fail-closed;补单独 /Launch 漏检;非动作活动对象(JS name tree/XFA/3D/媒体/附件)独立探测即拒;收窄扫描面修正误拒正常论文;对外错误码 active_pdf_content_not_supported 零改、schema export 零 diff;命门测试反向验证;真机 8 篇复跑 7 篇历史被拒篇全部越闸 |
+| 评测 PDF 试车道 | 本地固定论文集真机主路 smoke lane(非 TASK 编号,评测基建) | ✅ | Codex | 已合并 main(PR #193);eval/run_paper_pdf_smoke.py 对本地论文集逐篇跑完整真机主路(upload→parse→spec→plan→guidance)输出标准口径 summary,产物落 eval/out/(gitignore);与 stripped-md CI golden 并存不替换,默认不进 CI、跑真机;决策 12 §7.1 豁免 R 轮 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
 **决策 09 反例库**:108 → **171**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段):
