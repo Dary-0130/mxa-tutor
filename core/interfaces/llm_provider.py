@@ -35,6 +35,7 @@ class LLMResponse:
     model: str
     latency_ms: int
     finish_reason: str | None = None
+    system_fingerprint: str | None = None
 
 
 class TextProvider(ABC):

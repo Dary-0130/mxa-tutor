@@ -1088,6 +1088,87 @@ async def test_structured_fallback_log_is_reason_coded_metadata_only(
 
 
 @pytest.mark.asyncio
+async def test_dependency_audit_shadows_dto_invalid_terminal_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MXA_BUILD_STEPS_DEPENDENCY_AUDIT", "1")
+    warning_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_warning(*args: object, **kwargs: object) -> None:
+        warning_calls.append((args, kwargs))
+
+    monkeypatch.setattr(service_module.logger, "warning", fake_warning)
+    payloads = _payloads()
+    payloads["build_step_planner"]["build_steps"][2]["depends_on"] = ["STEP-003"]
+    payloads["build_step_planner"]["build_steps"][2]["unexpected"] = "dto failure"
+    service = PayloadPaperPlanService(payloads)
+
+    plan, _, _ = await service.generate(_spec(), "PAPER-001")
+
+    audit = service.build_steps_dependency_audit()
+    assert plan.build_steps is None
+    assert audit.dependency_audit_status == "violations"
+    assert audit.violations_by_code["self"] == 1
+    logged = repr(warning_calls)
+    assert "reason_code=%s" in logged
+    assert "dto_invalid" in logged
+    assert '"dependency_audit_status":"violations"' in logged
+
+
+@pytest.mark.asyncio
+async def test_dependency_audit_log_does_not_include_nonconforming_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MXA_BUILD_STEPS_DEPENDENCY_AUDIT", "1")
+    warning_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_warning(*args: object, **kwargs: object) -> None:
+        warning_calls.append((args, kwargs))
+
+    monkeypatch.setattr(service_module.logger, "warning", fake_warning)
+    leaked_dependency = "STEP-002 求解第3.2节"
+    payloads = _payloads()
+    payloads["build_step_planner"]["build_steps"][2]["depends_on"] = [leaked_dependency]
+
+    await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
+
+    logged = repr(warning_calls)
+    assert "depends_on_unknown" in logged
+    assert "dep_length_bucket" in logged
+    assert leaked_dependency not in logged
+    assert "求解第3.2节" not in logged
+
+
+@pytest.mark.asyncio
+async def test_dependency_audit_toggle_does_not_change_plan_output_or_terminal_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def run_once(enabled: bool) -> tuple[dict[str, Any], list[str], list[str]]:
+        if enabled:
+            monkeypatch.setenv("MXA_BUILD_STEPS_DEPENDENCY_AUDIT", "1")
+        else:
+            monkeypatch.delenv("MXA_BUILD_STEPS_DEPENDENCY_AUDIT", raising=False)
+        payloads = _payloads()
+        payloads["build_step_planner"]["build_steps"][2]["depends_on"] = ["STEP-003"]
+        service = _FallbackRecordingPaperPlanService(payloads)
+
+        plan, missing_prompts, missing_bindings = await service.generate(_spec(), "PAPER-001")
+
+        return (
+            ModelGenerationPlanModel.from_domain(plan).model_dump(mode="json"),
+            service.fallback_reason_codes,
+            [prompt.prompt_id for prompt in missing_prompts]
+            + [binding.prompt_id for binding in missing_bindings],
+        )
+
+    off_result = await run_once(False)
+    on_result = await run_once(True)
+
+    assert off_result == on_result
+    assert on_result[1] == ["depends_on_self"]
+
+
+@pytest.mark.asyncio
 async def test_user_supplied_build_step_evidence_falls_back_to_legacy() -> None:
     payloads = _payloads()
     payloads["build_step_planner"]["build_steps"][0]["evidence"] = [_user_evidence_payload()]
@@ -1367,6 +1448,16 @@ async def test_logger_does_not_leak_llm_response_text(monkeypatch: pytest.Monkey
 
     logged_text = " ".join(repr(item) for call in error_calls for item in call[0])
     assert "SECRET_LLM_RAW_TEXT" not in logged_text
+
+
+class _FallbackRecordingPaperPlanService(PayloadPaperPlanService):
+    def __init__(self, payloads: dict[str, dict[str, Any] | Exception]) -> None:
+        super().__init__(payloads)
+        self.fallback_reason_codes: list[str] = []
+
+    def _log_build_steps_fallback(self, exc: BuildStepsStructuredError) -> None:
+        self.fallback_reason_codes.append(exc.reason_code)
+        super()._log_build_steps_fallback(exc)
 
 
 def _payloads() -> dict[str, dict[str, Any]]:

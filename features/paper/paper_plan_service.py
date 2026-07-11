@@ -38,7 +38,14 @@ from features.paper._prompt_builder import (
     build_messages_for_regenerate_build_steps,
     build_messages_for_subsystem_plan,
 )
+from features.paper._prompt_loader import load_prompt_template
 from features.paper.build_guidance_generator import BuildGuidanceGenerator
+from features.paper.build_steps_dependency_audit import (
+    DependencyAudit,
+    audit_step_dependencies_from_payload,
+    build_steps_dependency_audit_enabled,
+    prompt_token_bucket,
+)
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     PLAN_EVIDENCE_SOURCE_REF_FIELD,
@@ -122,6 +129,8 @@ class PaperPlanService:
         )
         self._timeout = timeout
         self._max_tokens = max_tokens
+        self._last_llm_prompt_tokens_by_role: dict[str, int] = {}
+        self._last_build_steps_dependency_audit: DependencyAudit | None = None
 
     async def generate(
         self,
@@ -329,6 +338,7 @@ class PaperPlanService:
                 timeout=self._timeout,
                 max_tokens=self._max_tokens,
             )
+            self._last_llm_prompt_tokens_by_role[role_name] = response.prompt_tokens
             set_current_finish_reason(response.finish_reason)
             if enforce_retry_caps:
                 try:
@@ -499,7 +509,9 @@ class PaperPlanService:
         parameter_mapping: list[ParameterMapping],
         spec: PaperSpec,
     ) -> list[ModelBuildStepDraft]:
+        self._clear_build_steps_dependency_audit()
         source_refs = build_plan_evidence_source_refs(spec)
+        prompt_version = load_prompt_template("paper_plan_build_steps.yaml").version
         data = await self._call_llm_json(
             build_messages_for_build_steps(
                 block_recommendations,
@@ -514,6 +526,10 @@ class PaperPlanService:
             document_source_refs=source_refs,
             user_source_refs=[],
             role_name=BUILD_STEP_ROLE_NAME,
+            evidence_ref_count=len(source_refs),
+            block_candidate_count=len(block_recommendations),
+            parameter_mapping_count=len(parameter_mapping),
+            rendered_prompt_version=prompt_version,
         )
 
     async def _llm_build_steps_for_regeneration(
@@ -525,11 +541,13 @@ class PaperPlanService:
         allowed_user_evidence_refs: set[UserEvidenceRef],
         allowed_user_prompt_ids: frozenset[str],
     ) -> list[ModelBuildStepDraft]:
+        self._clear_build_steps_dependency_audit()
         source_refs = build_plan_evidence_source_refs(spec)
         user_source_refs = build_step_user_evidence_source_refs(
             record_plan_evidence,
             allowed_user_evidence_refs,
         )
+        prompt_version = load_prompt_template("paper_plan_build_steps_regenerate.yaml").version
         data = await self._call_llm_json(
             build_messages_for_regenerate_build_steps(
                 block_recommendations,
@@ -547,6 +565,10 @@ class PaperPlanService:
             document_source_refs=source_refs,
             user_source_refs=user_source_refs,
             role_name=BUILD_STEP_REGENERATION_ROLE_NAME,
+            evidence_ref_count=len(source_refs) + len(user_source_refs),
+            block_candidate_count=len(block_recommendations),
+            parameter_mapping_count=len(parameter_mapping),
+            rendered_prompt_version=prompt_version,
         )
 
     def _parse_build_steps_output(
@@ -556,8 +578,20 @@ class PaperPlanService:
         document_source_refs: list[PlanEvidenceSourceRef],
         user_source_refs: list[BuildStepUserEvidenceSourceRef],
         role_name: str,
+        evidence_ref_count: int | None = None,
+        block_candidate_count: int | None = None,
+        parameter_mapping_count: int | None = None,
+        rendered_prompt_version: str | None = None,
     ) -> list[ModelBuildStepDraft]:
         raw_data = data
+        self._record_build_steps_dependency_audit(
+            raw_data,
+            role_name=role_name,
+            evidence_ref_count=evidence_ref_count,
+            block_candidate_count=block_candidate_count,
+            parameter_mapping_count=parameter_mapping_count,
+            rendered_prompt_version=rendered_prompt_version,
+        )
         data = _resolve_build_steps_draft_evidence_payload(
             data,
             document_source_refs=document_source_refs,
@@ -893,10 +927,51 @@ class PaperPlanService:
                 )
 
     def _log_build_steps_fallback(self, exc: BuildStepsStructuredError) -> None:
+        audit = self.build_steps_dependency_audit()
+        if build_steps_dependency_audit_enabled():
+            logger.warning(
+                "paper_plan_build_steps_fallback reason_code=%s exc_type=%s " "dependency_audit=%s",
+                exc.reason_code,
+                type(exc).__name__,
+                json.dumps(audit.to_dict(), sort_keys=True, separators=(",", ":")),
+            )
+            return
         logger.warning(
             "paper_plan_build_steps_fallback reason_code=%s exc_type=%s",
             exc.reason_code,
             type(exc).__name__,
+        )
+
+    def build_steps_dependency_audit(self) -> DependencyAudit:
+        if self._last_build_steps_dependency_audit is None:
+            return DependencyAudit.unavailable("draft_parse")
+        return self._last_build_steps_dependency_audit
+
+    def _clear_build_steps_dependency_audit(self) -> None:
+        self._last_build_steps_dependency_audit = None
+
+    def _record_build_steps_dependency_audit(
+        self,
+        raw_data: object,
+        *,
+        role_name: str,
+        evidence_ref_count: int | None,
+        block_candidate_count: int | None,
+        parameter_mapping_count: int | None,
+        rendered_prompt_version: str | None,
+    ) -> None:
+        if not build_steps_dependency_audit_enabled():
+            self._last_build_steps_dependency_audit = None
+            return
+        prompt_tokens = self._last_llm_prompt_tokens_by_role.get(role_name)
+        self._last_build_steps_dependency_audit = audit_step_dependencies_from_payload(
+            raw_data
+        ).with_context(
+            evidence_ref_count=evidence_ref_count,
+            block_candidate_count=block_candidate_count,
+            parameter_mapping_count=parameter_mapping_count,
+            prompt_tokens_bucket=prompt_token_bucket(prompt_tokens),
+            rendered_prompt_version=rendered_prompt_version,
         )
 
 

@@ -38,6 +38,7 @@ from core.domain.paper_spec import (
     PaperSpec,
     ParameterEntry,
 )
+from features.paper.build_steps_dependency_audit import DependencyAudit
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     BuildStepsDtoValidationError,
@@ -453,6 +454,44 @@ async def test_lock_conflict_maps_to_reparse_in_progress_without_reading() -> No
     assert plan_service.build_calls == 0
 
 
+@pytest.mark.asyncio
+async def test_regeneration_dependency_audit_is_logged_without_changing_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MXA_BUILD_STEPS_DEPENDENCY_AUDIT", "1")
+    info_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_info(*args: object, **kwargs: object) -> None:
+        info_calls.append((args, kwargs))
+
+    monkeypatch.setattr(regeneration_module.logger, "info", fake_info)
+    plan_service = _FakePlanService(
+        build_results=[BuildStepsDtoValidationError("depends_on_self") for _ in range(4)],
+        mscript_results=["clear; clc;"],
+        dependency_audit=DependencyAudit(
+            dependency_audit_status="violations",
+            total_steps=3,
+            total_dep_edges=1,
+            dep_edge_density=0.5,
+            all_empty_dependency_graph=False,
+            nonfirst_steps_with_empty_depends_on=0,
+            duplicate_step_id_count=0,
+            violations_by_code={"self": 1, "unknown": 0, "cycle": 0, "not_prior": 0},
+            violation_edges_total_count=1,
+        ),
+    )
+    store = _FakeBundleStore(_record())
+    plan_cache = _FakePlanCache()
+
+    updated = await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+
+    assert updated.build_steps is None
+    logged = repr(info_calls)
+    assert "paper_step_regeneration_build_steps_dependency_audit" in logged
+    assert "depends_on_self" in logged
+    assert '"dependency_audit_status":"violations"' in logged
+
+
 def _service(
     store: _FakeBundleStore,
     plan_cache: _FakePlanCache,
@@ -574,6 +613,7 @@ class _FakePlanService:
         guidance_results: list[ModelGenerationPlan | Exception] | None = None,
         build_started: asyncio.Event | None = None,
         build_release: asyncio.Event | None = None,
+        dependency_audit: DependencyAudit | None = None,
     ) -> None:
         self.build_results = list(build_results or [])
         self.mscript_results = list(mscript_results or [])
@@ -584,6 +624,7 @@ class _FakePlanService:
         self.mscript_calls = 0
         self.guidance_calls = 0
         self.guidance_inputs: list[ModelGenerationPlan] = []
+        self.dependency_audit = dependency_audit or DependencyAudit.unavailable("draft_parse")
 
     async def _llm_build_steps_for_regeneration(self, *args: object) -> list[ModelBuildStepDraft]:
         _ = args
@@ -631,6 +672,9 @@ class _FakePlanService:
     async def _llm_missing_detect(self, *args: object) -> object:
         _ = args
         raise AssertionError("missing detect must not run during step regeneration")
+
+    def build_steps_dependency_audit(self) -> DependencyAudit:
+        return self.dependency_audit
 
 
 def _record(

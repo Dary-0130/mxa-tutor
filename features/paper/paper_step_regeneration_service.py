@@ -27,6 +27,7 @@ from features.paper.build_guidance_lifecycle import (
     guidance_status_requires_regeneration,
     mark_guidance_stale_for_step_regeneration,
 )
+from features.paper.build_steps_dependency_audit import build_steps_dependency_audit_enabled
 from features.paper.paper_plan_helpers import (
     BuildStepsDtoValidationError,
     BuildStepsEvidenceError,
@@ -184,17 +185,51 @@ class PaperStepRegenerationService:
                     record.plan.parameter_mapping,
                     record.plan.block_recommendations,
                 )
+                self._log_build_steps_dependency_audit(
+                    terminal_reason_code="structured_success",
+                    attempt_index=attempt + 1,
+                )
                 return steps, retry_count
-            except _BUILD_STEP_TRANSIENT_ERRORS:
+            except _BUILD_STEP_TRANSIENT_ERRORS as exc:
+                self._log_build_steps_dependency_audit(
+                    terminal_reason_code=_build_step_exception_reason_code(exc),
+                    attempt_index=attempt + 1,
+                )
                 if attempt == self._retry_attempts - 1:
                     return None, retry_count
                 retry_count += 1
                 await self._backoff(attempt)
-            except _BUILD_STEP_REDLINE_ERRORS:
+            except _BUILD_STEP_REDLINE_ERRORS as exc:
+                self._log_build_steps_dependency_audit(
+                    terminal_reason_code=_build_step_exception_reason_code(exc),
+                    attempt_index=attempt + 1,
+                )
                 return None, retry_count
-            except (LLMError, PaperPlanGenerationError):
+            except (LLMError, PaperPlanGenerationError) as exc:
+                self._log_build_steps_dependency_audit(
+                    terminal_reason_code=_build_step_exception_reason_code(exc),
+                    attempt_index=attempt + 1,
+                )
                 return None, retry_count
         return None, retry_count
+
+    def _log_build_steps_dependency_audit(
+        self,
+        *,
+        terminal_reason_code: str,
+        attempt_index: int,
+    ) -> None:
+        if not build_steps_dependency_audit_enabled():
+            return
+        audit = self._plan_service.build_steps_dependency_audit()
+        logger.info(
+            "paper_step_regeneration_build_steps_dependency_audit event_code={} "
+            "attempt_index={} terminal_reason_code={} dependency_audit={}",
+            "paper_step_regeneration_build_steps_dependency_audit",
+            attempt_index,
+            terminal_reason_code,
+            json.dumps(audit.to_dict(), sort_keys=True, separators=(",", ":")),
+        )
 
     async def _regenerate_mscript_with_retry(
         self,
@@ -411,3 +446,11 @@ def _log_regeneration_telemetry(
         build_steps_retry_count,
         mscript_retry_count,
     )
+
+
+def _build_step_exception_reason_code(exc: BaseException) -> str:
+    if isinstance(exc, BuildStepsStructuredError):
+        return exc.reason_code
+    if isinstance(exc, PaperPlanGenerationError) and exc.reason_code is not None:
+        return exc.reason_code
+    return type(exc).__name__

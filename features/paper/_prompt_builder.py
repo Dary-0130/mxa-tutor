@@ -45,6 +45,18 @@ from features.paper.paper_schemas import (
 
 from ._prompt_loader import load_prompt_template
 
+_DEPENDENCY_SALIENCE_TEMPLATE_LINES = (
+    "- depends_on 不得包含本步骤自己的 step_id;只能引用别的步骤",
+    "- 系统会自动排序步骤,depends_on 不必为书写顺序兜底",
+    "- 没有前序依赖时 depends_on 填空数组 [];第一个步骤通常就该是空依赖",
+    "- 这一步的接线若要连到别的步骤产生的模块,必须把那个步骤写进 depends_on",
+)
+_DEPENDENCY_SALIENCE_CONSTRAINTS = """【depends_on 依赖/接线可见性机制】:
+- depends_on 不得包含本步骤自己的 step_id,只能引用别的步骤
+- 系统会自动排序步骤,depends_on 不必为书写顺序兜底
+- 没有前序依赖时 depends_on 填空数组 [];第一个步骤通常就该是空依赖
+- 这一步的接线若要连到别的步骤产生的模块,必须把那个步骤写进 depends_on"""
+
 
 class _GuidanceEvidenceCardLike(Protocol):
     @property
@@ -202,6 +214,8 @@ def build_messages_for_build_steps(
     parameter_mapping: list[ParameterMapping],
     evidence: list[PaperEvidenceEntry],
     source_refs: list[PlanEvidenceSourceRef],
+    *,
+    dependency_salience_enabled: bool = False,
 ) -> list[LLMMessage]:
     """Build BuildStepPlanner messages."""
 
@@ -230,7 +244,16 @@ def build_messages_for_build_steps(
             "plan_evidence_sources_json": _plan_evidence_sources_json(source_refs),
         },
     )
-    return _role_messages(template.system, user, shared_constraints=_build_steps_constraints())
+    return _role_messages(
+        _dependency_salience_template_system(
+            template.system,
+            dependency_salience_enabled=dependency_salience_enabled,
+        ),
+        user,
+        shared_constraints=_build_steps_constraints(
+            dependency_salience_enabled=dependency_salience_enabled
+        ),
+    )
 
 
 def build_messages_for_regenerate_build_steps(
@@ -242,6 +265,7 @@ def build_messages_for_regenerate_build_steps(
     *,
     allowed_user_evidence_refs: set[UserEvidenceRef],
     allowed_user_prompt_ids: frozenset[str],
+    dependency_salience_enabled: bool = False,
 ) -> list[LLMMessage]:
     """Build regeneration-only BuildStepPlanner messages."""
 
@@ -278,7 +302,16 @@ def build_messages_for_regenerate_build_steps(
             "plan_evidence_sources_json": _plan_evidence_sources_json(source_refs),
         },
     )
-    return _role_messages(template.system, user, shared_constraints=_regeneration_constraints())
+    return _role_messages(
+        _dependency_salience_template_system(
+            template.system,
+            dependency_salience_enabled=dependency_salience_enabled,
+        ),
+        user,
+        shared_constraints=_regeneration_constraints(
+            dependency_salience_enabled=dependency_salience_enabled
+        ),
+    )
 
 
 def build_messages_for_mscript_draft(
@@ -488,8 +521,33 @@ def _role_messages(
     ]
 
 
-def _regeneration_constraints() -> str:
-    return """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
+def _dependency_salience_template_system(
+    system: str,
+    *,
+    dependency_salience_enabled: bool,
+) -> str:
+    if dependency_salience_enabled:
+        return system
+    for line in _DEPENDENCY_SALIENCE_TEMPLATE_LINES:
+        system = system.replace(f"{line}\n", "")
+    return system
+
+
+def _with_dependency_salience_constraints(
+    base: str,
+    *,
+    dependency_salience_enabled: bool,
+) -> str:
+    if not dependency_salience_enabled:
+        return base
+    return base.replace(
+        "\n\n【字段名硬约束】",
+        f"\n\n{_DEPENDENCY_SALIENCE_CONSTRAINTS}\n\n【字段名硬约束】",
+    )
+
+
+def _regeneration_constraints(*, dependency_salience_enabled: bool = False) -> str:
+    base = """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
 
 【重生成阶段私有 draft evidence 契约】:
@@ -518,10 +576,14 @@ def _regeneration_constraints() -> str:
 - 工程推断字段只在 SimPowerSystems 工程惯例下推断;若已有,直接复用,不重新编
 - 缺参时只保留 value 字面 "null";不编值
 - plan_id / paper_spec_id 不要自生成"""
+    return _with_dependency_salience_constraints(
+        base,
+        dependency_salience_enabled=dependency_salience_enabled,
+    )
 
 
-def _build_steps_constraints() -> str:
-    return """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
+def _build_steps_constraints(*, dependency_salience_enabled: bool = False) -> str:
+    base = """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
 
 【build_steps 私有 draft evidence 契约】:
@@ -543,6 +605,10 @@ def _build_steps_constraints() -> str:
 - 工程推断字段只在 SimPowerSystems 工程惯例下推断;若已有,直接复用,不重新编
 - 缺参时只保留 value 字面 "null";不编值
 - plan_id / paper_spec_id 不要自生成"""
+    return _with_dependency_salience_constraints(
+        base,
+        dependency_salience_enabled=dependency_salience_enabled,
+    )
 
 
 def _build_guidance_constraints() -> str:

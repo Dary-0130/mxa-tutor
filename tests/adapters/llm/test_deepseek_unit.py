@@ -42,6 +42,7 @@ def test_chat_normal_path_returns_llm_response(
         completion_tokens=3,
         model="deepseek-v4-flash",
         finish_reason="stop",
+        system_fingerprint="fp-test",
     )
 
     response = _provider().chat([LLMMessage(role="user", content="hi")])
@@ -52,6 +53,7 @@ def test_chat_normal_path_returns_llm_response(
     assert response.model == "deepseek-v4-flash"
     assert response.latency_ms >= 0
     assert response.finish_reason == "stop"
+    assert response.system_fingerprint == "fp-test"
 
 
 def test_chat_finish_reason_missing_returns_none(
@@ -65,6 +67,19 @@ def test_chat_finish_reason_missing_returns_none(
     response = _provider().chat([LLMMessage(role="user", content="hi")])
 
     assert response.finish_reason is None
+
+
+def test_chat_system_fingerprint_missing_returns_none(
+    mock_openai_client: tuple[Any, Any],
+    fake_chat_completion: Any,
+) -> None:
+    """Missing provider system_fingerprint is recorded as unknown, not invented."""
+    _, mock_create = mock_openai_client
+    mock_create.return_value = fake_chat_completion(include_system_fingerprint=False)
+
+    response = _provider().chat([LLMMessage(role="user", content="hi")])
+
+    assert response.system_fingerprint is None
 
 
 def test_chat_passes_messages_role_content(
@@ -289,3 +304,4 @@ def test_no_message_content_logged(
     assert "secret response" not in joined
     assert "tokens_in=" in joined
     assert "finish_reason=" in joined
+    assert "system_fingerprint=" in joined
