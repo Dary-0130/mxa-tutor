@@ -177,7 +177,7 @@ def test_schema_error_raises_generation_error() -> None:
 
 def test_schema_error_records_sanitized_field_validation_details() -> None:
     payload = _valid_payload()
-    secret_abstract = "SECRET_ABSTRACT_VALUE_" * 60
+    secret_abstract = "SECRET_ABSTRACT_VALUE_" * 80
     payload["abstract"] = secret_abstract
 
     with pytest.raises(PaperSpecGenerationError) as exc_info:
@@ -188,7 +188,7 @@ def test_schema_error_records_sanitized_field_validation_details() -> None:
             "loc": "abstract",
             "type": "string_too_long",
             "count": 1,
-            "max_length": 1000,
+            "max_length": 1500,
         },
     )
     serialized = json.dumps(exc_info.value.validation_errors, ensure_ascii=False)

@@ -879,6 +879,16 @@ def test_domain_literal_rejects_general() -> None:
         PaperSpecModel.model_validate(payload)
 
 
+def test_paper_spec_abstract_length_boundaries_are_enforced() -> None:
+    for length in (1, 1162, 1500):
+        model = PaperSpecModel.model_validate(_paper_spec_payload(abstract="A" * length))
+        assert len(model.abstract) == length
+
+    for length in (0, 1501):
+        with pytest.raises(ValidationError):
+            PaperSpecModel.model_validate(_paper_spec_payload(abstract="A" * length))
+
+
 def test_document_extracted_evidence_invariants() -> None:
     model = PaperEvidenceEntryModel.model_validate(_document_evidence_payload())
     assert model.source is EvidenceSource.DOCUMENT_EXTRACTED
@@ -1008,6 +1018,7 @@ def _paper_spec_payload(
     *,
     documents: list[dict[str, object]] | None = None,
     primary_document_id: str | None = None,
+    abstract: str = "Abstract",
     parameter_table: list[dict[str, object]] | None = None,
     parameter_conflicts: list[dict[str, object]] | None = None,
     equations: list[dict[str, object]] | None = None,
@@ -1022,7 +1033,7 @@ def _paper_spec_payload(
         if documents is not None
         else [{"document_id": "DOC-001", "filename": "paper.pdf"}],
         "primary_document_id": primary_document_id,
-        "abstract": "Abstract",
+        "abstract": abstract,
         "equations": equations if equations is not None else [_equation_payload()],
         "parameter_table": parameter_table
         if parameter_table is not None

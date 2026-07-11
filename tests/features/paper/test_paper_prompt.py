@@ -19,10 +19,20 @@ def _clear_prompt_cache() -> None:
 def test_load_prompt_template_reads_paper_spec_yaml() -> None:
     template = load_prompt_template()
 
-    assert template.version == "v0.3"
+    assert template.version == "v0.4"
     assert "PaperSpec" in template.description
     assert "{raw_text}" in template.user
     assert "paper_title" in template.system
+
+
+def test_paper_spec_prompt_abstract_guidance_separates_target_and_hard_cap() -> None:
+    template = load_prompt_template()
+
+    assert "推荐目标长度约 300-800 字" in template.system
+    assert "绝对硬上限为 1500 字" in template.system
+    assert "研究问题、方法或建模对象、" in template.system
+    assert "关键方程或参数线索、复现目标" in template.system
+    assert "用自己的表述综合、不逐句翻抄、不复制整段" in template.system
 
 
 def test_load_prompt_template_uses_lru_cache(monkeypatch: pytest.MonkeyPatch) -> None:
