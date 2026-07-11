@@ -102,6 +102,19 @@ def test_chat_passes_timeout_and_max_tokens(
     assert mock_create.call_args.kwargs["max_tokens"] == 123
 
 
+def test_chat_passes_16k_max_tokens_without_provider_clamp(
+    mock_openai_client: tuple[Any, Any],
+    fake_chat_completion: Any,
+) -> None:
+    """The adapter must not clamp an explicit 16k output budget to its default."""
+    _, mock_create = mock_openai_client
+    mock_create.return_value = fake_chat_completion()
+
+    _provider().chat([LLMMessage(role="user", content="hi")], max_tokens=16_000)
+
+    assert mock_create.call_args.kwargs["max_tokens"] == 16_000
+
+
 def test_json_mode_sends_response_format(
     mock_openai_client: tuple[Any, Any],
     fake_chat_completion: Any,

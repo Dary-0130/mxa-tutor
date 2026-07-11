@@ -19,7 +19,10 @@ from core.interfaces.document_parser import (
 )
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.paper import InMemoryPaperSpecCache, PaperSpecService
-from features.paper.paper_spec_service import MAX_PAPER_RAW_TEXT_CHARS
+from features.paper.paper_spec_service import (
+    DEFAULT_PAPER_SPEC_MAX_TOKENS,
+    MAX_PAPER_RAW_TEXT_CHARS,
+)
 from features.paper.structured_retry import StructuredRetryContext
 
 
@@ -43,6 +46,7 @@ class FakeTextProvider(TextProvider):
         self._error = error
         self.calls = 0
         self.messages: list[list[LLMMessage]] = []
+        self.max_tokens: list[int | None] = []
 
     def chat(
         self,
@@ -51,9 +55,10 @@ class FakeTextProvider(TextProvider):
         timeout: float = 30.0,
         max_tokens: int | None = None,
     ) -> LLMResponse:
-        _ = json_mode, timeout, max_tokens
+        _ = json_mode, timeout
         self.calls += 1
         self.messages.append(messages)
+        self.max_tokens.append(max_tokens)
         if self._error is not None:
             raise self._error
         return _response(self._payload)
@@ -319,6 +324,72 @@ async def test_service_rejects_document_text_over_v0_1_limit(
         await _service(provider).extract(tmp_path / "paper.pdf", "paper-1")
 
     assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw_text_length", [80_001, 150_000])
+async def test_service_allows_raw_text_up_to_expanded_limit(raw_text_length: int) -> None:
+    provider = FakeTextProvider()
+
+    spec = await _service(provider).extract_parsed_uncached(
+        _parsed_document(raw_text="x" * raw_text_length),
+        "paper-1",
+        display_filename="paper.pdf",
+    )
+
+    assert spec.paper_title == "电机短路实验报告"
+    assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_service_rejects_raw_text_above_expanded_limit() -> None:
+    provider = FakeTextProvider()
+
+    with pytest.raises(DocumentParseError) as exc_info:
+        await _service(provider).extract_parsed_uncached(
+            _parsed_document(raw_text="x" * 150_001),
+            "paper-1",
+            display_filename="paper.pdf",
+        )
+
+    assert exc_info.value.args == ("document_too_long_for_v0_1",)
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_spec_generation_passes_expanded_token_budget_to_provider() -> None:
+    provider = FakeTextProvider()
+
+    await _service(provider).extract_parsed_uncached(
+        _parsed_document(),
+        "paper-1",
+        display_filename="paper.pdf",
+    )
+
+    assert DEFAULT_PAPER_SPEC_MAX_TOKENS == 16_000
+    assert provider.max_tokens == [16_000]
+
+
+@pytest.mark.asyncio
+async def test_spec_length_finish_reason_on_incomplete_json_is_truncation_failure() -> None:
+    provider = SequencedTextProvider(
+        [
+            _response_text("{", finish_reason="length"),
+            _response(_valid_payload()),
+        ]
+    )
+
+    with pytest.raises(PaperSpecGenerationError) as exc_info:
+        await _service(provider).extract_parsed_uncached(
+            _parsed_document(),
+            "paper-1",
+            display_filename="paper.pdf",
+            retry_context=StructuredRetryContext(),
+        )
+
+    assert exc_info.value.reason_code == "invalid_json"
+    assert exc_info.value.finish_reason == "length"
+    assert provider.calls == 1
 
 
 @pytest.mark.asyncio
