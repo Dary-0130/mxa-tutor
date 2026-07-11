@@ -43,6 +43,19 @@ def test_hybrid_guardrail_conclusion_distinguishes_not_reached_and_misfire() -> 
     ) == ("no_document_basis误触发", True)
 
 
+def test_spec_validation_errors_merge_counts_without_values() -> None:
+    existing = [{"loc": "abstract", "type": "string_too_long", "count": 1, "max_length": 1000}]
+    incoming = (
+        {"loc": "abstract", "type": "string_too_long", "count": 2, "max_length": 1000},
+        {"loc": "domain", "type": "literal_error", "count": 1},
+    )
+
+    assert subject._merge_spec_validation_errors(existing, incoming) == [
+        {"loc": "abstract", "type": "string_too_long", "count": 3, "max_length": 1000},
+        {"loc": "domain", "type": "literal_error", "count": 1},
+    ]
+
+
 def test_write_summary_artifacts_uses_fixed_schema(tmp_path: Path) -> None:
     row = _summary_row(tmp_path)
 
@@ -56,6 +69,7 @@ def test_write_summary_artifacts_uses_fixed_schema(tmp_path: Path) -> None:
         assert reader.fieldnames == subject.SUMMARY_COLUMNS
         csv_row = next(reader)
     assert json.loads(csv_row["dto_invalid_errors"]) == row.dto_invalid_errors
+    assert json.loads(csv_row["spec_validation_errors"]) == row.spec_validation_errors
 
 
 @pytest.mark.asyncio
@@ -133,6 +147,9 @@ def _summary_row(
         job_id="job-1",
         error_code=None,
         failure_stage=None,
+        spec_validation_errors=[
+            {"loc": "abstract", "type": "string_too_long", "count": 1, "max_length": 1000}
+        ],
         build_steps_result_code="dto_invalid",
         build_steps_raw_reason_code="dto_invalid",
         build_steps_finish_reason="length",

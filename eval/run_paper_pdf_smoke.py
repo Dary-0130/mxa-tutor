@@ -36,6 +36,7 @@ from adapters.storage.schema import init_schema
 from adapters.storage.sqlite_paper_cache import SqlitePaperBundleStore, SqlitePaperSpecCacheView
 from api.routes.paper_upload import UploadDocumentResponse, upload_document
 from app.config import AppSettings
+from core.domain.exceptions import PaperSpecGenerationError
 from core.domain.paper_plan import PaperPlanRecord
 from core.domain.paper_upload_job import PaperUploadJobRecord
 from core.interfaces.document_parser import DocumentParserRouter
@@ -87,6 +88,7 @@ SUMMARY_COLUMNS = [
     "job_id",
     "error_code",
     "failure_stage",
+    "spec_validation_errors",
     "build_steps_result_code",
     "build_steps_raw_reason_code",
     "build_steps_finish_reason",
@@ -140,6 +142,7 @@ class LLMCallRecord:
 
 @dataclass
 class BuildStepsTelemetry:
+    spec_validation_errors: list[dict[str, object]] = field(default_factory=list)
     fallback_reason_code: str | None = None
     fallback_exception_type: str | None = None
     dto_invalid_errors: list[dict[str, str]] = field(default_factory=list)
@@ -156,6 +159,7 @@ class SmokeSummaryRow:
     job_id: str | None
     error_code: str | None
     failure_stage: str | None
+    spec_validation_errors: list[dict[str, object]]
     build_steps_result_code: BuildStepsResultCode
     build_steps_raw_reason_code: str | None
     build_steps_finish_reason: str | None
@@ -234,6 +238,31 @@ class RecordingTextProvider(TextProvider):
             if call.role == role:
                 return call
         return None
+
+
+class RecordingPaperSpecService(PaperSpecService):
+    """Eval-only subclass that records sanitized spec validation failure details."""
+
+    def __init__(
+        self,
+        *args: Any,
+        telemetry: BuildStepsTelemetry,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._smoke_telemetry = telemetry
+
+    def _record_spec_exhausted(self, exc: PaperSpecGenerationError) -> None:
+        _record_spec_validation_errors(self._smoke_telemetry, exc.validation_errors)
+        super()._record_spec_exhausted(exc)
+
+    def _record_spec_retry(
+        self,
+        exc: PaperSpecGenerationError,
+        remaining_structured_retries: int,
+    ) -> None:
+        _record_spec_validation_errors(self._smoke_telemetry, exc.validation_errors)
+        super()._record_spec_retry(exc, remaining_structured_retries)
 
 
 class RecordingPaperPlanService(PaperPlanService):
@@ -365,10 +394,11 @@ async def _run_one_pdf_round(
 ) -> SmokeSummaryRow:
     telemetry = BuildStepsTelemetry()
     provider = RecordingTextProvider(provider_factory(settings))
-    spec_service = PaperSpecService(
+    spec_service = RecordingPaperSpecService(
         cache=SqlitePaperSpecCacheView(store),
         text_provider=provider,
         document_parser_router=DocumentParserRouter([PdfParser(), DocxParser()]),
+        telemetry=telemetry,
     )
     plan_service = RecordingPaperPlanService(provider, telemetry=telemetry)
     response_payload: dict[str, Any] | None = None
@@ -410,6 +440,7 @@ async def _run_one_pdf_round(
         response_payload or {},
         job_record=job_record,
         unexpected_error=unexpected_error,
+        spec_validation_errors=telemetry.spec_validation_errors,
     )
     return build_summary_row(
         paper=paper,
@@ -460,6 +491,7 @@ def build_summary_row(
         else _payload_str(response_payload, "job_id"),
         error_code=_error_code(job_record, response_payload, unexpected_error),
         failure_stage=job_record.failed_stage if job_record is not None else None,
+        spec_validation_errors=list(telemetry.spec_validation_errors),
         build_steps_result_code=result_code,
         build_steps_raw_reason_code=telemetry.fallback_reason_code,
         build_steps_finish_reason=build_steps_call.finish_reason if build_steps_call else None,
@@ -538,6 +570,11 @@ def write_summary_artifacts(output_dir: Path, rows: list[SmokeSummaryRow]) -> No
             payload = row.to_dict()
             payload["dto_invalid_errors"] = json.dumps(
                 payload["dto_invalid_errors"],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            payload["spec_validation_errors"] = json.dumps(
+                payload["spec_validation_errors"],
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
@@ -642,6 +679,70 @@ def _pydantic_loc_type_errors(exc: ValidationError) -> list[dict[str, str]]:
     return errors
 
 
+def _record_spec_validation_errors(
+    telemetry: BuildStepsTelemetry,
+    validation_errors: tuple[dict[str, object], ...],
+) -> None:
+    if not validation_errors:
+        return
+    telemetry.spec_validation_errors = _merge_spec_validation_errors(
+        telemetry.spec_validation_errors,
+        validation_errors,
+    )
+
+
+def _merge_spec_validation_errors(
+    existing: list[dict[str, object]],
+    incoming: tuple[dict[str, object], ...],
+) -> list[dict[str, object]]:
+    grouped: dict[tuple[str, str, int | None, int | None], int] = {}
+    for detail in [*existing, *incoming]:
+        key = (
+            _detail_str(detail, "loc", default="root"),
+            _detail_str(detail, "type", default="unknown"),
+            _detail_int(detail, "actual_length"),
+            _detail_int(detail, "max_length"),
+        )
+        grouped[key] = grouped.get(key, 0) + _detail_count(detail)
+
+    merged: list[dict[str, object]] = []
+    for loc, error_type, actual_length, max_length in sorted(
+        grouped,
+        key=lambda key: (
+            key[0],
+            key[1],
+            -1 if key[2] is None else key[2],
+            -1 if key[3] is None else key[3],
+        ),
+    ):
+        detail: dict[str, object] = {
+            "loc": loc,
+            "type": error_type,
+            "count": grouped[(loc, error_type, actual_length, max_length)],
+        }
+        if actual_length is not None:
+            detail["actual_length"] = actual_length
+        if max_length is not None:
+            detail["max_length"] = max_length
+        merged.append(detail)
+    return merged
+
+
+def _detail_str(detail: dict[str, object], key: str, *, default: str) -> str:
+    value = detail.get(key)
+    return value if isinstance(value, str) else default
+
+
+def _detail_int(detail: dict[str, object], key: str) -> int | None:
+    value = detail.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _detail_count(detail: dict[str, object]) -> int:
+    value = _detail_int(detail, "count")
+    return value if value is not None and value > 0 else 1
+
+
 def _terminal_state(
     job_record: PaperUploadJobRecord | None,
     unexpected_error: Exception | None,
@@ -697,6 +798,7 @@ def _write_actual_artifact(
     *,
     job_record: PaperUploadJobRecord | None,
     unexpected_error: Exception | None,
+    spec_validation_errors: list[dict[str, object]],
 ) -> None:
     artifact = {
         "paper_file": paper.path.name,
@@ -706,6 +808,7 @@ def _write_actual_artifact(
         "job_state": job_record.job_state if job_record is not None else None,
         "failed_stage": job_record.failed_stage if job_record is not None else None,
         "error_code": job_record.last_error_code if job_record is not None else None,
+        "spec_validation_errors": spec_validation_errors,
         "unexpected_error_type": type(unexpected_error).__name__ if unexpected_error else None,
     }
     path = actual_dir / f"{paper.slug}__round_{round_index:02d}.actual.json"

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 from pydantic import ValidationError
@@ -47,6 +49,7 @@ SPEC_LEAF_NAME = "paper_spec"
 SPEC_STRUCTURED_RETRY_EXTRA_ATTEMPTS = 1
 EQUATION_REASON_CODES = frozenset({"equation_locator_invalid", "equation_id_outside_whitelist"})
 CONTRACT_MISMATCH_REPEAT_COUNT = 3
+LENGTH_VALIDATION_ERROR_TYPES = frozenset({"string_too_long", "too_long", "bytes_too_long"})
 
 
 class PaperSpecService:
@@ -240,12 +243,14 @@ class PaperSpecService:
         try:
             spec = PaperSpecModel.model_validate(payload).to_domain()
         except ValidationError as exc:
+            validation_errors = _validation_error_details(exc)
             logger.error(
                 "PaperSpec schema validation failed: reason_code={} error_type={} "
-                "finish_reason={}",
+                "finish_reason={} spec_validation_errors={}",
                 "schema_validation",
                 type(exc).__name__,
                 response.finish_reason,
+                _format_validation_errors_for_log(validation_errors),
             )
             raise PaperSpecGenerationError(
                 _GENERATION_ERROR_MESSAGE,
@@ -253,6 +258,7 @@ class PaperSpecService:
                 finish_reason=response.finish_reason,
                 leaf=SPEC_LEAF_NAME,
                 loc=_validation_loc(exc),
+                validation_errors=validation_errors,
             ) from None
 
         try:
@@ -351,7 +357,7 @@ class PaperSpecService:
     ) -> None:
         logger.info(
             "paper_structured_retry_decision component={} leaf={} event={} reason_code={} "
-            "finish_reason={} remaining={} schema_subtype={}",
+            "finish_reason={} remaining={} schema_subtype={} spec_validation_errors={}",
             "spec",
             SPEC_LEAF_NAME,
             event,
@@ -359,6 +365,7 @@ class PaperSpecService:
             exc.finish_reason,
             remaining_structured_retries,
             _schema_subtype(exc.reason_code, exc.loc),
+            _format_validation_errors_for_log(exc.validation_errors),
         )
 
 
@@ -454,6 +461,69 @@ def _validation_loc(exc: ValidationError) -> tuple[str, ...] | None:
     if not isinstance(loc, tuple):
         return None
     return tuple(str(part) for part in loc)
+
+
+def _validation_error_details(exc: ValidationError) -> tuple[dict[str, object], ...]:
+    grouped: dict[tuple[str, str, int | None, int | None], int] = {}
+    errors = exc.errors(include_url=False, include_context=True, include_input=False)
+    for item in errors:
+        loc = _format_validation_loc(item.get("loc"))
+        error_type = str(item.get("type") or "unknown")
+        actual_length, max_length = _length_error_numbers(item, error_type)
+        key = (loc, error_type, actual_length, max_length)
+        grouped[key] = grouped.get(key, 0) + 1
+
+    details: list[dict[str, object]] = []
+    for loc, error_type, actual_length, max_length in sorted(
+        grouped,
+        key=lambda key: (
+            key[0],
+            key[1],
+            -1 if key[2] is None else key[2],
+            -1 if key[3] is None else key[3],
+        ),
+    ):
+        detail: dict[str, object] = {
+            "loc": loc,
+            "type": error_type,
+            "count": grouped[(loc, error_type, actual_length, max_length)],
+        }
+        if actual_length is not None:
+            detail["actual_length"] = actual_length
+        if max_length is not None:
+            detail["max_length"] = max_length
+        details.append(detail)
+    return tuple(details)
+
+
+def _format_validation_loc(loc: object) -> str:
+    if not isinstance(loc, tuple) or not loc:
+        return "root"
+    return ".".join(str(part) for part in loc)
+
+
+def _length_error_numbers(
+    item: Mapping[str, Any],
+    error_type: str,
+) -> tuple[int | None, int | None]:
+    if error_type not in LENGTH_VALIDATION_ERROR_TYPES:
+        return None, None
+    ctx = item.get("ctx")
+    if not isinstance(ctx, Mapping):
+        return None, None
+    actual_length = _safe_int(ctx.get("actual_length"))
+    max_length = _safe_int(ctx.get("max_length"))
+    return actual_length, max_length
+
+
+def _safe_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _format_validation_errors_for_log(
+    validation_errors: tuple[dict[str, object], ...],
+) -> str:
+    return json.dumps(validation_errors, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
 def _locator_namespace_for_reason(reason_code: str | None) -> str | None:
