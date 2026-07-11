@@ -102,12 +102,14 @@ class PaperSpecGenerationError(MxaError):
         leaf: str | None = None,
         locator_namespace: str | None = None,
         loc: tuple[str, ...] | None = None,
+        validation_errors: tuple[dict[str, object], ...] | None = None,
     ) -> None:
         self.reason_code = reason_code
         self.finish_reason = finish_reason
         self.leaf = leaf
         self.locator_namespace = locator_namespace
         self.loc = loc
+        self.validation_errors = validation_errors or ()
         super().__init__(message)
 
 

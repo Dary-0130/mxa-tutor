@@ -175,6 +175,31 @@ def test_schema_error_raises_generation_error() -> None:
     assert exc_info.value.reason_code == "schema_validation"
 
 
+def test_schema_error_records_sanitized_field_validation_details() -> None:
+    payload = _valid_payload()
+    secret_abstract = "SECRET_ABSTRACT_VALUE_" * 60
+    payload["abstract"] = secret_abstract
+
+    with pytest.raises(PaperSpecGenerationError) as exc_info:
+        _service(FakeTextProvider())._parse_and_validate(_response(payload), _parsed_document())
+
+    assert exc_info.value.validation_errors == (
+        {
+            "loc": "abstract",
+            "type": "string_too_long",
+            "count": 1,
+            "max_length": 1000,
+        },
+    )
+    serialized = json.dumps(exc_info.value.validation_errors, ensure_ascii=False)
+    assert "SECRET_ABSTRACT_VALUE" not in serialized
+    assert secret_abstract not in serialized
+    assert "Traceback" not in serialized
+    assert "String should have at most" not in serialized
+    assert "input" not in serialized
+    assert "msg" not in serialized
+
+
 @pytest.mark.asyncio
 async def test_spec_structured_retry_recovers_schema_validation_without_echoing_value() -> None:
     bad_payload = _valid_payload()
