@@ -56,6 +56,22 @@ def test_spec_validation_errors_merge_counts_without_values() -> None:
     ]
 
 
+def test_classify_build_steps_result_preserves_bridge_resolution_subcodes() -> None:
+    telemetry = subject.BuildStepsTelemetry(
+        fallback_reason_code="source_ref_no_match",
+        fallback_exception_type="BuildStepsDtoValidationError",
+    )
+
+    assert subject.classify_build_steps_result(None, telemetry) == "source_ref_no_match"
+
+
+def test_pydantic_loc_sanitizer_replaces_dynamic_keys() -> None:
+    assert (
+        subject._sanitize_pydantic_loc(("build_steps", 0, "evidence", "paper text leaked"))
+        == "build_steps.0.evidence.<dynamic_key>"
+    )
+
+
 def test_write_summary_artifacts_uses_fixed_schema(tmp_path: Path) -> None:
     row = _summary_row(tmp_path)
 

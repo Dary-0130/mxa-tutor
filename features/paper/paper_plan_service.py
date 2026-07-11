@@ -41,16 +41,20 @@ from features.paper._prompt_builder import (
 from features.paper.build_guidance_generator import BuildGuidanceGenerator
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
+    PLAN_EVIDENCE_SOURCE_REF_FIELD,
     BuildStepsDtoValidationError,
     BuildStepsJsonParseError,
     BuildStepsStructuredError,
+    BuildStepUserEvidenceSourceRef,
     EvidenceTagger,
     MissingBindingModel,
     ModelBuildStepDraft,
     PlanAssembler,
+    PlanEvidenceSourceRef,
     UserEvidenceRef,
     apply_plan_evidence_reference_bridge,
     build_plan_evidence_source_refs,
+    build_step_user_evidence_source_refs,
     validate_build_step_evidence_for_spec,
 )
 from features.paper.paper_plan_integrity import validate_plan_does_not_resolve_conflicts
@@ -93,6 +97,7 @@ RETRYABLE_PLAN_LEAF_NAMES = frozenset({PLAN_COMPOSER_ROLE_NAME, MISSING_DETECTOR
 EQUATION_REASON_CODES = frozenset({"equation_locator_invalid", "equation_id_outside_whitelist"})
 CONTRACT_MISMATCH_REPEAT_COUNT = 3
 _UNSET = object()
+_MISSING = object()
 
 
 class PaperPlanService:
@@ -494,32 +499,22 @@ class PaperPlanService:
         parameter_mapping: list[ParameterMapping],
         spec: PaperSpec,
     ) -> list[ModelBuildStepDraft]:
+        source_refs = build_plan_evidence_source_refs(spec)
         data = await self._call_llm_json(
             build_messages_for_build_steps(
                 block_recommendations,
                 parameter_mapping,
                 spec.evidence,
-                build_plan_evidence_source_refs(spec),
+                source_refs,
             ),
             BUILD_STEP_ROLE_NAME,
         )
-        source_refs = build_plan_evidence_source_refs(spec)
-        raw_data = data
-        data = apply_plan_evidence_reference_bridge(data, source_refs)
-        _preserve_present_invalid_block_ref_paper_references(raw_data, data)
-        _log_omitted_build_step_block_reference_count(raw_data, role_name=BUILD_STEP_ROLE_NAME)
-        if data.get("build_steps") == []:
-            raise BuildStepsDtoValidationError("empty_steps")
-        try:
-            model = _BuildStepsOutputModel.model_validate(data)
-        except ValidationError as exc:
-            logger.error(
-                "paper_plan_build_steps_dto_failed role=%s exc_type=%s",
-                BUILD_STEP_ROLE_NAME,
-                type(exc).__name__,
-            )
-            raise BuildStepsDtoValidationError("dto_invalid") from None
-        return model.to_drafts()
+        return self._parse_build_steps_output(
+            data,
+            document_source_refs=source_refs,
+            user_source_refs=[],
+            role_name=BUILD_STEP_ROLE_NAME,
+        )
 
     async def _llm_build_steps_for_regeneration(
         self,
@@ -530,38 +525,68 @@ class PaperPlanService:
         allowed_user_evidence_refs: set[UserEvidenceRef],
         allowed_user_prompt_ids: frozenset[str],
     ) -> list[ModelBuildStepDraft]:
+        source_refs = build_plan_evidence_source_refs(spec)
+        user_source_refs = build_step_user_evidence_source_refs(
+            record_plan_evidence,
+            allowed_user_evidence_refs,
+        )
         data = await self._call_llm_json(
             build_messages_for_regenerate_build_steps(
                 block_recommendations,
                 parameter_mapping,
                 spec.evidence,
                 record_plan_evidence,
-                build_plan_evidence_source_refs(spec),
+                source_refs,
                 allowed_user_evidence_refs=allowed_user_evidence_refs,
                 allowed_user_prompt_ids=allowed_user_prompt_ids,
             ),
             BUILD_STEP_REGENERATION_ROLE_NAME,
         )
-        source_refs = build_plan_evidence_source_refs(spec)
-        raw_data = data
-        data = apply_plan_evidence_reference_bridge(data, source_refs)
-        _preserve_present_invalid_block_ref_paper_references(raw_data, data)
-        _log_omitted_build_step_block_reference_count(
-            raw_data,
+        return self._parse_build_steps_output(
+            data,
+            document_source_refs=source_refs,
+            user_source_refs=user_source_refs,
             role_name=BUILD_STEP_REGENERATION_ROLE_NAME,
         )
+
+    def _parse_build_steps_output(
+        self,
+        data: dict[str, Any],
+        *,
+        document_source_refs: list[PlanEvidenceSourceRef],
+        user_source_refs: list[BuildStepUserEvidenceSourceRef],
+        role_name: str,
+    ) -> list[ModelBuildStepDraft]:
+        raw_data = data
+        data = _resolve_build_steps_draft_evidence_payload(
+            data,
+            document_source_refs=document_source_refs,
+            user_source_refs=user_source_refs,
+        )
+        _log_omitted_build_step_block_reference_count(raw_data, role_name=role_name)
         if data.get("build_steps") == []:
             raise BuildStepsDtoValidationError("empty_steps")
         try:
             model = _BuildStepsOutputModel.model_validate(data)
         except ValidationError as exc:
+            self._record_build_steps_dto_validation_errors(exc, role_name=role_name)
+            reason_code = _build_steps_final_validation_reason(exc)
             logger.error(
-                "paper_plan_build_steps_dto_failed role=%s exc_type=%s",
-                BUILD_STEP_REGENERATION_ROLE_NAME,
+                "paper_plan_build_steps_dto_failed role=%s reason_code=%s exc_type=%s",
+                role_name,
+                reason_code,
                 type(exc).__name__,
             )
-            raise BuildStepsDtoValidationError("dto_invalid") from None
+            raise BuildStepsDtoValidationError(reason_code) from None
         return model.to_drafts()
+
+    def _record_build_steps_dto_validation_errors(
+        self,
+        exc: ValidationError,
+        *,
+        role_name: str,
+    ) -> None:
+        _ = exc, role_name
 
     async def _llm_mscript_draft(self, spec: PaperSpec) -> str | None:
         role_name = "mscript_drafter"
@@ -964,6 +989,12 @@ class _MissingPromptDraftModel(BaseModel):
     source: Literal["user_supplied"] = "user_supplied"
 
 
+class _BuildStepDraftEvidenceModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_ref: str = Field(min_length=1)
+
+
 class _StepBlockRefDraftModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1021,6 +1052,166 @@ class _BuildStepsOutputModel(BaseModel):
         return [step.to_draft() for step in self.build_steps]
 
 
+def _resolve_build_steps_draft_evidence_payload(
+    data: dict[str, Any],
+    *,
+    document_source_refs: list[PlanEvidenceSourceRef],
+    user_source_refs: list[BuildStepUserEvidenceSourceRef],
+) -> dict[str, Any]:
+    source_index = _build_step_source_ref_index(
+        document_source_refs=document_source_refs,
+        user_source_refs=user_source_refs,
+    )
+    result = dict(data)
+    steps = result.get("build_steps")
+    if not isinstance(steps, list):
+        return result
+    result["build_steps"] = [
+        _resolve_build_step_draft_evidence(step, source_index) for step in steps
+    ]
+    return result
+
+
+def _build_step_source_ref_index(
+    *,
+    document_source_refs: list[PlanEvidenceSourceRef],
+    user_source_refs: list[BuildStepUserEvidenceSourceRef],
+) -> dict[str, list[dict[str, Any]]]:
+    index: dict[str, list[dict[str, Any]]] = {}
+    for document_entry in document_source_refs:
+        index.setdefault(document_entry.source_ref, []).append(
+            _document_evidence_payload_from_source_ref(document_entry)
+        )
+    for user_entry in user_source_refs:
+        try:
+            payload = PaperEvidenceEntryModel.from_domain(user_entry.evidence).model_dump(
+                mode="json"
+            )
+        except ValidationError:
+            raise BuildStepsDtoValidationError("final_evidence_invalid") from None
+        index.setdefault(user_entry.source_ref, []).append(payload)
+    return index
+
+
+def _document_evidence_payload_from_source_ref(entry: PlanEvidenceSourceRef) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "source": EvidenceSource.DOCUMENT_EXTRACTED.value,
+        "document_id": entry.document_id,
+        "paper_section_id": None,
+        "equation_id": None,
+        "figure_id": None,
+        "excerpt": entry.excerpt,
+        "missing_param_prompt_id": None,
+        "user_action": None,
+        "parameter_correction_id": None,
+        "correction_param_key": None,
+    }
+    payload[entry.locator_kind] = entry.locator_id
+    try:
+        return PaperEvidenceEntryModel.model_validate(payload).model_dump(mode="json")
+    except ValidationError:
+        raise BuildStepsDtoValidationError("final_evidence_invalid") from None
+
+
+def _resolve_build_step_draft_evidence(
+    step: object,
+    source_index: dict[str, list[dict[str, Any]]],
+) -> object:
+    if not isinstance(step, dict):
+        return step
+    result = dict(step)
+
+    block_refs = result.get("block_refs")
+    if isinstance(block_refs, list):
+        result["block_refs"] = [
+            _resolve_build_step_block_ref_evidence(block_ref, source_index)
+            for block_ref in block_refs
+        ]
+
+    configuration_hints = result.get("configuration_hints")
+    if isinstance(configuration_hints, list):
+        result["configuration_hints"] = [
+            _resolve_build_step_configuration_hint_evidence(hint, source_index)
+            for hint in configuration_hints
+        ]
+
+    evidence = result.get("evidence")
+    if isinstance(evidence, list):
+        result["evidence"] = [
+            _resolve_build_step_draft_evidence_entry(entry, source_index) for entry in evidence
+        ]
+    return result
+
+
+def _resolve_build_step_block_ref_evidence(
+    block_ref: object,
+    source_index: dict[str, list[dict[str, Any]]],
+) -> object:
+    if not isinstance(block_ref, dict):
+        return block_ref
+    result = dict(block_ref)
+    if result.get("paper_reference") is not None:
+        result["paper_reference"] = _resolve_build_step_draft_evidence_entry(
+            result["paper_reference"],
+            source_index,
+        )
+    return result
+
+
+def _resolve_build_step_configuration_hint_evidence(
+    hint: object,
+    source_index: dict[str, list[dict[str, Any]]],
+) -> object:
+    if not isinstance(hint, dict):
+        return hint
+    result = dict(hint)
+    evidence = result.get("evidence")
+    if isinstance(evidence, list):
+        result["evidence"] = [
+            _resolve_build_step_draft_evidence_entry(entry, source_index) for entry in evidence
+        ]
+    return result
+
+
+def _resolve_build_step_draft_evidence_entry(
+    payload: object,
+    source_index: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise BuildStepsDtoValidationError("draft_schema_invalid") from None
+    source_ref = payload.get(PLAN_EVIDENCE_SOURCE_REF_FIELD, _MISSING)
+    if source_ref is _MISSING or source_ref is None:
+        raise BuildStepsDtoValidationError("source_ref_missing") from None
+    if not isinstance(source_ref, str):
+        raise BuildStepsDtoValidationError("source_ref_type_invalid") from None
+    if not source_ref.strip():
+        raise BuildStepsDtoValidationError("source_ref_missing") from None
+    try:
+        _BuildStepDraftEvidenceModel.model_validate(payload)
+    except ValidationError:
+        raise BuildStepsDtoValidationError("draft_schema_invalid") from None
+
+    matches = source_index.get(source_ref, [])
+    if not matches:
+        raise BuildStepsDtoValidationError("source_ref_no_match") from None
+    if len(matches) > 1:
+        raise BuildStepsDtoValidationError("source_ref_ambiguous") from None
+    return dict(matches[0])
+
+
+def _build_steps_final_validation_reason(exc: ValidationError) -> str:
+    for item in exc.errors(include_url=False, include_context=False, include_input=False):
+        loc = item.get("loc")
+        if not isinstance(loc, tuple):
+            continue
+        loc_parts = {str(part) for part in loc}
+        if PLAN_EVIDENCE_SOURCE_REF_FIELD in loc_parts:
+            return "source_ref_leaked"
+        if loc_parts & {"evidence", "paper_reference"}:
+            return "final_evidence_invalid"
+    return "dto_invalid"
+
+
 def _log_omitted_build_step_block_reference_count(
     data: object,
     *,
@@ -1059,31 +1250,3 @@ def _count_omitted_build_step_block_references(data: object) -> int:
             if isinstance(block_ref, dict) and "paper_reference" not in block_ref
         )
     return omitted_count
-
-
-def _preserve_present_invalid_block_ref_paper_references(
-    raw_data: object,
-    bridged_data: object,
-) -> None:
-    if not isinstance(raw_data, dict) or not isinstance(bridged_data, dict):
-        return
-    raw_steps = raw_data.get("build_steps")
-    bridged_steps = bridged_data.get("build_steps")
-    if not isinstance(raw_steps, list) or not isinstance(bridged_steps, list):
-        return
-    for raw_step, bridged_step in zip(raw_steps, bridged_steps, strict=False):
-        if not isinstance(raw_step, dict) or not isinstance(bridged_step, dict):
-            continue
-        raw_refs = raw_step.get("block_refs")
-        bridged_refs = bridged_step.get("block_refs")
-        if not isinstance(raw_refs, list) or not isinstance(bridged_refs, list):
-            continue
-        for raw_ref, bridged_ref in zip(raw_refs, bridged_refs, strict=False):
-            if not isinstance(raw_ref, dict) or not isinstance(bridged_ref, dict):
-                continue
-            if (
-                "paper_reference" in raw_ref
-                and raw_ref["paper_reference"] is not None
-                and "paper_reference" not in bridged_ref
-            ):
-                bridged_ref["paper_reference"] = {"__invalid_paper_reference__": True}

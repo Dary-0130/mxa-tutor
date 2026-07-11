@@ -109,6 +109,16 @@ class UserEvidenceRef:
     key: str
 
 
+@dataclass(frozen=True)
+class BuildStepUserEvidenceSourceRef:
+    """Regeneration-only private source_ref for resolved user evidence."""
+
+    source_ref: str
+    user_ref: UserEvidenceRef
+    evidence: PaperEvidenceEntry
+    selection_basis: str
+
+
 class EvidenceTagger:
     """Validate and create evidence entries without inventing locators."""
 
@@ -345,6 +355,30 @@ def build_plan_evidence_source_refs(spec: PaperSpec) -> list[PlanEvidenceSourceR
     return sources
 
 
+def build_step_user_evidence_source_refs(
+    plan_evidence: list[PaperEvidenceEntry],
+    allowed_user_evidence_refs: set[UserEvidenceRef],
+) -> list[BuildStepUserEvidenceSourceRef]:
+    """Build regeneration-only private source_ref tags for resolved user evidence."""
+
+    refs: list[BuildStepUserEvidenceSourceRef] = []
+    seen: set[UserEvidenceRef] = set()
+    for entry in plan_evidence:
+        ref = _user_evidence_ref(entry)
+        if ref is None or ref not in allowed_user_evidence_refs or ref in seen:
+            continue
+        seen.add(ref)
+        refs.append(
+            BuildStepUserEvidenceSourceRef(
+                source_ref=f"USER-{len(refs) + 1:03d}",
+                user_ref=ref,
+                evidence=entry,
+                selection_basis=_user_evidence_selection_basis(ref),
+            )
+        )
+    return refs
+
+
 def apply_plan_evidence_reference_bridge(
     payload: dict[str, Any],
     source_refs: list[PlanEvidenceSourceRef],
@@ -440,6 +474,12 @@ def _source_ref_excerpt(value: str | None) -> str | None:
     if not cleaned:
         return None
     return cleaned[:300]
+
+
+def _user_evidence_selection_basis(ref: UserEvidenceRef) -> str:
+    if ref.kind is UserEvidenceAction.FILL_MISSING:
+        return f"resolved fill_missing prompt {ref.key}"
+    return f"resolved correct_extracted correction {ref.key}"
 
 
 class PlanAssembler:

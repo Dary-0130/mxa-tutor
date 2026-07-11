@@ -25,9 +25,11 @@ from core.interfaces.document_parser import FigurePlaceholder, ParsedDocument
 from core.interfaces.llm_provider import LLMMessage
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
+    BuildStepUserEvidenceSourceRef,
     PlanEvidenceSourceRef,
     UserEvidenceRef,
     build_plan_evidence_source_refs,
+    build_step_user_evidence_source_refs,
     resolved_prompt_ids,
     resolved_user_evidence_refs,
 )
@@ -228,7 +230,7 @@ def build_messages_for_build_steps(
             "plan_evidence_sources_json": _plan_evidence_sources_json(source_refs),
         },
     )
-    return _role_messages(template.system, user)
+    return _role_messages(template.system, user, shared_constraints=_build_steps_constraints())
 
 
 def build_messages_for_regenerate_build_steps(
@@ -244,12 +246,10 @@ def build_messages_for_regenerate_build_steps(
     """Build regeneration-only BuildStepPlanner messages."""
 
     template = load_prompt_template("paper_plan_build_steps_regenerate.yaml")
-    allowed_user_evidence = [
-        entry
-        for entry in plan_evidence
-        if entry.source is EvidenceSource.USER_SUPPLIED
-        and _user_evidence_entry_is_resolved(entry, allowed_user_evidence_refs)
-    ]
+    user_source_refs = build_step_user_evidence_source_refs(
+        plan_evidence,
+        allowed_user_evidence_refs,
+    )
     user = _render_user(
         template.user,
         {
@@ -272,10 +272,7 @@ def build_messages_for_regenerate_build_steps(
                 ]
             ),
             "allowed_user_evidence_json": _json_dumps(
-                [
-                    PaperEvidenceEntryModel.from_domain(entry).model_dump(mode="json")
-                    for entry in allowed_user_evidence
-                ]
+                [_user_evidence_source_ref_prompt_payload(entry) for entry in user_source_refs]
             ),
             "resolved_prompt_ids_json": _json_dumps(sorted(allowed_user_prompt_ids)),
             "plan_evidence_sources_json": _plan_evidence_sources_json(source_refs),
@@ -495,17 +492,13 @@ def _regeneration_constraints() -> str:
     return """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
 
-【重生成阶段 evidence 双源契约】(每个 PaperEvidenceEntry 必守):
-- document_id 是后端注入的契约字段,LLM 不输出、不自创
-- source = "document_extracted":必须填写私有 source_ref(来自 plan_evidence_sources_json);三 locator 填 null;excerpt 由后端按 source_ref 回填;missing_param_prompt_id = null;document_id 由后端按 source_ref 注入
-- source = "user_supplied":只能逐字复用 allowed_user_evidence_json 中的一条;三 locator 全 null;excerpt = null;document_id = null
-- user_action = "fill_missing" 时,missing_param_prompt_id 必须在 resolved_prompt_ids_json 中;parameter_correction_id / correction_param_key = null
-- user_action = "correct_extracted" 时,parameter_correction_id / correction_param_key 必须逐字来自 allowed_user_evidence_json;missing_param_prompt_id = null
-
-【私有引用桥】:
-- document_extracted evidence 只能引用 plan_evidence_sources_json 里的 source_ref,形如 REF-001;严禁自创 source_ref
-- 不输出 document_id;不直接输出 paper_section_id / equation_id / figure_id 的真实 ID;后端会按 source_ref 解析、stamp document_id、回填 canonical locator、并 strip source_ref
-- user_supplied evidence 不填 source_ref,不得伪造 allowed_user_evidence_json 之外的用户证据
+【重生成阶段私有 draft evidence 契约】:
+- build_steps[*].block_refs[*].paper_reference / build_steps[*].configuration_hints[*].evidence[*] / build_steps[*].evidence[*] 只允许输出 {"source_ref":"REF-001"} 或 {"source_ref":"USER-001"} 这种对象
+- document_extracted evidence 只能引用 plan_evidence_sources_json 中的 REF-* source_ref
+- user_supplied evidence 只能引用 allowed_user_evidence_json 中的 USER-* source_ref
+- source_ref 不得自创、不得留空、不得输出 null
+- 不输出 source / document_id / paper_section_id / equation_id / figure_id / locator / excerpt / missing_param_prompt_id / user_action / parameter_correction_id / correction_param_key
+- 后端会按 source_ref 唯一解析并盖章 source、document_id、canonical locator、excerpt 或 user_supplied provenance;解析失败整份 build_steps fail-closed
 
 【字段名硬约束】(逐字匹配,禁止自创字段名):
 - BlockRecommendation 3 字段:block_type / purpose / paper_reference
@@ -513,11 +506,37 @@ def _regeneration_constraints() -> str:
 - ParameterMapping.unit 工程推断 / 无物理单位时优先填 null
 - 禁止字段名:locator / locators / paper_locator / param_name / parameter_name / param_symbol / param_value / param_unit
 - 禁止字段名嵌套对象:locator 必须把 paper_section_id / equation_id / figure_id 平铺,不嵌套
+- connection_hints.to_block_ref 必须是既有 block_ref_id 字符串,不得输出数字、对象或自创引用
 
 【重生成阶段参数来源】:
 - parameter_mapping_json 是当前建模工作值,可能包含用户已补充或已纠错的 user_supplied 值
 - user_supplied 工作值可以作为合法参数来源进入步骤引用,但不得写成论文原文证据
 - 不得把 user_supplied evidence 标成 document_extracted;不得伪造论文 locator / excerpt
+
+【反幻觉】:
+- 不输出 PaperSpec / 资料没给的参数 / 公式 / 图占位
+- 工程推断字段只在 SimPowerSystems 工程惯例下推断;若已有,直接复用,不重新编
+- 缺参时只保留 value 字面 "null";不编值
+- plan_id / paper_spec_id 不要自生成"""
+
+
+def _build_steps_constraints() -> str:
+    return """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
+只返回有效 JSON 对象;不要 markdown,不要解释文字。
+
+【build_steps 私有 draft evidence 契约】:
+- build_steps[*].block_refs[*].paper_reference / build_steps[*].configuration_hints[*].evidence[*] / build_steps[*].evidence[*] 只允许输出 {"source_ref":"REF-001"} 这种对象
+- source_ref 必须逐字来自 plan_evidence_sources_json;不得自创,不得留空,不得输出 null
+- 不输出 source / document_id / paper_section_id / equation_id / figure_id / locator / excerpt / missing_param_prompt_id / user_action / parameter_correction_id / correction_param_key
+- 后端会按 source_ref 唯一解析并盖章 source=document_extracted、document_id、canonical locator、excerpt;解析失败整份 build_steps fail-closed
+- 初始生成阶段禁止 user_supplied evidence
+
+【字段名硬约束】(逐字匹配,禁止自创字段名):
+- BlockRecommendation 3 字段:block_type / purpose / paper_reference
+- ParameterMapping 5 字段:paper_param_name / model_param_name / value / unit / source
+- ParameterMapping.unit 工程推断 / 无物理单位时优先填 null
+- 禁止字段名:locator / locators / paper_locator / param_name / parameter_name / param_symbol / param_value / param_unit
+- connection_hints.to_block_ref 必须是既有 block_ref_id 字符串,不得输出数字、对象或自创引用
 
 【反幻觉】:
 - 不输出 PaperSpec / 资料没给的参数 / 公式 / 图占位
@@ -678,15 +697,29 @@ def _plan_evidence_sources_json(source_refs: list[PlanEvidenceSourceRef]) -> str
         [
             {
                 "source_ref": entry.source_ref,
-                "document_id": entry.document_id,
-                "locator_kind": entry.locator_kind,
-                "locator_id": entry.locator_id,
-                "filename": entry.filename,
-                "excerpt": entry.excerpt,
+                "basis": _plan_evidence_selection_basis(entry),
             }
             for entry in source_refs
         ]
     )
+
+
+def _plan_evidence_selection_basis(entry: PlanEvidenceSourceRef) -> str:
+    kind_label = {
+        "paper_section_id": "paper section",
+        "equation_id": "equation",
+        "figure_id": "figure",
+    }[entry.locator_kind]
+    return f"{entry.filename} / {kind_label}: {entry.excerpt}"
+
+
+def _user_evidence_source_ref_prompt_payload(
+    entry: BuildStepUserEvidenceSourceRef,
+) -> dict[str, str]:
+    return {
+        "source_ref": entry.source_ref,
+        "basis": entry.selection_basis,
+    }
 
 
 def _dedupe_evidence(entries: list[PaperEvidenceEntry]) -> list[PaperEvidenceEntry]:
