@@ -176,15 +176,89 @@ dto_invalid 归零本身不是目标——模型若给了不存在的号码，�
 
 真机复跑数据：
 
-截至本 as-built 回填时尚未执行 8 × 3 真机复跑。本机默认样例目录 E:\桌面\样例 存在 8 篇 PDF，.env 中可见 DeepSeek key 字段；未执行原因是完整车道预计数小时且消耗外部 API 额度。该项需 PM/车道按 eval/run_paper_pdf_smoke.py 同批同口径补跑并回填总成品率、dto_invalid 次数、bridge-resolution 子码次数、其他原因码、guidance 下游结果、墙钟 + token telemetry。
+补跑时间：2026-07-11，当前分支 codex/build-steps-draft-contract，HEAD=dc1c3db。
+
+补跑口径：同一批 8 篇本地 arXiv PDF，eval/run_paper_pdf_smoke.py 跑三遍，每遍 --rounds 1；每遍使用独立 eval/out/paper_pdf_smoke/task534_post_* 输出目录、独立 _runtime/paper_pdf_smoke.sqlite、独立 _runtime/uploads，未触碰 data/mxa.db。
+
+输出目录：
+
+1. eval/out/paper_pdf_smoke/task534_post_20260711_204014_r01
+2. eval/out/paper_pdf_smoke/task534_post_20260711_211011_r02
+3. eval/out/paper_pdf_smoke/task534_post_20260711_213707_r03
+
+与基线逐项对照：
+
+| 项 | 基线（改前，24 轮） | 本次补跑（改后，24 轮） |
+|---|---:|---:|
+| build_steps 结构化成功 | 10/24 = 41.7% | 10/24 = 41.7% |
+| 严格成品（build_steps 成功且 guidance generated） | 10/24 = 41.7% | 9/24 = 37.5% |
+| dto_invalid | 7 | 2 |
+| json_parse_failed | 2（均 finish_reason=length） | 1（finish_reason=length） |
+| parameter_value_leak | 2 | 2 |
+| parameter_ref_no_match | 1 | 1 |
+| depends_on_self | 1 | 7 |
+| 硬失败 | 1（plan_failed_retryable） | 1（paper_spec_generation_failed / extracting_spec） |
+
+bridge-resolution 子码计数：
+
+| 子码 | 次数 |
+|---|---:|
+| draft_schema_invalid | 0 |
+| source_ref_missing | 0 |
+| source_ref_type_invalid | 0 |
+| source_ref_no_match | 0 |
+| source_ref_ambiguous | 0 |
+| final_evidence_invalid | 0 |
+| source_ref_leaked | 0 |
+
+本次 dto_invalid 说明：2 轮均为 connection_hints.*.from_block_ref string_type；共 6 个脱敏 loc/type 项。未出现旧 evidence provenance 族（paper_reference.source missing / document_id missing / invalid marker）。
+
+guidance 下游结果：
+
+1. guidance generated：9/24。
+2. guidance generation_failed：1/24（该轮 build_steps 结构化成功，但 guidance 未生成）。
+3. guidance 未触达：14/24。
+
+单轮墙钟（按 stderr 首末时间）：
+
+1. r01：1757s（29.3 min）。
+2. r02：1483s（24.7 min）。
+3. r03：1734s（28.9 min）。
+4. 合计：4974s（82.9 min）。
+
+build_steps token telemetry（23 轮触达 build_step_planner；1 轮 spec 阶段硬失败未触达）：
+
+1. output_tokens P50：5076。
+2. output_tokens P95（nearest-rank）：7058。
+3. output_tokens max：7999。
+4. finish_reason 分布：stop=22，length=1，未触达=1。
 
 哪些是真救回 / 哪些只是重分类：
 
-1. 真救回：确定性层面，合法最小 draft（只含 source_ref）在三处 build_steps evidence 入口均能被后端解析并重建为完整 PaperEvidenceEntry，通过公共 DTO；旧的 source/document_id/locator/excerpt 缺失族不再由模型承担。
-2. 真救回：regenerate 的已解析用户证据改为 USER-* source_ref，由后端盖章 source=user_supplied 并复用已验证 provenance，不再要求模型输出用户证据成品字段。
-3. 重分类：source_ref 未命中、缺失、类型错误、歧义、成品重建失败、source_ref 泄漏会从泛化 dto_invalid 转为明确子码；这不是救回，是真正 fail-closed。
-4. 重分类：to_block_ref 非字符串仍是 DTO 失败，单独计数，不并入 evidence 修复成效。
+确定性层面的真救回仍成立：合法最小 draft（只含 source_ref）在三处 build_steps evidence 入口均能被后端解析并重建为完整 PaperEvidenceEntry，通过公共 DTO；regenerate 的 USER-* 用户证据路径也能由后端盖章 source=user_supplied 并复用已验证 provenance。
+
+真机逐轮观察层面的真救回（原来废、现在 build_steps 结构化成功且 guidance generated）：6 轮。
+
+1. r01 / 2409.11267：dto_invalid -> generated。
+2. r02 / 2110.10333：dto_invalid -> generated。
+3. r02 / 2510.12335：parameter_value_leak -> generated。
+4. r03 / 2003.10496：json_parse_failed -> generated。
+5. r03 / 2409.11267：硬失败 -> generated。
+6. r03 / 2510.12335：dto_invalid -> generated。
+
+其中，旧 dto_invalid -> generated 的观察救回为 3 轮；其他失败 -> generated 的观察救回为 3 轮。因同篇跨轮波动已知，以上只作观察，不作因果证明。
+
+只是重分类（原来 dto_invalid、现在 bridge-resolution 子码失败、仍废）：0 轮。本次 bridge-resolution 子码全部为 0，没有发生“换名字仍失败”的 bridge 重分类。
+
+旧 dto_invalid 但本次仍废、且不是 bridge 重分类：4 轮。
+
+1. r01 / 2110.10333：dto_invalid -> depends_on_self。
+2. r02 / 2107.02719：dto_invalid -> dto_invalid（from_block_ref string_type）。
+3. r02 / 2403.04374：dto_invalid -> dto_invalid（from_block_ref string_type）。
+4. r03 / 2410.04316：dto_invalid -> depends_on_self。
+
+反向波动（基线 generated，本次非 generated）：7 轮；成品率只作观察，不作本卡因果证明。
 
 老实记账：
 
-本卡修完仍会剩：引用脆弱（1 次）、redline 违规（2 次）、截断（2 次）、自依赖（1 次）。这些归后续卡，本卡不包治。
+本次补跑没有证明总体成品率提升：build_steps 结构化成功仍为 10/24，严格 guidance generated 为 9/24。dto_invalid 从 7 降到 2，但 dto_invalid 归零本身不是目标；本次剩余 2 个 dto_invalid 是 from_block_ref strict string 问题，正确归为 DTO 失败，不应强行变成功。depends_on_self 升到 7，json_parse_failed 仍有 1 个 length 截断，parameter_value_leak 仍有 2 个，另有 1 个 spec 阶段硬失败；这些是后续卡信号，本卡不包治。
