@@ -350,18 +350,18 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 23/24 (paper-to-model TASK-500~508 + TASK-523/524/525/526/528/529 + TASK-530(PDF 活动内容闸)+ TASK-520/521/522(🔍 追问/多文件/解析纠错子线未完全收口);MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 26/27 (paper-to-model TASK-500~508 + TASK-523/524/525/526/528/529 + TASK-530(PDF 活动内容闸) + TASK-531/532/533(长度上限放宽 + spec 校验诊断)+ TASK-520/521/522(🔍 追问/多文件/解析纠错子线未完全收口);MATLAB bridge/engine TASK-510~519)
 
-总计: 54/57
+总计: 57/60
 ```
 
 ---
 
 ## 下一步
 
-当前状态:paper-to-model v0.1 单篇主路已打通到「真论文进得来」——TASK-530 已修好 PDF 活动内容闸(此前 8 篇真 arXiv 有 7 篇被误拦在 active_pdf_content_not_supported、连 spec 都抽不出),配套评测 PDF 试车道(PR #193)已入仓,可对本地论文集同批同口径量效果。真机 8 篇复跑:7 篇历史被拒篇全部越过活动内容闸进入抽取,2 篇(2110.10333 / 2510.12335)一路跑通 spec + build_steps(其中 2510 已生成 guidance)——项目首次有真论文从头跑到指导层。
+当前状态:paper-to-model v0.1 单篇主路已在真论文上端到端跑热——8 篇真 arXiv PDF 全部从 upload 一路跑到 guidance(试车道 ready 8/8),项目首次实现真论文全批跑通。此前三道瓶颈已依次闭合:TASK-530 修好 PDF 活动内容闸(7 篇误拦全部越闸)、TASK-531 放宽两处内部长度上限(raw_text 80k→150k、spec 预算 8000→16000,ready 2/8→6/8)、TASK-532 放宽 abstract 对外约束(1000→1500,ready 6/8→8/8);中途插入 TASK-533 补齐 spec 校验字段级诊断,凭此坐实剩余失败均为 abstract 超长、排除「第四道未知约束」。主路实模型经核为 deepseek-v4-flash(1M 窗口 / 384K 输出上限),现有各处上限均系自设保守值,远未触及模型能力。
 已完成主体:paper-to-model 主线 TASK-500~508 ✅、修复卡 523/524 ✅、上传作业化 525-A/B ✅、结构化输出稳定性 526 ✅、建模指导三层 528-A/B/C ✅、draft DTO 容忍 529 ✅、PDF 闸 530 ✅;MATLAB bridge/engine 线 510~519 ✅(517/518/519 各 A/B 子块均合并)。追问子线 520(剩 520-E)、多文件子线 521(剩解析纠错相关)、解析纠错子线 522(剩 522-A 诚实提示 / 522-D2 消解冲突)仍🔍未完全收口。
-下一步:主路瓶颈前移到 spec 生成——8 篇越闸后 5 篇栽在 spec(经诊断分三类:2 篇 abstract 字段 max_length 约束太紧卡掉[非截断]、3 篇 spec JSON 撞 8000 token 上限截断、1 篇[2409]raw_text 超 80k 硬闸在调 LLM 前即拒)。按决策 15 先诊断后修:abstract 约束卡先单独修(约束放宽),截断与 build_steps 截断合并成截断卡(抬 max_tokens / 瘦 prompt / 分段,沾 526-B),80k 闸独立评估。528-B 遗留的混合型护栏(2110 触发 no_document_basis)待 spec 通后回验。528-D 上屏继续后置至主路跑热。
+下一步:主路已跑热,重心转向质量与工作台。①质量回验:8/8 跑通只证「出得来」,不证「出得对」——2110 触发的 no_document_basis(528-B 混合型护栏)现可在全批跑通的样本上回判是否规则过紧;TASK-533 新增的 spec_validation_errors 也已照出 2605 一次 unit/string_too_short 被 structured retry 救回,作线索收着、样本足够再判是否成规律。②abstract 放宽的后续代价:TASK-532 只用 prompt 降低照抄概率、未建硬防线,需另起卡(先诊断现有样本 abstract 与 raw_text 重叠度、量清照抄严重度,再定是否建窄的整段复制检测 + 有界重写)。③样本扩容:现 8 篇域集中于微电网/电力 + MPC/RL,决策 24 准入要 ≥20 真实 case,后续几批须掺别方向/结构形态(更长论文亦将检验 150k 门槛与 telemetry)。④轻工作台(决策 26:最小「家」+ 本地课题包读写/找回)→ 拉 8-12 真研究生试水。528-D 上屏可解除后置(主路已跑热)。
 
 ## Week 5+:paper-to-model 主线占位
 
@@ -401,6 +401,9 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-528-C | 建模指导语义校验闸(独立穷尽语义硬门 + 读回校验 + 红线测试) | ✅ | Codex | additive;未 bump v9;读回走当场现算;四处过严高危点已焊测试 |
 | TASK-529 | build_steps draft DTO 容忍缺省 paper_reference(修 dto_invalid 主因) | ✅ | Codex | 已合并 main(PR #191 / commit 3e07e5d);私有 _StepBlockRefDraftModel 容忍 LLM 省略 paper_reference→None,公共/域/schema/TS 契约零改、export 零 diff;红线/证据不放松、命门测试反向验证过;真机 dto_invalid 归零(样本小,2 case×3);build_steps 残余降级=截断+下游校验,归后续卡 |
 | TASK-530 | PDF 活动内容闸从三词字节拒改为对象语义白名单放行 | ✅ | Codex | 已合并 main(PR #194 / commit 59ba116);闸从 raw-byte 搜 /JavaScript·/JS·/OpenAction 命中即拒,改为基于 pypdf 规范化对象图的语义白名单:仅放行本文档内 /GoTo 翻页(OpenAction/书签/点击注解)+ 点击型 link URI,危险动作(脚本//Launch/远程/自动跳外链/附件//AA//Next/未知)全 fail-closed;补单独 /Launch 漏检;非动作活动对象(JS name tree/XFA/3D/媒体/附件)独立探测即拒;收窄扫描面修正误拒正常论文;对外错误码 active_pdf_content_not_supported 零改、schema export 零 diff;命门测试反向验证;真机 8 篇复跑 7 篇历史被拒篇全部越闸 |
+| TASK-531 | 主路内部长度上限放宽(raw_text 门槛 + spec 生成预算) | ✅ | Codex | 已合并 main;MAX_PAPER_RAW_TEXT_CHARS 80k→150k、DEFAULT_PAPER_SPEC_MAX_TOKENS 8000→16000;主路实模型经核为 deepseek-v4-flash(1M 窗口/384K 输出上限,非注释所写 V3),两处均属自设保守值、远未触及模型能力;按 R1 裁决 plan/guidance 预算(8000)不顺带抬、改设触发条件(finish_reason=length 或 P95 逼近上限即另起卡);纯内部常量、schema export 零 diff、不触发决策 13;新增确定性边界测试(150k 放行/150001 拒/80001 放行/spy 断言下发 max_tokens=16000/finish_reason=length 不被残缺 JSON 掩盖)+ 三篇截断篇各 3 轮真机;试车道 ready 2/8→6/8 |
+| TASK-532 | PaperSpec.abstract 上限 1000→1500(对外 schema 同步) | ✅ | Codex | 已合并 main;走决策 13 全清单(schema 源 + 重导出 + 06 契约 + prompt + 边界测试),12 个 paper schema 仅 paper_spec 的 abstract maxLength 变、其余 11 零 diff;不 bump CURRENT_SCHEMA_VERSION(仍 8,无 DDL/迁移);超长仍 fail、不静默截断(决策 17);prompt bump v0.3→v0.4,新写防照抄指令并把「推荐 300-800 字」与「硬上限 1500」分开写(防 1500 被模型当目标长度)——本卡只降低照抄概率、不声称已兜住,整段复制硬检测拆独立后续卡;真机 8 篇 ready 6/8→8/8,2403(1188)/2409(1238)实测均超旧撞线值 1162,印证 1500 余量必要 |
+| TASK-533 | spec 校验失败记录字段级诊断(loc/type/count) | ✅ | Codex | 已合并 main;补主路观测盲区——此前 spec pydantic 校验失败只记 schema_validation 大类,无法归因到字段,导致「长度闸打通后露出的失败是不是第四道闸」无法从记录判断;现只提取 loc/type/count(长度类另记纯数字 max_length/actual_length),严格剔除 msg/input/字段值/raw/stack(决策 11);试车道 summary/actual 带 spec_validation_errors;凭此当场坐实 2410/2409 失败均为 abstract/string_too_long/max_length=1000、排除第四道约束,直接支撑 TASK-532 放行;纯观测、不改行为、schema export 零 diff |
 | 评测 PDF 试车道 | 本地固定论文集真机主路 smoke lane(非 TASK 编号,评测基建) | ✅ | Codex | 已合并 main(PR #193);eval/run_paper_pdf_smoke.py 对本地论文集逐篇跑完整真机主路(upload→parse→spec→plan→guidance)输出标准口径 summary,产物落 eval/out/(gitignore);与 stripped-md CI golden 并存不替换,默认不进 CI、跑真机;决策 12 §7.1 豁免 R 轮 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
