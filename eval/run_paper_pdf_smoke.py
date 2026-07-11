@@ -166,10 +166,6 @@ NO_LLM_CALLS_NOTE = "本轮未发生 LLM 调用"
 
 _CURRENT_LLM_ROLE: ContextVar[str | None] = ContextVar("paper_pdf_smoke_llm_role", default=None)
 _CURRENT_LLM_ARM: ContextVar[str | None] = ContextVar("paper_pdf_smoke_llm_arm", default=None)
-_CURRENT_ROUND_SEQUENCE_INDEX: ContextVar[int] = ContextVar(
-    "paper_pdf_smoke_round_sequence_index",
-    default=0,
-)
 _CURRENT_PAIRED_BUILD_STEPS: ContextVar[bool] = ContextVar(
     "paper_pdf_smoke_paired_build_steps",
     default=False,
@@ -619,20 +615,12 @@ async def run_smoke(
     rows: list[SmokeSummaryRow] = []
     pair_token = _CURRENT_PAIRED_BUILD_STEPS.set(paired_build_steps)
     try:
-        sequence_index = 0
         for paper in papers:
             for round_index in range(1, rounds + 1):
-                sequence_token = _CURRENT_ROUND_SEQUENCE_INDEX.set(sequence_index)
-                try:
-                    row = await runner(
-                        paper, round_index, runtime, settings, store, provider_builder
-                    )
-                finally:
-                    _CURRENT_ROUND_SEQUENCE_INDEX.reset(sequence_token)
+                row = await runner(paper, round_index, runtime, settings, store, provider_builder)
                 rows.append(row)
                 write_summary_artifacts(runtime.output_dir, rows)
                 print(_format_progress_line(row), flush=True)
-                sequence_index += 1
     finally:
         _CURRENT_PAIRED_BUILD_STEPS.reset(pair_token)
     return runtime, rows
@@ -655,7 +643,7 @@ async def _run_one_pdf_round(
         telemetry=telemetry,
     )
     paired_build_steps = _CURRENT_PAIRED_BUILD_STEPS.get()
-    pair_order_start = "on" if _CURRENT_ROUND_SEQUENCE_INDEX.get() % 2 else "off"
+    pair_order_start = _paired_build_steps_first_arm(round_index)
     plan_service = RecordingPaperPlanService(
         provider,
         telemetry=telemetry,
@@ -1100,6 +1088,10 @@ def _default_provider_factory(settings: AppSettings) -> TextProvider:
         api_key=settings.deepseek_api_key,
         base_url=settings.deepseek_base_url,
     )
+
+
+def _paired_build_steps_first_arm(round_index: int) -> str:
+    return "on" if round_index % 2 == 0 else "off"
 
 
 def _prepare_runtime(output_dir: Path | None) -> SmokeRuntime:

@@ -124,6 +124,14 @@ def test_llm_model_summary_marks_missing_version_fingerprint() -> None:
     assert summary["version_fingerprint_note"] == "供应商未提供版本标识"
 
 
+def test_paired_build_steps_first_arm_alternates_by_round_index() -> None:
+    assert [subject._paired_build_steps_first_arm(index) for index in (1, 2, 3)] == [
+        "off",
+        "on",
+        "off",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_paired_build_steps_runs_two_arms_on_same_upstream() -> None:
     fake_provider = _SequenceProvider(

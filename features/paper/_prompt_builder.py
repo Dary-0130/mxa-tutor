@@ -46,16 +46,16 @@ from features.paper.paper_schemas import (
 from ._prompt_loader import load_prompt_template
 
 _DEPENDENCY_SALIENCE_TEMPLATE_LINES = (
-    "- depends_on 不得包含本步骤自己的 step_id;只能引用别的步骤",
+    "- depends_on 不得自己依赖自己;只能引用别的步骤",
     "- 系统会自动排序步骤,depends_on 不必为书写顺序兜底",
-    "- 没有前序依赖时 depends_on 填空数组 [];第一个步骤通常就该是空依赖",
-    "- 这一步的接线若要连到别的步骤产生的模块,必须把那个步骤写进 depends_on",
+    "- 没有前提就给空列表 [];尤其第一步通常就该是空依赖",
+    "- 接线要连到别的步骤产生的模块,就必须把那个步骤写进依赖(depends_on)",
 )
 _DEPENDENCY_SALIENCE_CONSTRAINTS = """【depends_on 依赖/接线可见性机制】:
-- depends_on 不得包含本步骤自己的 step_id,只能引用别的步骤
+- depends_on 不得自己依赖自己;只能引用别的步骤
 - 系统会自动排序步骤,depends_on 不必为书写顺序兜底
-- 没有前序依赖时 depends_on 填空数组 [];第一个步骤通常就该是空依赖
-- 这一步的接线若要连到别的步骤产生的模块,必须把那个步骤写进 depends_on"""
+- 没有前提就给空列表 [];尤其第一步通常就该是空依赖
+- 接线要连到别的步骤产生的模块,就必须把那个步骤写进依赖(depends_on)"""
 
 
 class _GuidanceEvidenceCardLike(Protocol):
@@ -526,8 +526,7 @@ def _dependency_salience_template_system(
     *,
     dependency_salience_enabled: bool,
 ) -> str:
-    if dependency_salience_enabled:
-        return system
+    _ = dependency_salience_enabled
     for line in _DEPENDENCY_SALIENCE_TEMPLATE_LINES:
         system = system.replace(f"{line}\n", "")
     return system

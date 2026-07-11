@@ -300,8 +300,8 @@ def test_build_step_planner_system_specifies_structured_redline_contract() -> No
     assert '禁止输出 source="user_supplied"' in system
     assert "不得包含参数具体值" in system
     assert '禁止写"增大 10%"' in system
-    assert "第一个步骤通常就该是空依赖" in system
-    assert "必须把那个步骤写进 depends_on" in system
+    assert "第一步通常就该是空依赖" in system
+    assert "必须把那个步骤写进依赖" in system
 
 
 def test_original_build_step_prompt_still_forbids_user_supplied_evidence() -> None:
@@ -325,10 +325,10 @@ def test_build_step_dependency_salience_is_gated_off_by_default() -> None:
     on_messages = build_messages_for_build_steps(*args, dependency_salience_enabled=True)
 
     assert default_messages == off_messages
-    assert "第一个步骤通常就该是空依赖" not in off_messages[0].content
-    assert "必须把那个步骤写进 depends_on" not in off_messages[0].content
-    assert "第一个步骤通常就该是空依赖" in on_messages[0].content
-    assert "必须把那个步骤写进 depends_on" in on_messages[0].content
+    assert "第一步通常就该是空依赖" not in off_messages[0].content
+    assert "必须把那个步骤写进依赖" not in off_messages[0].content
+    assert "第一步通常就该是空依赖" in on_messages[0].content
+    assert "必须把那个步骤写进依赖" in on_messages[0].content
 
 
 def test_dependency_audit_env_does_not_change_default_build_step_prompt(
@@ -378,10 +378,10 @@ def test_regenerate_dependency_salience_is_gated_off_by_default() -> None:
     )
 
     assert default_messages == off_messages
-    assert "第一个步骤通常就该是空依赖" not in off_messages[0].content
-    assert "必须把那个步骤写进 depends_on" not in off_messages[0].content
-    assert "第一个步骤通常就该是空依赖" in on_messages[0].content
-    assert "必须把那个步骤写进 depends_on" in on_messages[0].content
+    assert "第一步通常就该是空依赖" not in off_messages[0].content
+    assert "必须把那个步骤写进依赖" not in off_messages[0].content
+    assert "第一步通常就该是空依赖" in on_messages[0].content
+    assert "必须把那个步骤写进依赖" in on_messages[0].content
 
 
 def test_regenerate_build_step_prompt_allows_resolved_user_evidence() -> None:

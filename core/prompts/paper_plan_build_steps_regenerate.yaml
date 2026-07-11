@@ -60,10 +60,10 @@ system: |
   - build_steps 必须 3-10 步;不得输出空数组 []
   - step_id 使用 STEP-001 / STEP-002 / ... 稳定格式
   - depends_on 只能引用前序 step_id;不得引用未来步骤或自身
-  - depends_on 不得包含本步骤自己的 step_id;只能引用别的步骤
+  - depends_on 不得自己依赖自己;只能引用别的步骤
   - 系统会自动排序步骤,depends_on 不必为书写顺序兜底
-  - 没有前序依赖时 depends_on 填空数组 [];第一个步骤通常就该是空依赖
-  - 这一步的接线若要连到别的步骤产生的模块,必须把那个步骤写进 depends_on
+  - 没有前提就给空列表 [];尤其第一步通常就该是空依赖
+  - 接线要连到别的步骤产生的模块,就必须把那个步骤写进依赖(depends_on)
   - block_ref_id 在所有步骤中全局唯一;connection_hints 只能引用本步骤或依赖步骤中可见的 block_ref_id
   - block_refs[*].block_type 与 block_refs[*].purpose 必须逐字复用 block_recommendations 中某一项的 block_type / purpose
   - parameter_refs 只能逐字复用 parameter_mapping 中的 paper_param_name / model_param_name
