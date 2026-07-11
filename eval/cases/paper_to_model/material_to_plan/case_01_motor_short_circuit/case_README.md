@@ -45,7 +45,7 @@
 - `paper_title`:论文标题(从剥离版第一段抽取)
 - `paper_type`:`"report"`(学生实验报告)
 - `domain`:`"motor_control"`(资料入口 6 类之一)
-- `abstract`:对剥离版的摘要(系统应识别工况 / 方法 / 任务,1-1000 字)
+- `abstract`:对剥离版的摘要(系统应识别工况 / 方法 / 任务,1-1500 字)
 - `documents` / `primary_document_id`:单文件身份为 `DOC-001`,主文献为空
 - `equations`:1 个 EquationEntry(EQ-01 字面 = 论文公式)
 - `parameter_table`:15 个 ParameterEntry,逐项对应论文第 2 段给出的 12 个电机参数 + PN/UN/fN(论文显式标的"额定"三项),全 `source: document_extracted` 且 `document_id: DOC-001`

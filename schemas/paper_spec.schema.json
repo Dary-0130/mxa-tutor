@@ -458,7 +458,7 @@
       "title": "Primary Document Id"
     },
     "abstract": {
-      "maxLength": 1000,
+      "maxLength": 1500,
       "minLength": 1,
       "title": "Abstract",
       "type": "string"

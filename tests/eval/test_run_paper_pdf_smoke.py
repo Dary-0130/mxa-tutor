@@ -44,14 +44,14 @@ def test_hybrid_guardrail_conclusion_distinguishes_not_reached_and_misfire() -> 
 
 
 def test_spec_validation_errors_merge_counts_without_values() -> None:
-    existing = [{"loc": "abstract", "type": "string_too_long", "count": 1, "max_length": 1000}]
+    existing = [{"loc": "abstract", "type": "string_too_long", "count": 1, "max_length": 1500}]
     incoming = (
-        {"loc": "abstract", "type": "string_too_long", "count": 2, "max_length": 1000},
+        {"loc": "abstract", "type": "string_too_long", "count": 2, "max_length": 1500},
         {"loc": "domain", "type": "literal_error", "count": 1},
     )
 
     assert subject._merge_spec_validation_errors(existing, incoming) == [
-        {"loc": "abstract", "type": "string_too_long", "count": 3, "max_length": 1000},
+        {"loc": "abstract", "type": "string_too_long", "count": 3, "max_length": 1500},
         {"loc": "domain", "type": "literal_error", "count": 1},
     ]
 
@@ -148,7 +148,7 @@ def _summary_row(
         error_code=None,
         failure_stage=None,
         spec_validation_errors=[
-            {"loc": "abstract", "type": "string_too_long", "count": 1, "max_length": 1000}
+            {"loc": "abstract", "type": "string_too_long", "count": 1, "max_length": 1500}
         ],
         build_steps_result_code="dto_invalid",
         build_steps_raw_reason_code="dto_invalid",

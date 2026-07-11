@@ -431,7 +431,7 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 | `domain` | 资料入口领域枚举 | 不含 `general` | 工程领域 |
 | `documents` | array[`PaperDocument`] | 非空;`document_id` 唯一且匹配 `^DOC-\d{3}$` | 本份结果由哪几篇文档组成 |
 | `primary_document_id` | string \| null | required-but-nullable;非 null 时必须属于 `documents` | 主文献身份锚点;不参与值裁决;null 表示无主/平等 |
-| `abstract` | string | 1-1000 字 | 摘要或任务陈述 |
+| `abstract` | string | 1-1500 字 | 摘要或任务陈述 |
 | `equations` | array[`EquationEntry`] | 0-N | 公式列表 |
 | `parameter_table` | array[`ParameterEntry`] | 0-N | 参数表 |
 | `figure_locations` | array[`FigureRef`] | 0-N | 图表位置 |

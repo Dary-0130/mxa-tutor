@@ -503,7 +503,7 @@ class PaperSpecModel(_StrictBaseModel):
     domain: PaperDomain
     documents: list[PaperDocumentModel] = Field(min_length=1)
     primary_document_id: str | None = Field(min_length=1, pattern=DOCUMENT_ID_PATTERN)
-    abstract: str = Field(min_length=1, max_length=1000)
+    abstract: str = Field(min_length=1, max_length=1500)
     equations: list[EquationEntryModel] = Field(default_factory=list)
     parameter_table: list[ParameterEntryModel] = Field(default_factory=list)
     figure_locations: list[FigureRefModel] = Field(default_factory=list)
