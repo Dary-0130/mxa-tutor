@@ -191,12 +191,35 @@ build_steps 合法 且 guidance_invoked = true,随后 guidance 自身失败
     → first_blocking_stage = "guidance"
 ```
 
+★ 两个特例(Stage 1 坐实,必须单列)
+特例 A:`retry_cap_exhausted` 名不副实,不许照名字记账。
+Stage 1 实测:该码当前唯一可执行的分支是 pre-call(not attempts —— 一次模型都没调);而真正的「重试耗尽」分支(call_count >= 3)在现有常量下(FULL_ATTEMPTS=2 / HARD_CALL_CAP=3)不可达。
+规则:该码一律按 `guidance_invoked` 的事实读数归因,不按码名归因。
+
+`guidance_invoked == false` → 不记 guidance 账(与 `build_steps_unavailable` 同处理)
+`guidance_invoked == true` → 记 guidance 账
+
+★ 并落一个不变量:若出现 `retry_cap_exhausted` 且 `guidance_provider_call_count >= 3` → 量具或常量与卡面认知不符,批次作废、停手回报(说明那条「不可达」分支其实可达)。
+特例 B:`no_document_basis` 两码(`zero_document_claims_empty_evidence_pool` / `zero_document_claims_unlinked_evidence_pool`)归属待定,坐实前不许记账。
+这两个码的字面含义是「模型没写出任何有依据的说法 —— 因为证据池是空的 / 没连上」。★ 若证据池本身就是空的或没连上,那是上游没把东西给到,不是指导层写不好。
+实施时必须逐一坐实(给代码位置):
+
+证据池为空 / 未连上,是上游(spec / plan / evidence 装配)的产物缺陷,还是指导层自己在构造证据池时的缺陷?
+这两个码判出时,`guidance_invoked` 是 true(Stage 1 已知:两轮 attempt 之后判)—— 所以「调过模型」这个读数在这里不足以定责,必须另外看证据池的来源。
+
+在坐实之前,这两个码一律记入新桶 `guidance_input_defect`(见下),不得计入 `guidance_owned_failures`,也不得硬塞进 plan 或 build_steps。
+★ 不许凭码名推断归属。 上一轮「写爆」就是靠名字推出来的,推错了。
+
 **总账不变量**:
 
 ```
-plan_owned + build_steps_owned + guidance_owned + unattributed == total_failed_rounds
-unattributed == 0        ← 违反即批次作废
+plan_owned + build_steps_owned + guidance_owned
+  + guidance_input_defect + unattributed == total_failed_rounds
+unattributed == 0                    ← 违反即批次作废
 ```
+★ `guidance_input_defect` 是一个显式的「尚未定责」桶,不是第四层。
+它存在的意义是:宁可让它显式挂着,也不许把归属不明的轮次硬塞进某一层去凑一个好看的第一名。
+坐实后(修订 1 特例 B),它并入上游或 guidance;坐实前,它既不给 guidance 加分,也不给上游加分。
 
 **两本账,不得混用**:`first_blocking_stage` **用于选靶**;`terminal_observed_stage` **用于诊断**。
 
@@ -434,6 +457,13 @@ termination_guard:
 
 **折算(全部从本批数据自算,不引入外部先验)**:
 
+★ 前置门 0(先于两道选靶门):
+`guidance_input_defect == 0`   → 可直接选靶
+`guidance_input_defect > 0`    → 必须先坐实其归属(修订 1 特例 B),
+                               归入上游或 guidance 后再选靶
+★ 不得在 `guidance_input_defect > 0` 的情况下直接选靶 —— 那等于拿一批归属不明的轮次去决定打哪一层。
+★ 坐实所需的信息全部是只读代码核查,不需要再跑一批数。
+
 ```
 downstream_survival(guidance)    = 1.0
 downstream_survival(build_steps) = guidance_delivered / guidance_invoked
@@ -488,14 +518,38 @@ expected_gain(L) = failures_owned_by(L) × downstream_survival(L)
 
 ## 10. ★ 实施前置(三项 confirm-and-stop;基线 = 当前 `origin/main`)
 
-**核完这三项无阻即实现;不符 → 停手报架构师(决策 15),别硬上。**
+★ Stage 1 已完成(2026-07-12,只读核实,三项全部通过,无停手项)。实测结果如下,卡面据此更新:
+1. 七个 `GuidanceFailureReason` 的判定时点(已坐实)
+`reason` / `status` / 调模型前 / 后
+`build_steps_unavailable` / `generation_failed` / 前(根本没调模型)
+`retry_cap_exhausted` / `generation_failed` / 混合 —— 当前唯一可执行的是 pre-call 分支;`call_count >= 3` 分支在现有常量下不可达(见 §5-S3 特例 A)
+`zero_document_claims_empty_evidence_pool` / `no_document_basis` / 后(两轮 attempt 之后)
+`zero_document_claims_unlinked_evidence_pool` / `no_document_basis` / 后(两轮 attempt 之后)
+`llm_unparseable` / `generation_failed` / 后
+`evidence_resolution_failed` / `generation_failed` / 后
+`evidence_card_unavailable` / `generation_failed` / 后(pool 构造出错,但 reason 在 attempts 之后判)
+合法 status × reason 组合(已坐实,据此写 §5.3 断言):
 
-1. **七个 `GuidanceFailureReason` 逐一标明「判定发生在调模型之前还是之后」**,产出 §5.3 的**合法 status × reason 组合表**。
-   *(Stage-0 已给两个:`build_steps_unavailable` = 之前;`evidence_card_unavailable` = 之后。其余五个须逐一坐实 —— **凡「调模型之前」判出的,一律不记 guidance 账。**)*
-2. **三层未核实计数**(生成阶段降级 / validator 丢弃 / 最终存活)是否**都拿得到**。
-   **拿不到 → 停手回报,不许用一层顶替另一层。**
-3. **生产侧 guidance 的 `timeout` 实际值**。
-   *(Stage-0 只报了评测侧落回 90,**未报生产侧**。这是 §5-S1 主断言的一个比对项,不能凭空写。)*
+`generation_failed` ⟹ reason ∈ { `llm_unparseable`, `evidence_resolution_failed`, `retry_cap_exhausted`, `build_steps_unavailable`, `evidence_card_unavailable` }
+`no_document_basis` ⟹ reason ∈ { `zero_document_claims_empty_evidence_pool`, `zero_document_claims_unlinked_evidence_pool` }
+`not_generated` / `generated` / `stale_pending_regeneration` ⟹ reason 必为 null
+其余组合全部非法 → 出现即批次作废
+
+2. 三层未核实计数(已坐实,三层都拿得到,均为 telemetry-only plumbing,不改生产判定)
+计数 / 现状 / 做法
+`generator_downgraded_unverified_count` / 现在拿不到 —— 生成器会把 resolver / grounding 失败的 document_extracted draft 降成 document_evidence_unverified,但 `GuidanceDraftResult` 只有 details / stats / dropped_count,没有「降级来源」计数 / 给 draft result / attempt stats 加 telemetry-only 字段;不改判定逻辑
+`validator_dropped_unverified_count` / 运行时能算,summary 拿不到。现有 `GuidanceValidationTelemetry.detail_dropped_count` 统计所有 detail drop,粒度不够 / 从 `GuidanceSemanticValidationResult.item_actions` + validator 前的 candidate details 过滤:被 drop 且原 detail 的 `confirmation_reason_code == document_evidence_unverified`;加评测落档 plumbing
+`final_surviving_unverified_count` / 能算 / 从最终 `plan.build_guidance.details` 数:`basis == "user_confirmation_required"` 且 `confirmation_reason_code == "document_evidence_unverified"`。★ 仅在 `guidance_status == "generated"` 且 `build_guidance != null` 时计数;`build_guidance` 为 null 时落 null,严禁用 0 顶替
+★ 三层数不许互相顶替(§5-S4)。
+3. ★ 生产侧 guidance 的实际配置(已坐实,§5-S1 主断言据此写)
+项 / 生产 / 评测(现状)
+`max_tokens` / 8000(`DEFAULT_PAPER_PLAN_MAX_TOKENS`) / 6000(guidance 默认)
+provider-call timeout / 120.0s(`DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS`)★ 不是 90 / 90.0s(guidance 默认)
+guidance 本地 wall-clock cap / 180.0s / 180.0s(同一层,另一层 cap)
+生产装配只调 `PaperPlanService(text_provider=...)`,走默认值并传给 `BuildGuidanceGenerator`;评测 `RecordingBuildGuidanceGenerator` 只 `super().__init__(text_provider)`,两个参数一起落回 guidance 默认值。
+★★ 三处不同构(token 上限 / timeout / 由此派生的时间预算)全部让评测比生产更苛刻 —— 同一个方向,不是随机漂移。
+这说明评测子类从来没被当成「必须和生产长得一样」的东西。§5-S1 的 provider 边界逐项比对必须覆盖 timeout,不能只比 max_tokens。
+★ 挂账(不属本卡,合并后另起小卡):加一道 CI 断言,焊死「评测侧 guidance 的有效配置必须与生产同源」——否则会有第四处。
 
 **其余停手条件**:
 
@@ -525,7 +579,7 @@ expected_gain(L) = failures_owned_by(L) × downstream_survival(L)
 
 ---
 
-**版本**:v0.3
+**版本**:v0.4(v0.3 + Stage 1 实测折入:失败码时点表 / 组合表 / 三层计数做法 / 生产 timeout=120;新增 retry_cap_exhausted 名不副实特例、no_document_basis 归属待定桶 guidance_input_defect 及其前置门 0)
 **作者**:Claude(架构师)
 **依据**:Codex R6 只读核查 ×2(2026-07-12)+ R1 设计审(条件通过,采纳 13 / 打回 2)
 **审批**:R1 条件通过 → PM 拍 → 派 Codex(须先过 §10 三项 confirm-and-stop)
