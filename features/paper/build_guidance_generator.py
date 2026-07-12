@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 
@@ -27,6 +28,19 @@ from core.domain.paper_plan import (
 from core.domain.paper_spec import PaperSpec, ParameterEntry
 from core.interfaces.llm_provider import LLMMessage, TextProvider
 from features.paper._prompt_builder import build_messages_for_build_guidance
+from features.paper.build_guidance_observability import (
+    GuidanceAttemptTelemetry,
+    GuidanceFailureReasonCode,
+    GuidanceGenerationTelemetry,
+    GuidanceParseOutcome,
+    GuidanceTerminationGuard,
+    completion_ratio,
+    guidance_exception_code,
+    has_provider_telemetry_anomaly,
+    llm_unparseable_reason,
+    termination_guard_for_exception,
+    termination_guard_for_retry_reason,
+)
 from features.paper.build_guidance_rules import (
     CONFIRMATION_REASON_TEMPLATES,
     CONVENTION_TEMPLATES,
@@ -73,6 +87,7 @@ from features.paper.build_guidance_rules import (
     unsafe_freeform_text as _unsafe_freeform_text,
 )
 from features.paper.build_guidance_semantic_validator import (
+    GuidanceSemanticValidationResult,
     guidance_validation_telemetry,
     validate_build_guidance_semantics,
 )
@@ -90,7 +105,8 @@ GUIDANCE_FULL_ATTEMPTS = 2
 GUIDANCE_HARD_CALL_CAP = 3
 GUIDANCE_WALL_CLOCK_SECONDS = 180.0
 
-GuidanceFailureReason = Literal[
+GuidanceFailureReason = GuidanceFailureReasonCode
+_LEGACY_GUIDANCE_FAILURE_REASON = Literal[
     "zero_document_claims_empty_evidence_pool",
     "zero_document_claims_unlinked_evidence_pool",
     "llm_unparseable",
@@ -118,6 +134,56 @@ class GuidanceDraftResult:
     details: list[GuidanceDetail]
     stats: DraftAttemptStats
     dropped_count: int
+    downgraded_unverified_count: int
+    resolver_event_codes: list[str]
+
+
+@dataclass(frozen=True)
+class GuidanceLLMCallResult:
+    """Parsed guidance payload plus sanitized response metadata."""
+
+    payload: dict[str, Any]
+    finish_reason: str | None
+    prompt_tokens: int
+    completion_tokens: int
+    max_tokens: int
+    elapsed_ms: int
+
+
+class GuidanceLLMCallError(Exception):
+    """Internal non-leaking wrapper for one failed guidance provider attempt."""
+
+    def __init__(
+        self,
+        *,
+        parse_outcome: GuidanceParseOutcome,
+        finish_reason: str | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        max_tokens: int | None,
+        elapsed_ms: int,
+        generator_exception: str,
+        termination_guard: GuidanceTerminationGuard,
+    ) -> None:
+        self.parse_outcome = parse_outcome
+        self.finish_reason = finish_reason
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.max_tokens = max_tokens
+        self.elapsed_ms = elapsed_ms
+        self.generator_exception = cast(Any, generator_exception)
+        self.termination_guard = termination_guard
+        super().__init__()
+
+
+@dataclass(frozen=True)
+class GuidanceDocumentResolution:
+    """Telemetry-only result of resolving one document-sourced draft detail."""
+
+    detail: GuidanceDetail | None
+    resolver_error_count: int
+    resolver_event_codes: list[str]
+    downgraded_unverified_count: int
 
 
 @dataclass
@@ -143,6 +209,10 @@ class GuidanceRetryContext:
 
 class GuidanceRetryExceeded(Exception):
     """Raised when the independent guidance retry caps are exhausted."""
+
+    def __init__(self, reason_code: str) -> None:
+        self.reason_code = reason_code
+        super().__init__()
 
 
 class GuidanceDetailDraftModel(BaseModel):
@@ -182,11 +252,25 @@ class BuildGuidanceGenerator:
         timeout: float = DEFAULT_GUIDANCE_TIMEOUT_SECONDS,
         max_tokens: int = DEFAULT_GUIDANCE_MAX_TOKENS,
         evidence_tagger: EvidenceTagger | None = None,
+        retry_context_factory: Callable[[], GuidanceRetryContext] | None = None,
     ) -> None:
         self._text_provider = text_provider
         self._timeout = timeout
         self._max_tokens = max_tokens
         self._evidence_tagger = evidence_tagger or EvidenceTagger()
+        self._retry_context_factory = retry_context_factory or GuidanceRetryContext
+        self._last_telemetry = GuidanceGenerationTelemetry(
+            attempts=[],
+            terminal_status=None,
+            terminal_reason=None,
+            terminal_termination_guard="none",
+        )
+
+    @property
+    def last_telemetry(self) -> GuidanceGenerationTelemetry:
+        """Return telemetry from the latest generate call."""
+
+        return self._last_telemetry
 
     async def generate(
         self,
@@ -195,11 +279,19 @@ class BuildGuidanceGenerator:
     ) -> ModelGenerationPlan:
         """Return the plan with generated guidance or an honest terminal status."""
 
+        attempt_records: list[GuidanceAttemptTelemetry] = []
+        terminal_guard: GuidanceTerminationGuard = "none"
         if plan.build_steps is None:
             self._log_terminal(
                 "generation_failed",
                 "build_steps_unavailable",
                 retry_count=0,
+            )
+            self._last_telemetry = GuidanceGenerationTelemetry(
+                attempts=[],
+                terminal_status="generation_failed",
+                terminal_reason="build_steps_unavailable",
+                terminal_termination_guard="none",
             )
             return replace(plan, build_guidance=None, guidance_status="generation_failed")
 
@@ -207,39 +299,102 @@ class BuildGuidanceGenerator:
         truth_index = GroundingTruthIndex.from_spec_plan(spec, plan, pool)
         targets = ControlledGuidanceTargets(plan.build_steps)
         attempts: list[DraftAttemptStats] = []
-        retry_context = GuidanceRetryContext()
+        retry_context = self._retry_context_factory()
 
         for attempt_index in range(GUIDANCE_FULL_ATTEMPTS):
             try:
-                payload = await self._call_llm_json(
+                call_result = await self._call_llm_json(
                     build_messages_for_build_guidance(plan, pool.cards),
                     retry_context,
                 )
-            except GuidanceRetryExceeded:
+            except GuidanceRetryExceeded as exc:
+                terminal_guard = termination_guard_for_retry_reason(exc.reason_code)
                 break
-            except Exception:
-                attempts.append(
-                    DraftAttemptStats(
+            except GuidanceLLMCallError as exc:
+                stats = DraftAttemptStats(
+                    raw_document_claim_count=0,
+                    raw_supporting_ref_count=0,
+                    resolver_error_count=0,
+                    parse_error_count=1,
+                )
+                attempts.append(stats)
+                terminal_guard = exc.termination_guard
+                attempt_records.append(
+                    GuidanceAttemptTelemetry(
+                        attempt_index=attempt_index + 1,
+                        parse_outcome=exc.parse_outcome,
+                        finish_reason=exc.finish_reason,
+                        completion_tokens=exc.completion_tokens,
+                        prompt_tokens=exc.prompt_tokens,
+                        max_tokens=exc.max_tokens,
+                        completion_ratio=completion_ratio(
+                            exc.completion_tokens,
+                            exc.max_tokens,
+                        ),
+                        provider_telemetry_anomaly=has_provider_telemetry_anomaly(
+                            finish_reason=exc.finish_reason,
+                            completion_tokens=exc.completion_tokens,
+                            max_tokens=exc.max_tokens,
+                        ),
+                        resolver_event_codes=[],
+                        validator_machine_codes=[],
+                        detail_downgraded_count=None,
+                        detail_dropped_count=None,
+                        validator_dropped_unverified_count=None,
+                        generated_output_changed=None,
                         raw_document_claim_count=0,
                         raw_supporting_ref_count=0,
                         resolver_error_count=0,
                         parse_error_count=1,
+                        elapsed_ms=exc.elapsed_ms,
+                        termination_guard=exc.termination_guard,
+                        generator_exception=exc.generator_exception,
                     )
                 )
                 continue
 
             result = parse_and_ground_guidance_draft(
-                payload,
+                call_result.payload,
                 pool=pool,
                 truth_index=truth_index,
                 targets=targets,
                 build_steps=plan.build_steps,
             )
             attempts.append(result.stats)
+            attempt_record = GuidanceAttemptTelemetry(
+                attempt_index=attempt_index + 1,
+                parse_outcome="parsed",
+                finish_reason=call_result.finish_reason,
+                completion_tokens=call_result.completion_tokens,
+                prompt_tokens=call_result.prompt_tokens,
+                max_tokens=call_result.max_tokens,
+                completion_ratio=completion_ratio(
+                    call_result.completion_tokens,
+                    call_result.max_tokens,
+                ),
+                provider_telemetry_anomaly=has_provider_telemetry_anomaly(
+                    finish_reason=call_result.finish_reason,
+                    completion_tokens=call_result.completion_tokens,
+                    max_tokens=call_result.max_tokens,
+                ),
+                resolver_event_codes=result.resolver_event_codes,
+                validator_machine_codes=[],
+                detail_downgraded_count=result.downgraded_unverified_count,
+                detail_dropped_count=result.dropped_count,
+                validator_dropped_unverified_count=0,
+                generated_output_changed=False,
+                raw_document_claim_count=result.stats.raw_document_claim_count,
+                raw_supporting_ref_count=result.stats.raw_supporting_ref_count,
+                resolver_error_count=result.stats.resolver_error_count,
+                parse_error_count=result.stats.parse_error_count,
+                elapsed_ms=call_result.elapsed_ms,
+                termination_guard="none",
+            )
             document_details = [
                 detail for detail in result.details if detail.basis == "document_extracted"
             ]
             if not document_details:
+                attempt_records.append(attempt_record)
                 continue
 
             gaps = synthesize_guidance_gaps(
@@ -302,29 +457,69 @@ class BuildGuidanceGenerator:
                     telemetry.stale_snapshot_step_ref_ignored,
                     1,
                 )
+                attempt_record = replace(
+                    attempt_record,
+                    validator_machine_codes=machine_codes,
+                    detail_dropped_count=telemetry.detail_dropped_count,
+                    validator_dropped_unverified_count=(
+                        _validator_dropped_unverified_count(candidate, validation)
+                    ),
+                    generated_output_changed=True,
+                )
+            attempt_records.append(attempt_record)
+            self._last_telemetry = GuidanceGenerationTelemetry(
+                attempts=attempt_records,
+                terminal_status=validation.plan.guidance_status,
+                terminal_reason=None
+                if validation.plan.guidance_status == "generated"
+                else "guidance_validator_generated_output_changed",
+                terminal_termination_guard="none",
+            )
             return validation.plan
 
         status, reason = _terminal_status_and_reason(
             attempts,
             pool=pool,
             call_count=retry_context.call_count,
+            attempt_records=attempt_records,
         )
         self._log_terminal(status, reason, retry_count=max(0, len(attempts) - 1))
+        self._last_telemetry = GuidanceGenerationTelemetry(
+            attempts=attempt_records,
+            terminal_status=status,
+            terminal_reason=reason,
+            terminal_termination_guard=terminal_guard,
+        )
         return replace(plan, build_guidance=None, guidance_status=status)
 
     async def _call_llm_json(
         self,
         messages: list[LLMMessage],
         retry_context: GuidanceRetryContext,
-    ) -> dict[str, Any]:
+    ) -> GuidanceLLMCallResult:
         retry_context.before_call()
-        response = await asyncio.to_thread(
-            self._text_provider.chat,
-            messages,
-            json_mode=True,
-            timeout=self._timeout,
-            max_tokens=self._max_tokens,
-        )
+        start = time.monotonic()
+        try:
+            response = await asyncio.to_thread(
+                self._text_provider.chat,
+                messages,
+                json_mode=True,
+                timeout=self._timeout,
+                max_tokens=self._max_tokens,
+            )
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            raise GuidanceLLMCallError(
+                parse_outcome="provider_exception",
+                finish_reason=None,
+                prompt_tokens=None,
+                completion_tokens=None,
+                max_tokens=self._max_tokens,
+                elapsed_ms=elapsed_ms,
+                generator_exception=guidance_exception_code(exc),
+                termination_guard=termination_guard_for_exception(exc),
+            ) from None
+        elapsed_ms = int((time.monotonic() - start) * 1000)
         try:
             payload = json.loads(response.text)
         except json.JSONDecodeError:
@@ -332,10 +527,35 @@ class BuildGuidanceGenerator:
                 "paper_build_guidance_json_decode_failed reason_code={}",
                 "llm_unparseable",
             )
-            raise
+            raise GuidanceLLMCallError(
+                parse_outcome="json_error",
+                finish_reason=response.finish_reason,
+                prompt_tokens=response.prompt_tokens,
+                completion_tokens=response.completion_tokens,
+                max_tokens=self._max_tokens,
+                elapsed_ms=elapsed_ms,
+                generator_exception="parse_error",
+                termination_guard="none",
+            ) from None
         if not isinstance(payload, dict):
-            raise TypeError("guidance_json_top_level_must_be_object")
-        return payload
+            raise GuidanceLLMCallError(
+                parse_outcome="non_object_json",
+                finish_reason=response.finish_reason,
+                prompt_tokens=response.prompt_tokens,
+                completion_tokens=response.completion_tokens,
+                max_tokens=self._max_tokens,
+                elapsed_ms=elapsed_ms,
+                generator_exception="parse_error",
+                termination_guard="none",
+            ) from None
+        return GuidanceLLMCallResult(
+            payload=payload,
+            finish_reason=response.finish_reason,
+            prompt_tokens=response.prompt_tokens,
+            completion_tokens=response.completion_tokens,
+            max_tokens=self._max_tokens,
+            elapsed_ms=elapsed_ms,
+        )
 
     def _log_success(
         self,
@@ -470,11 +690,15 @@ def parse_and_ground_guidance_draft(
             details=[],
             stats=DraftAttemptStats(0, 0, 0, parse_error_count=1),
             dropped_count=0,
+            downgraded_unverified_count=0,
+            resolver_event_codes=[],
         )
     raw_counters = _raw_counters(raw_items)
     details: list[GuidanceDetail] = []
     dropped_count = 0
+    downgraded_unverified_count = 0
     resolver_error_count = raw_counters.resolver_error_count
+    resolver_event_codes: list[str] = []
     step_by_id = {step.step_id: step for step in build_steps}
     seen_keys: set[tuple[str, str, str, str]] = set()
 
@@ -498,7 +722,7 @@ def parse_and_ground_guidance_draft(
             continue
         seen_keys.add(key)
         if draft.basis == "document_extracted":
-            detail, resolver_errors = _document_detail_from_draft(
+            resolution = _document_detail_from_draft(
                 draft,
                 pool=pool,
                 truth_index=truth_index,
@@ -506,9 +730,11 @@ def parse_and_ground_guidance_draft(
                 step=step,
                 ordinal=len(details) + 1,
             )
-            resolver_error_count += resolver_errors
-            if detail is not None:
-                details.append(detail)
+            resolver_error_count += resolution.resolver_error_count
+            resolver_event_codes.extend(resolution.resolver_event_codes)
+            downgraded_unverified_count += resolution.downgraded_unverified_count
+            if resolution.detail is not None:
+                details.append(resolution.detail)
             continue
         if draft.basis == "engineering_convention":
             detail = _convention_detail_from_draft(
@@ -540,6 +766,8 @@ def parse_and_ground_guidance_draft(
             parse_error_count=0,
         ),
         dropped_count=dropped_count,
+        downgraded_unverified_count=downgraded_unverified_count,
+        resolver_event_codes=_unique_codes(resolver_event_codes),
     )
 
 
@@ -647,30 +875,36 @@ def _document_detail_from_draft(
     targets: ControlledGuidanceTargets,
     step: ModelBuildStep,
     ordinal: int,
-) -> tuple[GuidanceDetail | None, int]:
+) -> GuidanceDocumentResolution:
     resolved: list[PaperEvidenceEntry] = []
     resolver_errors = 0
+    resolver_event_codes: list[str] = []
     for handle in draft.supporting_evidence_refs:
         card = pool.by_handle.get(handle)
         if card is None:
             resolver_errors += 1
+            resolver_event_codes.append("handle_no_match")
             continue
         resolved.append(card.evidence)
     resolved = _dedupe_evidence(resolved)
     high_risk_tokens = high_risk_claim_tokens(draft.claim_text, step)
     if not resolved or not truth_index.contains_all(high_risk_tokens):
-        return (
-            _confirmation_detail(
+        if resolved:
+            resolver_event_codes.append("grounding_whitelist_no_match")
+        return GuidanceDocumentResolution(
+            detail=_confirmation_detail(
                 step_id=draft.step_id,
                 detail_kind=draft.detail_kind,
                 reason_code="document_evidence_unverified",
                 target=targets.label(draft.step_id, draft.target),
                 ordinal=ordinal,
             ),
-            resolver_errors + (0 if resolved else 1),
+            resolver_error_count=resolver_errors + (0 if resolved else 1),
+            resolver_event_codes=_unique_codes(resolver_event_codes),
+            downgraded_unverified_count=1,
         )
-    return (
-        GuidanceDetail(
+    return GuidanceDocumentResolution(
+        detail=GuidanceDetail(
             detail_id=f"GD-{ordinal:03d}",
             step_id=draft.step_id,
             detail_kind=draft.detail_kind,
@@ -681,7 +915,9 @@ def _document_detail_from_draft(
             convention_code=None,
             confirmation_reason_code=None,
         ),
-        resolver_errors,
+        resolver_error_count=resolver_errors,
+        resolver_event_codes=_unique_codes(resolver_event_codes),
+        downgraded_unverified_count=0,
     )
 
 
@@ -847,16 +1083,43 @@ def _gap_from_rule(
     )
 
 
+def _unique_codes(codes: list[str]) -> list[str]:
+    return sorted(set(codes))
+
+
+def _validator_dropped_unverified_count(
+    candidate: ModelGenerationPlan,
+    validation: GuidanceSemanticValidationResult,
+) -> int:
+    if candidate.build_guidance is None:
+        return 0
+    details_by_id = {detail.detail_id: detail for detail in candidate.build_guidance.details}
+    count = 0
+    for action in validation.item_actions:
+        if action.item_type != "detail" or action.action != "drop":
+            continue
+        detail = details_by_id.get(action.item_id or "")
+        if (
+            detail is not None
+            and detail.basis == "user_confirmation_required"
+            and detail.confirmation_reason_code == "document_evidence_unverified"
+        ):
+            count += 1
+    return count
+
+
 def _terminal_status_and_reason(
     attempts: list[DraftAttemptStats],
     *,
     pool: GuidanceEvidencePool,
     call_count: int,
+    attempt_records: list[GuidanceAttemptTelemetry],
 ) -> tuple[Literal["generation_failed", "no_document_basis"], GuidanceFailureReason]:
     if not attempts:
         return "generation_failed", "retry_cap_exhausted"
     if any(stats.parse_error_count for stats in attempts):
-        return "generation_failed", "llm_unparseable"
+        finish_reason = _last_parse_error_finish_reason(attempt_records)
+        return "generation_failed", llm_unparseable_reason(finish_reason)
     if any(stats.raw_document_claim_count > 0 for stats in attempts):
         return "generation_failed", "evidence_resolution_failed"
     if any(stats.resolver_error_count > 0 for stats in attempts):
@@ -873,6 +1136,15 @@ def _terminal_status_and_reason(
     if call_count >= GUIDANCE_HARD_CALL_CAP:
         return "generation_failed", "retry_cap_exhausted"
     return "generation_failed", "evidence_resolution_failed"
+
+
+def _last_parse_error_finish_reason(
+    attempt_records: list[GuidanceAttemptTelemetry],
+) -> str | None:
+    for attempt in reversed(attempt_records):
+        if attempt.parse_error_count > 0:
+            return attempt.finish_reason
+    return None
 
 
 def _entry_from_source_ref(source_ref: PlanEvidenceSourceRef) -> PaperEvidenceEntry:

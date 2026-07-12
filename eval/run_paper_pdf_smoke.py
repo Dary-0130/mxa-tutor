@@ -10,15 +10,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import uuid
 from collections import Counter
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
@@ -46,7 +49,21 @@ from core.domain.paper_upload_job import PaperUploadJobRecord
 from core.interfaces.document_parser import DocumentParserRouter
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.paper._prompt_loader import load_prompt_template
-from features.paper.build_guidance_generator import GUIDANCE_ROLE_NAME, BuildGuidanceGenerator
+from features.paper.build_guidance_generator import (
+    GUIDANCE_FULL_ATTEMPTS,
+    GUIDANCE_HARD_CALL_CAP,
+    GUIDANCE_ROLE_NAME,
+    GUIDANCE_WALL_CLOCK_SECONDS,
+    BuildGuidanceGenerator,
+    _critical_steps,
+)
+from features.paper.build_guidance_observability import (
+    SUMMARY_SCHEMA_VERSION,
+    first_blocking_stage_from_owner,
+    guidance_exception_code,
+    guidance_failure_owner_bucket,
+    validate_guidance_status_reason,
+)
 from features.paper.build_steps_dependency_audit import (
     DependencyAudit,
     audit_step_dependencies_from_payload,
@@ -63,6 +80,8 @@ from features.paper.paper_plan_helpers import (
 from features.paper.paper_plan_service import (
     _UNSET,
     BUILD_STEP_ROLE_NAME,
+    DEFAULT_PAPER_PLAN_MAX_TOKENS,
+    DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS,
     MISSING_DETECTOR_ROLE_NAME,
     PLAN_COMPOSER_ROLE_NAME,
     PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS,
@@ -109,6 +128,8 @@ BUILD_STEPS_BRIDGE_REASON_CODES = frozenset(
 
 SUMMARY_COLUMNS = [
     "run_id",
+    "summary_schema_version",
+    "git_revision",
     "paper_file",
     "arxiv_id",
     "round_index",
@@ -143,7 +164,37 @@ SUMMARY_COLUMNS = [
     "paired_arm_order",
     "paired_build_steps_arms",
     "guidance_reached",
+    "guidance_invoked",
+    "guidance_provider_call_count",
     "guidance_status",
+    "guidance_failure_reason",
+    "guidance_retry_count",
+    "guidance_generator_exception",
+    "guidance_validator_machine_codes",
+    "guidance_attempt_record_count",
+    "guidance_attempts",
+    "guidance_terminal_termination_guard",
+    "guidance_status_reason_valid",
+    "first_blocking_stage",
+    "terminal_observed_stage",
+    "failure_owner_bucket",
+    "plan_ready",
+    "build_steps_structured",
+    "guidance_delivered",
+    "guidance_evidence_clean",
+    "guidance_fully_actionable",
+    "all_document_details_lost",
+    "critical_step_count",
+    "blocking_gap_count",
+    "final_detail_total_count",
+    "final_document_detail_count",
+    "final_unverified_detail_count",
+    "generator_downgraded_unverified_count",
+    "validator_dropped_unverified_count",
+    "final_surviving_unverified_count",
+    "guidance_effective_config",
+    "guidance_prompt_template_version",
+    "guidance_prompt_template_sha256",
     "dto_invalid_errors",
     "dependency_audit_status",
     "dependency_audit_unavailable_stage",
@@ -212,12 +263,20 @@ class SmokeRuntime:
 class LLMCallRecord:
     role: str | None
     arm_label: str | None
+    request_model: str | None
+    json_mode: bool
+    timeout: float
     finish_reason: str | None
     prompt_tokens: int
     completion_tokens: int
     max_tokens: int | None
+    response_format: str | None
+    temperature: float | None
+    top_p: float | None
+    seed: int | None
     response_model: str | None
     system_fingerprint: str | None
+    exception_code: str | None = None
 
     @property
     def total_tokens(self) -> int:
@@ -239,11 +298,37 @@ class BuildStepsTelemetry:
     paired_build_steps_arms: list[dict[str, Any]] = field(default_factory=list)
     guidance_failure_reason: str | None = None
     guidance_validator_machine_codes: list[str] = field(default_factory=list)
+    guidance_retry_count: int | None = None
+    guidance_generator_exception: str | None = None
+    guidance_attempts: list[dict[str, object]] = field(default_factory=list)
+    guidance_terminal_termination_guard: str | None = None
+    generator_downgraded_unverified_count: int | None = None
+    validator_dropped_unverified_count: int | None = None
+    all_document_details_lost: bool | None = None
+    guidance_artifact_snapshots: list[GuidanceArtifactSnapshot] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GuidanceArtifactSnapshot:
+    """Eval-only snapshot for writing readable build guidance artifacts."""
+
+    arm_label: str
+    plan: ModelGenerationPlan | None
+    guidance_status: str
+    guidance_delivered: bool
+    guidance_evidence_clean: bool
+    guidance_fully_actionable: bool
+    generator_downgraded_unverified_count: int | None
+    validator_dropped_unverified_count: int | None
+    final_surviving_unverified_count: int | None
+    blocking_gap_count: int | None
 
 
 @dataclass(frozen=True)
 class SmokeSummaryRow:
     run_id: str
+    summary_schema_version: str
+    git_revision: str
     paper_file: str
     arxiv_id: str | None
     round_index: int
@@ -278,7 +363,37 @@ class SmokeSummaryRow:
     paired_arm_order: list[str]
     paired_build_steps_arms: list[dict[str, Any]]
     guidance_reached: bool
+    guidance_invoked: bool
+    guidance_provider_call_count: int
     guidance_status: str
+    guidance_failure_reason: str | None
+    guidance_retry_count: int | None
+    guidance_generator_exception: str | None
+    guidance_validator_machine_codes: list[str]
+    guidance_attempt_record_count: int
+    guidance_attempts: list[dict[str, object]]
+    guidance_terminal_termination_guard: str | None
+    guidance_status_reason_valid: bool
+    first_blocking_stage: str | None
+    terminal_observed_stage: str | None
+    failure_owner_bucket: str | None
+    plan_ready: bool
+    build_steps_structured: bool
+    guidance_delivered: bool
+    guidance_evidence_clean: bool
+    guidance_fully_actionable: bool
+    all_document_details_lost: bool | None
+    critical_step_count: int | None
+    blocking_gap_count: int | None
+    final_detail_total_count: int | None
+    final_document_detail_count: int | None
+    final_unverified_detail_count: int | None
+    generator_downgraded_unverified_count: int | None
+    validator_dropped_unverified_count: int | None
+    final_surviving_unverified_count: int | None
+    guidance_effective_config: dict[str, object]
+    guidance_prompt_template_version: str
+    guidance_prompt_template_sha256: str
     dto_invalid_errors: list[dict[str, str]]
     dependency_audit_status: str
     dependency_audit_unavailable_stage: str | None
@@ -333,6 +448,10 @@ class RoundRunner(Protocol):
     ) -> SmokeSummaryRow: ...
 
 
+class GuidanceBatchInvalidError(ValueError):
+    """Raised when guidance observability gates invalidate an eval batch."""
+
+
 class RecordingTextProvider(TextProvider):
     """TextProvider wrapper that records sanitized per-leaf usage metadata."""
 
@@ -347,20 +466,51 @@ class RecordingTextProvider(TextProvider):
         timeout: float = 30.0,
         max_tokens: int | None = None,
     ) -> LLMResponse:
-        response = self._delegate.chat(
-            messages,
-            json_mode=json_mode,
-            timeout=timeout,
-            max_tokens=max_tokens,
-        )
+        request_model = self._delegate.capability().model_name
+        try:
+            response = self._delegate.chat(
+                messages,
+                json_mode=json_mode,
+                timeout=timeout,
+                max_tokens=max_tokens,
+            )
+        except Exception as exc:
+            self.calls.append(
+                LLMCallRecord(
+                    role=_CURRENT_LLM_ROLE.get(),
+                    arm_label=_CURRENT_LLM_ARM.get(),
+                    request_model=request_model,
+                    json_mode=json_mode,
+                    timeout=timeout,
+                    finish_reason=None,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    max_tokens=max_tokens,
+                    response_format="json_object" if json_mode else None,
+                    temperature=None,
+                    top_p=None,
+                    seed=None,
+                    response_model=None,
+                    system_fingerprint=None,
+                    exception_code=guidance_exception_code(exc),
+                )
+            )
+            raise
         self.calls.append(
             LLMCallRecord(
                 role=_CURRENT_LLM_ROLE.get(),
                 arm_label=_CURRENT_LLM_ARM.get(),
+                request_model=request_model,
+                json_mode=json_mode,
+                timeout=timeout,
                 finish_reason=response.finish_reason,
                 prompt_tokens=response.prompt_tokens,
                 completion_tokens=response.completion_tokens,
                 max_tokens=max_tokens,
+                response_format="json_object" if json_mode else None,
+                temperature=None,
+                top_p=None,
+                seed=None,
                 response_model=response.model,
                 system_fingerprint=response.system_fingerprint,
             )
@@ -415,8 +565,10 @@ class RecordingBuildGuidanceGenerator(BuildGuidanceGenerator):
         text_provider: TextProvider,
         *,
         telemetry: BuildStepsTelemetry,
+        timeout: float = DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS,
+        max_tokens: int = DEFAULT_PAPER_PLAN_MAX_TOKENS,
     ) -> None:
-        super().__init__(text_provider)
+        super().__init__(text_provider, timeout=timeout, max_tokens=max_tokens)
         self._smoke_telemetry = telemetry
 
     async def generate(
@@ -426,7 +578,15 @@ class RecordingBuildGuidanceGenerator(BuildGuidanceGenerator):
     ) -> ModelGenerationPlan:
         self._smoke_telemetry.guidance_failure_reason = None
         self._smoke_telemetry.guidance_validator_machine_codes = []
+        self._smoke_telemetry.guidance_retry_count = None
+        self._smoke_telemetry.guidance_generator_exception = None
+        self._smoke_telemetry.guidance_attempts = []
+        self._smoke_telemetry.guidance_terminal_termination_guard = None
+        self._smoke_telemetry.generator_downgraded_unverified_count = None
+        self._smoke_telemetry.validator_dropped_unverified_count = None
+        self._smoke_telemetry.all_document_details_lost = None
         result = await super().generate(spec, plan)
+        self._sync_guidance_telemetry()
         if (
             result.guidance_status == "generation_failed"
             and self._smoke_telemetry.guidance_failure_reason is None
@@ -439,11 +599,39 @@ class RecordingBuildGuidanceGenerator(BuildGuidanceGenerator):
             ]
         return result
 
+    def _sync_guidance_telemetry(self) -> None:
+        telemetry = self.last_telemetry
+        self._smoke_telemetry.guidance_attempts = telemetry.attempt_dicts()
+        self._smoke_telemetry.guidance_terminal_termination_guard = (
+            telemetry.terminal_termination_guard
+        )
+        self._smoke_telemetry.guidance_generator_exception = telemetry.generator_exception
+        if telemetry.terminal_reason is not None:
+            self._smoke_telemetry.guidance_failure_reason = telemetry.terminal_reason
+        if not telemetry.attempts:
+            return
+        self._smoke_telemetry.guidance_retry_count = max(0, len(telemetry.attempts) - 1)
+        last_attempt = telemetry.attempts[-1]
+        self._smoke_telemetry.guidance_validator_machine_codes = list(
+            last_attempt.validator_machine_codes
+        )
+        if last_attempt.detail_downgraded_count is not None:
+            self._smoke_telemetry.generator_downgraded_unverified_count = (
+                last_attempt.detail_downgraded_count
+            )
+        if last_attempt.validator_dropped_unverified_count is not None:
+            self._smoke_telemetry.validator_dropped_unverified_count = (
+                last_attempt.validator_dropped_unverified_count
+            )
+        self._smoke_telemetry.all_document_details_lost = (
+            "guidance_validator_all_document_details_lost" in last_attempt.validator_machine_codes
+        )
+
     async def _call_llm_json(
         self,
         messages: list[LLMMessage],
         retry_context: Any,
-    ) -> dict[str, Any]:
+    ) -> Any:
         token = _CURRENT_LLM_ROLE.set(GUIDANCE_ROLE_NAME)
         try:
             return await super()._call_llm_json(messages, retry_context)
@@ -459,6 +647,7 @@ class RecordingBuildGuidanceGenerator(BuildGuidanceGenerator):
     ) -> None:
         self._smoke_telemetry.guidance_failure_reason = reason
         self._smoke_telemetry.guidance_validator_machine_codes = []
+        self._smoke_telemetry.guidance_retry_count = retry_count
         super()._log_terminal(status, reason, retry_count=retry_count)
 
 
@@ -473,13 +662,19 @@ class RecordingPaperPlanService(PaperPlanService):
         paired_build_steps: bool = False,
         paired_build_steps_full: bool = False,
         pair_order_start: str = "off",
+        timeout: float = DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS,
+        max_tokens: int = DEFAULT_PAPER_PLAN_MAX_TOKENS,
     ) -> None:
         super().__init__(
             text_provider=text_provider,
             build_guidance_generator=RecordingBuildGuidanceGenerator(
                 text_provider,
                 telemetry=telemetry,
+                timeout=timeout,
+                max_tokens=max_tokens,
             ),
+            timeout=timeout,
+            max_tokens=max_tokens,
         )
         self._smoke_telemetry = telemetry
         self._paired_build_steps = paired_build_steps
@@ -508,6 +703,7 @@ class RecordingPaperPlanService(PaperPlanService):
             and self._smoke_telemetry.guidance_failure_reason is None
         ):
             self._smoke_telemetry.guidance_failure_reason = "guidance_generator_exception"
+            self._smoke_telemetry.guidance_generator_exception = "unexpected_internal_error"
             self._smoke_telemetry.guidance_validator_machine_codes = [
                 "guidance_generator_exception"
             ]
@@ -708,6 +904,13 @@ class RecordingPaperPlanService(PaperPlanService):
         finally:
             _CURRENT_LLM_ARM.reset(token)
 
+        self._smoke_telemetry.guidance_artifact_snapshots.append(
+            _guidance_snapshot_for_plan(
+                arm_label,
+                guided_plan,
+                telemetry=self._smoke_telemetry,
+            )
+        )
         payload.update(
             {
                 "full_pipeline_used": True,
@@ -716,9 +919,7 @@ class RecordingPaperPlanService(PaperPlanService):
                 "full_build_steps_raw_reason_code": raw_reason_code,
                 "full_build_steps_exception_type": exception_type,
                 "full_guidance_reached": bool(guided_plan.build_steps),
-                "full_guidance_status": guided_plan.guidance_status
-                if guided_plan.build_steps
-                else "未触达",
+                "full_guidance_status": guided_plan.guidance_status,
                 "full_guidance_failure_reason": self._smoke_telemetry.guidance_failure_reason,
                 "full_guidance_validator_machine_codes": list(
                     self._smoke_telemetry.guidance_validator_machine_codes
@@ -1023,7 +1224,7 @@ async def _run_one_pdf_round(
             response_payload = result.model_dump(mode="json")
     except Exception as exc:  # summary must still be written for failed true runs
         unexpected_error = exc
-        response_payload = {"error": type(exc).__name__, "message": str(exc)}
+        response_payload = {"error_code": guidance_exception_code(exc)}
     finally:
         handle.close()
 
@@ -1039,7 +1240,7 @@ async def _run_one_pdf_round(
         unexpected_error=unexpected_error,
         spec_validation_errors=telemetry.spec_validation_errors,
     )
-    return build_summary_row(
+    row = build_summary_row(
         paper=paper,
         round_index=round_index,
         runtime=runtime,
@@ -1054,6 +1255,21 @@ async def _run_one_pdf_round(
         response_payload=response_payload,
         unexpected_error=unexpected_error,
     )
+    snapshots = telemetry.guidance_artifact_snapshots or [
+        _guidance_snapshot_for_plan(
+            "on" if paired_build_steps else "main",
+            plan_record.plan if plan_record is not None else None,
+            row=row,
+        )
+    ]
+    write_guidance_artifacts(
+        runtime.output_dir,
+        paper=paper,
+        round_index=round_index,
+        row=row,
+        snapshots=snapshots,
+    )
+    return row
 
 
 def build_summary_row(
@@ -1071,8 +1287,39 @@ def build_summary_row(
 ) -> SmokeSummaryRow:
     terminal_state = _terminal_state(job_record, unexpected_error)
     plan = plan_record.plan if plan_record is not None else None
-    guidance_reached = bool(plan is not None and plan.build_steps)
-    guidance_status = plan.guidance_status if guidance_reached else "未触达"
+    plan_ready = plan is not None
+    build_steps_structured = bool(plan is not None and plan.build_steps)
+    guidance_reached = build_steps_structured
+    guidance_status = plan.guidance_status if plan is not None else "not_generated"
+    guidance_calls = [call for call in llm_calls if call.role == GUIDANCE_ROLE_NAME]
+    guidance_invoked = bool(guidance_calls)
+    guidance_call = guidance_calls[0] if guidance_calls else None
+    guidance_failure_reason = (
+        None if guidance_status == "generated" else telemetry.guidance_failure_reason
+    )
+    status_reason_valid = _guidance_status_reason_valid(
+        guidance_status,
+        guidance_failure_reason,
+    )
+    output_counts = _guidance_output_counts(plan)
+    final_unverified_detail_count = output_counts["final_unverified_detail_count"]
+    guidance_delivered = guidance_status == "generated" and output_counts["has_guidance"] is True
+    guidance_evidence_clean = guidance_delivered and final_unverified_detail_count == 0
+    guidance_fully_actionable = guidance_evidence_clean and output_counts["blocking_gap_count"] == 0
+    failed_for_owner = not guidance_delivered
+    owner_bucket = guidance_failure_owner_bucket(
+        failed=failed_for_owner,
+        plan_ready=plan_ready,
+        build_steps_structured=build_steps_structured,
+        guidance_invoked=guidance_invoked,
+        guidance_failure_reason=guidance_failure_reason,
+    )
+    first_blocking_stage = first_blocking_stage_from_owner(owner_bucket)
+    terminal_observed_stage = _terminal_observed_stage(
+        plan_ready=plan_ready,
+        build_steps_structured=build_steps_structured,
+        guidance_failure_reason=guidance_failure_reason,
+    )
     result_code = classify_build_steps_result(plan_record, telemetry)
     hybrid_conclusion, hybrid_misfire = hybrid_guardrail_conclusion(
         hybrid_candidate=paper.hybrid_candidate,
@@ -1084,6 +1331,8 @@ def build_summary_row(
     paired_build_steps_arms = _paired_build_steps_arms_for_summary(telemetry, llm_calls)
     return SmokeSummaryRow(
         run_id=runtime.run_id,
+        summary_schema_version=SUMMARY_SCHEMA_VERSION,
+        git_revision=_git_revision(),
         paper_file=paper.path.name,
         arxiv_id=paper.arxiv_id,
         round_index=round_index,
@@ -1126,7 +1375,47 @@ def build_summary_row(
         paired_arm_order=list(telemetry.paired_arm_order),
         paired_build_steps_arms=paired_build_steps_arms,
         guidance_reached=guidance_reached,
+        guidance_invoked=guidance_invoked,
+        guidance_provider_call_count=len(guidance_calls),
         guidance_status=guidance_status,
+        guidance_failure_reason=guidance_failure_reason,
+        guidance_retry_count=telemetry.guidance_retry_count,
+        guidance_generator_exception=telemetry.guidance_generator_exception,
+        guidance_validator_machine_codes=list(telemetry.guidance_validator_machine_codes),
+        guidance_attempt_record_count=len(telemetry.guidance_attempts),
+        guidance_attempts=list(telemetry.guidance_attempts),
+        guidance_terminal_termination_guard=telemetry.guidance_terminal_termination_guard,
+        guidance_status_reason_valid=status_reason_valid,
+        first_blocking_stage=first_blocking_stage,
+        terminal_observed_stage=terminal_observed_stage,
+        failure_owner_bucket=owner_bucket,
+        plan_ready=plan_ready,
+        build_steps_structured=build_steps_structured,
+        guidance_delivered=guidance_delivered,
+        guidance_evidence_clean=guidance_evidence_clean,
+        guidance_fully_actionable=guidance_fully_actionable,
+        all_document_details_lost=(
+            telemetry.all_document_details_lost
+            if telemetry.all_document_details_lost is not None
+            else False
+            if guidance_delivered
+            else None
+        ),
+        critical_step_count=output_counts["critical_step_count"],
+        blocking_gap_count=output_counts["blocking_gap_count"],
+        final_detail_total_count=output_counts["final_detail_total_count"],
+        final_document_detail_count=output_counts["final_document_detail_count"],
+        final_unverified_detail_count=final_unverified_detail_count,
+        generator_downgraded_unverified_count=(
+            telemetry.generator_downgraded_unverified_count if guidance_delivered else None
+        ),
+        validator_dropped_unverified_count=(
+            telemetry.validator_dropped_unverified_count if guidance_delivered else None
+        ),
+        final_surviving_unverified_count=final_unverified_detail_count,
+        guidance_effective_config=_guidance_effective_config(guidance_call),
+        guidance_prompt_template_version=_guidance_prompt_template_version(),
+        guidance_prompt_template_sha256=_guidance_prompt_template_sha256(),
         dto_invalid_errors=list(telemetry.dto_invalid_errors),
         dependency_audit_status=dependency_audit.dependency_audit_status,
         dependency_audit_unavailable_stage=dependency_audit.unavailable_stage,
@@ -1164,6 +1453,229 @@ def build_summary_row(
     )
 
 
+def write_guidance_artifacts(
+    output_dir: Path,
+    *,
+    paper: SmokePaper,
+    round_index: int,
+    row: SmokeSummaryRow,
+    snapshots: list[GuidanceArtifactSnapshot],
+) -> list[Path]:
+    """Write eval-only raw and readable build guidance artifacts."""
+
+    artifact_dir = output_dir / "guidance_artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for snapshot in snapshots:
+        stem = (
+            f"{paper.slug}__round_{round_index:02d}"
+            f"__arm_{_safe_artifact_part(snapshot.arm_label)}"
+        )
+        payload = _guidance_artifact_payload(row, snapshot)
+        json_path = artifact_dir / f"{stem}.guidance.json"
+        text_path = artifact_dir / f"{stem}.guidance.txt"
+        json_path.write_text(
+            json.dumps(_jsonable(payload), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        text_path.write_text(
+            render_guidance_artifact_text(row, snapshot),
+            encoding="utf-8",
+        )
+        written.extend([json_path, text_path])
+    return written
+
+
+def _guidance_artifact_payload(
+    row: SmokeSummaryRow,
+    snapshot: GuidanceArtifactSnapshot,
+) -> dict[str, object]:
+    plan = snapshot.plan
+    return {
+        "paper_id": row.paper_id,
+        "round_index": row.round_index,
+        "arm": snapshot.arm_label,
+        "build_steps": plan.build_steps if plan is not None else None,
+        "build_guidance": plan.build_guidance if plan is not None else None,
+        "guidance_status": snapshot.guidance_status,
+        "guidance_delivered": snapshot.guidance_delivered,
+        "guidance_evidence_clean": snapshot.guidance_evidence_clean,
+        "guidance_fully_actionable": snapshot.guidance_fully_actionable,
+        "generator_downgraded_unverified_count": (snapshot.generator_downgraded_unverified_count),
+        "validator_dropped_unverified_count": snapshot.validator_dropped_unverified_count,
+        "final_surviving_unverified_count": snapshot.final_surviving_unverified_count,
+        "blocking_gap_count": snapshot.blocking_gap_count,
+    }
+
+
+def render_guidance_artifact_text(
+    row: SmokeSummaryRow,
+    snapshot: GuidanceArtifactSnapshot,
+) -> str:
+    """Render one build guidance artifact for direct human reading."""
+
+    plan = snapshot.plan
+    lines = [
+        f"paper_id: {row.paper_id or 'unknown'}",
+        f"round_index: {row.round_index}",
+        f"arm: {snapshot.arm_label}",
+        f"guidance_status: {snapshot.guidance_status}",
+        (
+            "judgement: "
+            f"delivered={snapshot.guidance_delivered}, "
+            f"evidence_clean={snapshot.guidance_evidence_clean}, "
+            f"fully_actionable={snapshot.guidance_fully_actionable}"
+        ),
+        (
+            "counts: "
+            "generator_downgraded_unverified_count="
+            f"{_display_count(snapshot.generator_downgraded_unverified_count)}, "
+            "validator_dropped_unverified_count="
+            f"{_display_count(snapshot.validator_dropped_unverified_count)}, "
+            "final_surviving_unverified_count="
+            f"{_display_count(snapshot.final_surviving_unverified_count)}, "
+            f"blocking_gap_count={_display_count(snapshot.blocking_gap_count)}"
+        ),
+        "",
+    ]
+    if plan is None or not plan.build_steps:
+        lines.append("（无 build_steps）")
+        return "\n".join(lines) + "\n"
+    if plan.build_guidance is None:
+        lines.append("（无 build_guidance）")
+
+    details_by_step: dict[str, list[Any]] = {}
+    gaps_by_step: dict[str, list[Any]] = {}
+    if plan.build_guidance is not None:
+        for detail in plan.build_guidance.details:
+            details_by_step.setdefault(detail.step_id, []).append(detail)
+        for gap in plan.build_guidance.gaps:
+            if gap.step_id is not None:
+                gaps_by_step.setdefault(gap.step_id, []).append(gap)
+
+    for index, step in enumerate(plan.build_steps, start=1):
+        lines.append(f"[步骤 {index}] {step.title}")
+        lines.append(f"  说明:{step.display_text or step.intent}")
+        lines.append(f"  参数:{_render_step_parameters(step)}")
+        for detail in details_by_step.get(step.step_id, []):
+            lines.append(f"  说明:{detail.display_text}")
+            lines.append(f"  出处:{_render_detail_source(detail)}")
+        for gap in gaps_by_step.get(step.step_id, []):
+            prefix = "[阻塞] " if gap.severity == "blocking" else ""
+            lines.append(f"  缺口:{prefix}{gap.display_text}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _guidance_snapshot_for_plan(
+    arm_label: str,
+    plan: ModelGenerationPlan | None,
+    *,
+    telemetry: BuildStepsTelemetry | None = None,
+    row: SmokeSummaryRow | None = None,
+) -> GuidanceArtifactSnapshot:
+    output_counts = _guidance_output_counts(plan)
+    guidance_status = plan.guidance_status if plan is not None else "not_generated"
+    guidance_delivered = guidance_status == "generated" and output_counts["has_guidance"] is True
+    final_unverified = output_counts["final_unverified_detail_count"]
+    guidance_evidence_clean = guidance_delivered and final_unverified == 0
+    guidance_fully_actionable = guidance_evidence_clean and output_counts["blocking_gap_count"] == 0
+    return GuidanceArtifactSnapshot(
+        arm_label=arm_label,
+        plan=plan,
+        guidance_status=guidance_status,
+        guidance_delivered=guidance_delivered,
+        guidance_evidence_clean=guidance_evidence_clean,
+        guidance_fully_actionable=guidance_fully_actionable,
+        generator_downgraded_unverified_count=_artifact_count(
+            "generator_downgraded_unverified_count",
+            guidance_delivered=guidance_delivered,
+            telemetry=telemetry,
+            row=row,
+        ),
+        validator_dropped_unverified_count=_artifact_count(
+            "validator_dropped_unverified_count",
+            guidance_delivered=guidance_delivered,
+            telemetry=telemetry,
+            row=row,
+        ),
+        final_surviving_unverified_count=final_unverified,
+        blocking_gap_count=output_counts["blocking_gap_count"],
+    )
+
+
+def _artifact_count(
+    field_name: str,
+    *,
+    guidance_delivered: bool,
+    telemetry: BuildStepsTelemetry | None,
+    row: SmokeSummaryRow | None,
+) -> int | None:
+    if not guidance_delivered:
+        return None
+    if row is not None:
+        value = getattr(row, field_name)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+    if telemetry is not None:
+        value = getattr(telemetry, field_name)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+    return None
+
+
+def _render_step_parameters(step: ModelBuildStep) -> str:
+    if not step.parameter_refs:
+        return "无"
+    return ", ".join(
+        f"{ref.paper_param_name} -> {ref.model_param_name}" for ref in step.parameter_refs
+    )
+
+
+def _render_detail_source(detail: Any) -> str:
+    if (
+        detail.basis == "user_confirmation_required"
+        and detail.confirmation_reason_code == "document_evidence_unverified"
+    ):
+        return "★ 未核实,请用户自行确认"
+    if detail.basis == "engineering_convention":
+        return f"工程惯例:{detail.convention_code or 'unspecified'}"
+    if not detail.evidence:
+        return "论文依据缺失"
+    return "; ".join(_render_evidence_locator(entry) for entry in detail.evidence)
+
+
+def _render_evidence_locator(entry: Any) -> str:
+    if entry.paper_section_id:
+        return f"论文 {entry.document_id or 'unknown'} 第 {entry.paper_section_id} 处"
+    if entry.equation_id:
+        return f"论文 {entry.document_id or 'unknown'} 公式 {entry.equation_id}"
+    if entry.figure_id:
+        return f"论文 {entry.document_id or 'unknown'} 图 {entry.figure_id}"
+    return f"论文 {entry.document_id or 'unknown'}"
+
+
+def _display_count(value: int | None) -> str:
+    return "null" if value is None else str(value)
+
+
+def _safe_artifact_part(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return safe or "main"
+
+
+def _jsonable(value: object) -> object:
+    if is_dataclass(value) and not isinstance(value, type):
+        return _jsonable(asdict(value))
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
 def classify_build_steps_result(
     plan_record: PaperPlanRecord | None,
     telemetry: BuildStepsTelemetry,
@@ -1174,6 +1686,137 @@ def classify_build_steps_result(
         telemetry.fallback_reason_code,
         telemetry.fallback_exception_type,
     )
+
+
+def _guidance_output_counts(plan: ModelGenerationPlan | None) -> dict[str, Any]:
+    build_steps = plan.build_steps if plan is not None else None
+    critical_step_count = len(_critical_steps(build_steps)) if build_steps is not None else None
+    guidance = plan.build_guidance if plan is not None else None
+    if guidance is None:
+        return {
+            "has_guidance": False,
+            "critical_step_count": critical_step_count,
+            "blocking_gap_count": None,
+            "final_detail_total_count": None,
+            "final_document_detail_count": None,
+            "final_unverified_detail_count": None,
+        }
+    final_unverified = _final_unverified_detail_count(plan)
+    return {
+        "has_guidance": True,
+        "critical_step_count": critical_step_count,
+        "blocking_gap_count": len(guidance.assessment.blocking_gap_ids),
+        "final_detail_total_count": len(guidance.details),
+        "final_document_detail_count": sum(
+            1 for detail in guidance.details if detail.basis == "document_extracted"
+        ),
+        "final_unverified_detail_count": final_unverified,
+    }
+
+
+def _final_unverified_detail_count(plan: ModelGenerationPlan) -> int:
+    if plan.build_guidance is None:
+        return 0
+    return sum(
+        1
+        for detail in plan.build_guidance.details
+        if detail.basis == "user_confirmation_required"
+        and detail.confirmation_reason_code == "document_evidence_unverified"
+    )
+
+
+def _guidance_status_reason_valid(status: str, reason: str | None) -> bool:
+    try:
+        validate_guidance_status_reason(status, reason)
+    except ValueError:
+        return False
+    return True
+
+
+def _terminal_observed_stage(
+    *,
+    plan_ready: bool,
+    build_steps_structured: bool,
+    guidance_failure_reason: str | None,
+) -> str | None:
+    if guidance_failure_reason is not None:
+        return "guidance"
+    if not plan_ready:
+        return "plan"
+    if not build_steps_structured:
+        return "build_steps"
+    return None
+
+
+def _guidance_effective_config(call: LLMCallRecord | None) -> dict[str, object]:
+    return {
+        "model": call.request_model if call else None,
+        "max_tokens": call.max_tokens if call else None,
+        "timeout": call.timeout if call else None,
+        "json_mode": call.json_mode if call else None,
+        "response_format": call.response_format if call else None,
+        "temperature": call.temperature if call else None,
+        "top_p": call.top_p if call else None,
+        "seed": call.seed if call else None,
+        "guidance_full_attempts": GUIDANCE_FULL_ATTEMPTS,
+        "guidance_hard_call_cap": GUIDANCE_HARD_CALL_CAP,
+        "guidance_wall_clock_seconds": GUIDANCE_WALL_CLOCK_SECONDS,
+        "guidance_prompt_template_version": _guidance_prompt_template_version(),
+        "guidance_prompt_template_sha256": _guidance_prompt_template_sha256(),
+        "summary_schema_version": SUMMARY_SCHEMA_VERSION,
+        "git_revision": _git_revision(),
+    }
+
+
+def _guidance_prompt_template_version() -> str:
+    return load_prompt_template("paper_build_guidance.yaml").version
+
+
+def _guidance_prompt_template_sha256() -> str:
+    path = Path(__file__).resolve().parents[1] / "core" / "prompts" / "paper_build_guidance.yaml"
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _git_revision() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "unavailable"
+    return result.stdout.strip() or "unavailable"
+
+
+def validate_guidance_batch_observability(
+    rows: list[SmokeSummaryRow],
+    *,
+    planned_round_count: int | None = None,
+) -> None:
+    """Validate pre-registered TASK-535 guidance batch gates."""
+
+    if planned_round_count is not None and len(rows) != planned_round_count:
+        raise GuidanceBatchInvalidError("terminal_round_record_count_mismatch")
+    for row in rows:
+        if not row.guidance_status_reason_valid:
+            raise GuidanceBatchInvalidError("invalid_guidance_status_reason")
+        if row.guidance_delivered and row.all_document_details_lost:
+            raise GuidanceBatchInvalidError("delivered_with_all_document_details_lost")
+        if (
+            row.guidance_failure_reason == "retry_cap_exhausted"
+            and row.guidance_provider_call_count >= GUIDANCE_HARD_CALL_CAP
+        ):
+            raise GuidanceBatchInvalidError("retry_cap_exhausted_reached_hard_cap")
+        if not row.guidance_delivered and row.first_blocking_stage is None:
+            raise GuidanceBatchInvalidError("missing_first_blocking_stage")
+        if row.failure_owner_bucket == "unattributed":
+            raise GuidanceBatchInvalidError("unattributed_failures")
+        if row.guidance_attempt_record_count != row.guidance_provider_call_count:
+            raise GuidanceBatchInvalidError("guidance_attempt_provider_count_mismatch")
 
 
 def _classify_build_steps_failure(
@@ -1265,6 +1908,9 @@ def write_summary_artifacts(output_dir: Path, rows: list[SmokeSummaryRow]) -> No
                 "run_llm_system_fingerprint_counts",
                 "paired_arm_order",
                 "paired_build_steps_arms",
+                "guidance_validator_machine_codes",
+                "guidance_attempts",
+                "guidance_effective_config",
                 "violations_by_code",
                 "violation_edges",
                 "same_number_probes",
@@ -1647,11 +2293,14 @@ def _error_code(
 ) -> str | None:
     if job_record is not None and job_record.last_error_code:
         return job_record.last_error_code
+    payload_error_code = _payload_str(response_payload, "error_code")
+    if payload_error_code:
+        return payload_error_code
     payload_error = _payload_str(response_payload, "error")
     if payload_error:
         return payload_error
     if unexpected_error is not None:
-        return type(unexpected_error).__name__
+        return guidance_exception_code(unexpected_error)
     return None
 
 
@@ -1695,7 +2344,9 @@ def _write_actual_artifact(
         "failed_stage": job_record.failed_stage if job_record is not None else None,
         "error_code": job_record.last_error_code if job_record is not None else None,
         "spec_validation_errors": spec_validation_errors,
-        "unexpected_error_type": type(unexpected_error).__name__ if unexpected_error else None,
+        "unexpected_error_code": guidance_exception_code(unexpected_error)
+        if unexpected_error
+        else None,
     }
     path = actual_dir / f"{paper.slug}__round_{round_index:02d}.actual.json"
     path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

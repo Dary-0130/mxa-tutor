@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -34,6 +35,7 @@ from features.paper.build_guidance_lifecycle import (
     guidance_view_state,
     normalize_guidance_lifecycle,
 )
+from features.paper.build_guidance_observability import termination_guard_for_retry_reason
 from features.paper.build_guidance_semantic_validator import (
     validate_build_guidance_semantics,
 )
@@ -67,6 +69,52 @@ class QueueProvider(TextProvider):
 
     def capability(self) -> ModelCapability:
         return ModelCapability(model_name="fake")
+
+
+class MetadataProvider(TextProvider):
+    def __init__(self, responses: list[LLMResponse | Exception]) -> None:
+        self.responses = list(responses)
+        self.calls: list[dict[str, object]] = []
+
+    def chat(
+        self,
+        messages: list[LLMMessage],
+        json_mode: bool = False,
+        timeout: float = 30.0,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
+        self.calls.append(
+            {
+                "messages": messages,
+                "json_mode": json_mode,
+                "timeout": timeout,
+                "max_tokens": max_tokens,
+            }
+        )
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    def capability(self) -> ModelCapability:
+        return ModelCapability(model_name="fake")
+
+
+def _response(
+    text: str,
+    *,
+    finish_reason: str | None,
+    prompt_tokens: int = 10,
+    completion_tokens: int = 20,
+) -> LLMResponse:
+    return LLMResponse(
+        text=text,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        model="fake",
+        latency_ms=1,
+        finish_reason=finish_reason,
+    )
 
 
 @pytest.mark.asyncio
@@ -135,7 +183,8 @@ async def test_unsupported_engineering_decision_downgrades_without_reusing_claim
         ]
     )
 
-    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan())
+    generator = BuildGuidanceGenerator(provider)
+    updated = await generator.generate(_spec(), _plan())
 
     assert updated.guidance_status == "generated"
     assert updated.build_guidance is not None
@@ -143,6 +192,9 @@ async def test_unsupported_engineering_decision_downgrades_without_reusing_claim
     assert confirmation.basis == "user_confirmation_required"
     assert confirmation.confirmation_reason_code == "document_evidence_unverified"
     assert "anti-windup" not in confirmation.display_text.casefold()
+    assert (
+        "grounding_whitelist_no_match" in generator.last_telemetry.attempts[0].resolver_event_codes
+    )
 
 
 @pytest.mark.asyncio
@@ -169,13 +221,13 @@ async def test_raw_document_claim_with_unresolved_handle_never_becomes_no_basis(
         ]
     )
 
-    updated = await BuildGuidanceGenerator(provider).generate(
-        _spec(), _plan_without_linked_evidence()
-    )
+    generator = BuildGuidanceGenerator(provider)
+    updated = await generator.generate(_spec(), _plan_without_linked_evidence())
 
     assert updated.guidance_status == "generation_failed"
     assert guidance_view_state(updated) == "failed_retryable"
     assert updated.build_guidance is None
+    assert "handle_no_match" in generator.last_telemetry.attempts[0].resolver_event_codes
 
 
 @pytest.mark.asyncio
@@ -202,11 +254,15 @@ async def test_raw_document_claim_with_grounding_failure_never_becomes_no_basis(
         ]
     )
 
-    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan())
+    generator = BuildGuidanceGenerator(provider)
+    updated = await generator.generate(_spec(), _plan())
 
     assert updated.guidance_status == "generation_failed"
     assert guidance_view_state(updated) == "failed_retryable"
     assert updated.build_guidance is None
+    assert (
+        "grounding_whitelist_no_match" in generator.last_telemetry.attempts[0].resolver_event_codes
+    )
 
 
 @pytest.mark.asyncio
@@ -220,6 +276,102 @@ async def test_no_basis_requires_zero_raw_document_claims_and_unlinked_evidence_
     assert updated.guidance_status == "no_document_basis"
     assert guidance_view_state(updated) == "no_basis"
     assert updated.build_guidance is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("finish_reason", "expected_reason"),
+    [
+        ("length", "llm_unparseable_finish_length"),
+        ("stop", "llm_unparseable_finish_stop"),
+        (None, "llm_unparseable_finish_unknown"),
+    ],
+)
+async def test_llm_unparseable_reason_preserves_finish_reason_machine_code(
+    finish_reason: str | None,
+    expected_reason: str,
+) -> None:
+    provider = MetadataProvider(
+        [
+            _response("not json", finish_reason=finish_reason),
+            _response("still not json", finish_reason=finish_reason),
+        ]
+    )
+    generator = BuildGuidanceGenerator(provider)
+
+    updated = await generator.generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generation_failed"
+    assert generator.last_telemetry.terminal_reason == expected_reason
+    assert {attempt.finish_reason for attempt in generator.last_telemetry.attempts} == {
+        finish_reason
+    }
+
+
+@pytest.mark.asyncio
+async def test_provider_telemetry_anomaly_marks_length_far_from_token_cap() -> None:
+    provider = MetadataProvider(
+        [
+            _response("not json", finish_reason="length", completion_tokens=5),
+            _response("still not json", finish_reason="length", completion_tokens=5),
+        ]
+    )
+    generator = BuildGuidanceGenerator(provider, max_tokens=100)
+
+    updated = await generator.generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generation_failed"
+    assert generator.last_telemetry.terminal_reason == "llm_unparseable_finish_length"
+    assert generator.last_telemetry.attempts[0].provider_telemetry_anomaly is True
+    assert generator.last_telemetry.attempts[0].completion_ratio == 0.05
+
+
+@pytest.mark.asyncio
+async def test_attempt_telemetry_keeps_first_failure_when_retry_succeeds() -> None:
+    provider = MetadataProvider(
+        [
+            _response("not json", finish_reason="stop"),
+            _response(json.dumps(_valid_guidance_payload()), finish_reason="stop"),
+        ]
+    )
+    generator = BuildGuidanceGenerator(provider)
+
+    updated = await generator.generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generated"
+    assert [attempt.parse_outcome for attempt in generator.last_telemetry.attempts] == [
+        "json_error",
+        "parsed",
+    ]
+    assert [attempt.attempt_index for attempt in generator.last_telemetry.attempts] == [1, 2]
+    assert generator.last_telemetry.terminal_reason is None
+
+
+@pytest.mark.asyncio
+async def test_production_guidance_generator_does_not_write_guidance_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_write_text(self: Path, *args: object, **kwargs: object) -> int:
+        _ = self, args, kwargs
+        raise AssertionError("production guidance path wrote model body")
+
+    monkeypatch.setattr(Path, "write_text", fail_write_text)
+    provider = MetadataProvider(
+        [_response(json.dumps(_valid_guidance_payload()), finish_reason="stop")]
+    )
+
+    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generated"
+    assert updated.build_guidance is not None
+
+
+def test_termination_guard_distinguishes_wall_clock_and_hard_cap() -> None:
+    assert (
+        termination_guard_for_retry_reason("guidance_wall_clock_cap_exceeded")
+        == "guidance_wall_clock"
+    )
+    assert termination_guard_for_retry_reason("guidance_call_cap_exceeded") == "hard_call_cap"
 
 
 @pytest.mark.asyncio
@@ -492,6 +644,25 @@ def test_guidance_lifecycle_view_states_and_terminal_clear() -> None:
 
 def _generated_plan() -> ModelGenerationPlan:
     return replace(_plan(), build_guidance=_build_guidance(), guidance_status="generated")
+
+
+def _valid_guidance_payload() -> dict[str, object]:
+    return {
+        "details": [
+            {
+                "step_id": "STEP-001",
+                "detail_kind": "parameter_value",
+                "basis": "document_extracted",
+                "claim_text": "Use the 5 kW load from the paper.",
+                "supporting_evidence_refs": ["GEV-001"],
+                "convention_code": None,
+                "target": "PL::Load.P",
+                "confirmation_reason_code": None,
+                "direction_hint": None,
+            }
+        ],
+        "gaps": [],
+    }
 
 
 def _replace_first_detail(plan: ModelGenerationPlan, **changes: Any) -> ModelGenerationPlan:

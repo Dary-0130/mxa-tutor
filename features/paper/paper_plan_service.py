@@ -40,6 +40,7 @@ from features.paper._prompt_builder import (
 )
 from features.paper._prompt_loader import load_prompt_template
 from features.paper.build_guidance_generator import BuildGuidanceGenerator
+from features.paper.build_guidance_observability import guidance_exception_code
 from features.paper.build_steps_dependency_audit import (
     DependencyAudit,
     audit_step_dependencies_from_payload,
@@ -296,9 +297,9 @@ class PaperPlanService:
             return await self._build_guidance_generator.generate(spec, plan)
         except Exception as exc:
             logger.warning(
-                "paper_build_guidance_unhandled_fail_closed reason_code=%s exc_type=%s",
+                "paper_build_guidance_unhandled_fail_closed reason_code=%s exception_code=%s",
                 "guidance_generator_exception",
-                type(exc).__name__,
+                guidance_exception_code(exc),
             )
             return replace(plan, build_guidance=None, guidance_status="generation_failed")
 

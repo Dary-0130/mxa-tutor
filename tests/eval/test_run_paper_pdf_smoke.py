@@ -10,7 +10,17 @@ import pytest
 import eval.run_paper_pdf_smoke as subject
 from app.config import AppSettings
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
-from core.domain.paper_plan import BlockRecommendation, ParameterMapping
+from core.domain.paper_plan import (
+    BlockRecommendation,
+    BuildGuidance,
+    GuidanceAssessment,
+    GuidanceDetail,
+    GuidanceGap,
+    ModelBuildStep,
+    ParameterMapping,
+    ParameterMappingRef,
+    StepBlockRef,
+)
 from core.domain.paper_spec import PaperDocument, PaperSpec
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability
 
@@ -97,6 +107,11 @@ def test_write_summary_artifacts_uses_fixed_schema(tmp_path: Path) -> None:
     assert json.loads(csv_row["llm_system_fingerprint_counts"]) == row.llm_system_fingerprint_counts
     assert json.loads(csv_row["paired_arm_order"]) == row.paired_arm_order
     assert json.loads(csv_row["paired_build_steps_arms"]) == row.paired_build_steps_arms
+    assert json.loads(csv_row["guidance_validator_machine_codes"]) == (
+        row.guidance_validator_machine_codes
+    )
+    assert json.loads(csv_row["guidance_attempts"]) == row.guidance_attempts
+    assert json.loads(csv_row["guidance_effective_config"]) == row.guidance_effective_config
     assert json.loads(csv_row["violations_by_code"]) == row.violations_by_code
     assert json.loads(csv_row["violation_edges"]) == row.violation_edges
     assert json.loads(csv_row["same_number_probes"]) == row.same_number_probes
@@ -113,10 +128,17 @@ def test_llm_model_summary_marks_missing_version_fingerprint() -> None:
         subject.LLMCallRecord(
             role="paper_spec_extractor",
             arm_label=None,
+            request_model="deepseek-v4-flash",
+            json_mode=True,
+            timeout=120.0,
             finish_reason="stop",
             prompt_tokens=1,
             completion_tokens=2,
             max_tokens=3,
+            response_format="json_object",
+            temperature=None,
+            top_p=None,
+            seed=None,
             response_model="deepseek-v4-flash",
             system_fingerprint=None,
         )
@@ -173,6 +195,43 @@ async def test_paired_build_steps_runs_two_arms_on_same_upstream() -> None:
     assert arms[1]["dependency_audit"]["dependency_audit_status"] == "clean"
     assert arms[1]["downstream_used"] is True
     assert arms[1]["response_model"] == "deepseek-v4-flash"
+
+
+@pytest.mark.asyncio
+async def test_guidance_provider_boundary_uses_one_fake_and_matches_production_runway() -> None:
+    fake_provider = _SequenceProvider([_guidance_payload(), _guidance_payload()])
+    provider = subject.RecordingTextProvider(fake_provider)
+    spec = _paper_spec()
+    plan = _plan_with_build_steps()
+    production_service = subject.PaperPlanService(provider)
+    evaluation_service = subject.RecordingPaperPlanService(
+        provider,
+        telemetry=subject.BuildStepsTelemetry(),
+    )
+
+    await production_service.generate_build_guidance_for_plan(spec, plan)
+    await evaluation_service.generate_build_guidance_for_plan(spec, plan)
+
+    assert len(provider.calls) == 2
+    production_call, evaluation_call = provider.calls
+    assert (
+        production_call.max_tokens
+        == evaluation_call.max_tokens
+        == (subject.DEFAULT_PAPER_PLAN_MAX_TOKENS)
+    )
+    assert (
+        production_call.timeout
+        == evaluation_call.timeout
+        == (subject.DEFAULT_PAPER_PLAN_TIMEOUT_SECONDS)
+    )
+    assert production_call.request_model == evaluation_call.request_model
+    assert production_call.json_mode is evaluation_call.json_mode is True
+    assert production_call.response_format == evaluation_call.response_format == "json_object"
+    assert production_call.temperature is evaluation_call.temperature is None
+    assert production_call.top_p is evaluation_call.top_p is None
+    assert production_call.seed is evaluation_call.seed is None
+    assert evaluation_call.role == subject.GUIDANCE_ROLE_NAME
+    assert fake_provider.messages[0][1].content == fake_provider.messages[1][1].content
 
 
 @pytest.mark.asyncio
@@ -286,6 +345,167 @@ async def test_run_smoke_wires_temp_db_upload_dir_and_mock_runner(tmp_path: Path
     assert (output_dir / "_runtime" / "paper_pdf_smoke.sqlite").is_file()
 
 
+def test_summary_keeps_guidance_denominators_null_when_guidance_is_absent(tmp_path: Path) -> None:
+    plan = replace(
+        _plan_with_build_steps(), build_guidance=None, guidance_status="generation_failed"
+    )
+    row = subject.build_summary_row(
+        paper=subject.SmokePaper(
+            path=tmp_path / "arxiv-2605.27553-test.pdf",
+            arxiv_id="2605.27553",
+            hybrid_candidate=False,
+        ),
+        round_index=1,
+        runtime=_runtime(tmp_path),
+        telemetry=subject.BuildStepsTelemetry(guidance_failure_reason="build_steps_unavailable"),
+        build_steps_call=None,
+        llm_calls=[],
+        job_record=None,
+        plan_record=subject.PaperPlanRecord(
+            paper_id="paper",
+            spec=_paper_spec(),
+            plan=plan,
+            missing_prompts=[],
+            missing_bindings=[],
+        ),
+        response_payload={},
+        unexpected_error=None,
+    )
+
+    assert row.final_detail_total_count is None
+    assert row.final_document_detail_count is None
+    assert row.final_unverified_detail_count is None
+    assert row.generator_downgraded_unverified_count is None
+    assert row.validator_dropped_unverified_count is None
+    assert row.final_surviving_unverified_count is None
+
+
+def test_summary_reports_three_unverified_layers_separately(tmp_path: Path) -> None:
+    guidance = _guidance_with_surviving_unverified()
+    plan = replace(_plan_with_build_steps(), build_guidance=guidance, guidance_status="generated")
+    telemetry = subject.BuildStepsTelemetry(
+        guidance_attempts=[],
+        generator_downgraded_unverified_count=2,
+        validator_dropped_unverified_count=1,
+    )
+
+    row = subject.build_summary_row(
+        paper=subject.SmokePaper(
+            path=tmp_path / "arxiv-2605.27553-test.pdf",
+            arxiv_id="2605.27553",
+            hybrid_candidate=False,
+        ),
+        round_index=1,
+        runtime=_runtime(tmp_path),
+        telemetry=telemetry,
+        build_steps_call=None,
+        llm_calls=[],
+        job_record=None,
+        plan_record=subject.PaperPlanRecord(
+            paper_id="paper",
+            spec=_paper_spec(),
+            plan=plan,
+            missing_prompts=[],
+            missing_bindings=[],
+        ),
+        response_payload={},
+        unexpected_error=None,
+    )
+
+    assert row.generator_downgraded_unverified_count == 2
+    assert row.validator_dropped_unverified_count == 1
+    assert row.final_surviving_unverified_count == 1
+    assert row.guidance_evidence_clean is False
+
+
+def test_write_guidance_artifacts_outputs_raw_json_and_readable_text(tmp_path: Path) -> None:
+    guidance = _guidance_with_surviving_unverified()
+    plan = replace(_plan_with_build_steps(), build_guidance=guidance, guidance_status="generated")
+    telemetry = subject.BuildStepsTelemetry(
+        generator_downgraded_unverified_count=2,
+        validator_dropped_unverified_count=1,
+    )
+    paper = subject.SmokePaper(
+        path=tmp_path / "arxiv-2605.27553-test.pdf",
+        arxiv_id="2605.27553",
+        hybrid_candidate=False,
+    )
+    row = subject.build_summary_row(
+        paper=paper,
+        round_index=1,
+        runtime=_runtime(tmp_path),
+        telemetry=telemetry,
+        build_steps_call=None,
+        llm_calls=[],
+        job_record=None,
+        plan_record=subject.PaperPlanRecord(
+            paper_id="paper",
+            spec=_paper_spec(),
+            plan=plan,
+            missing_prompts=[],
+            missing_bindings=[],
+        ),
+        response_payload={"paper_id": "paper", "job_id": "job"},
+        unexpected_error=None,
+    )
+    snapshot = subject._guidance_snapshot_for_plan("main", plan, row=row)
+
+    paths = subject.write_guidance_artifacts(
+        tmp_path,
+        paper=paper,
+        round_index=1,
+        row=row,
+        snapshots=[snapshot],
+    )
+
+    json_path = next(path for path in paths if path.suffix == ".json")
+    text_path = next(path for path in paths if path.suffix == ".txt")
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    text = text_path.read_text(encoding="utf-8")
+    marker = "★ 未核实,请用户自行确认"
+    assert payload["paper_id"] == "paper"
+    assert payload["round_index"] == 1
+    assert payload["arm"] == "main"
+    assert payload["build_steps"][0]["step_id"] == "STEP-001"
+    assert (
+        payload["build_guidance"]["details"][1]["confirmation_reason_code"]
+        == "document_evidence_unverified"
+    )
+    assert payload["final_surviving_unverified_count"] == row.final_surviving_unverified_count
+    assert "[步骤 1] Place gain" in text
+    assert "出处:论文 DOC-001 第 S1 处" in text
+    assert f"出处:{marker}" in text
+    assert "缺口:[阻塞] STEP-001 lacks verified configuration evidence." in text
+    assert text.count(marker) == row.final_surviving_unverified_count
+
+
+def test_guidance_batch_gates_reject_invariants(tmp_path: Path) -> None:
+    delivered_all_lost = replace(
+        _summary_row(tmp_path),
+        guidance_delivered=True,
+        all_document_details_lost=True,
+        first_blocking_stage=None,
+        failure_owner_bucket=None,
+    )
+    invalid_combo = replace(
+        _summary_row(tmp_path),
+        guidance_status="generation_failed",
+        guidance_failure_reason=None,
+        guidance_status_reason_valid=False,
+    )
+    retry_cap_reached = replace(
+        _summary_row(tmp_path),
+        guidance_status="generation_failed",
+        guidance_failure_reason="retry_cap_exhausted",
+        guidance_status_reason_valid=True,
+        guidance_provider_call_count=subject.GUIDANCE_HARD_CALL_CAP,
+    )
+
+    for row in (delivered_all_lost, invalid_combo, retry_cap_reached):
+        with pytest.raises(subject.GuidanceBatchInvalidError):
+            subject.validate_guidance_batch_observability([row])
+
+
 def test_ci_guard_requires_explicit_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CI", "true")
 
@@ -308,6 +528,8 @@ def _summary_row(
     )
     return subject.SmokeSummaryRow(
         run_id="run",
+        summary_schema_version=subject.SUMMARY_SCHEMA_VERSION,
+        git_revision="abc123",
         paper_file=paper.path.name,
         arxiv_id=paper.arxiv_id,
         round_index=round_index,
@@ -344,7 +566,53 @@ def _summary_row(
         paired_arm_order=[],
         paired_build_steps_arms=[],
         guidance_reached=False,
-        guidance_status="未触达",
+        guidance_invoked=False,
+        guidance_provider_call_count=0,
+        guidance_status="not_generated",
+        guidance_failure_reason=None,
+        guidance_retry_count=None,
+        guidance_generator_exception=None,
+        guidance_validator_machine_codes=[],
+        guidance_attempt_record_count=0,
+        guidance_attempts=[],
+        guidance_terminal_termination_guard=None,
+        guidance_status_reason_valid=True,
+        first_blocking_stage="plan",
+        terminal_observed_stage="plan",
+        failure_owner_bucket="plan_owned",
+        plan_ready=False,
+        build_steps_structured=False,
+        guidance_delivered=False,
+        guidance_evidence_clean=False,
+        guidance_fully_actionable=False,
+        all_document_details_lost=None,
+        critical_step_count=None,
+        blocking_gap_count=None,
+        final_detail_total_count=None,
+        final_document_detail_count=None,
+        final_unverified_detail_count=None,
+        generator_downgraded_unverified_count=None,
+        validator_dropped_unverified_count=None,
+        final_surviving_unverified_count=None,
+        guidance_effective_config={
+            "model": None,
+            "max_tokens": None,
+            "timeout": None,
+            "json_mode": None,
+            "response_format": None,
+            "temperature": None,
+            "top_p": None,
+            "seed": None,
+            "guidance_full_attempts": subject.GUIDANCE_FULL_ATTEMPTS,
+            "guidance_hard_call_cap": subject.GUIDANCE_HARD_CALL_CAP,
+            "guidance_wall_clock_seconds": subject.GUIDANCE_WALL_CLOCK_SECONDS,
+            "guidance_prompt_template_version": "v-test",
+            "guidance_prompt_template_sha256": "sha-test",
+            "summary_schema_version": subject.SUMMARY_SCHEMA_VERSION,
+            "git_revision": "abc123",
+        },
+        guidance_prompt_template_version="v-test",
+        guidance_prompt_template_sha256="sha-test",
         dto_invalid_errors=[{"loc": "build_steps.0.block_refs.0", "type": "missing"}],
         dependency_audit_status="violations",
         dependency_audit_unavailable_stage=None,
@@ -394,6 +662,16 @@ def _summary_row(
     )
 
 
+def _runtime(tmp_path: Path) -> subject.SmokeRuntime:
+    return subject.SmokeRuntime(
+        run_id="run",
+        output_dir=tmp_path,
+        db_path=tmp_path / "db.sqlite",
+        upload_dir=tmp_path / "uploads",
+        actual_dir=tmp_path / "actual",
+    )
+
+
 class _SequenceProvider:
     def __init__(self, payloads: list[dict[str, object]]) -> None:
         self.payloads = list(payloads)
@@ -431,6 +709,110 @@ def _build_steps_payload(*, depends_on_third_step: list[str]) -> dict[str, objec
             _build_step_payload("STEP-003", "B3", depends_on_third_step),
         ]
     }
+
+
+def _guidance_payload() -> dict[str, object]:
+    return {
+        "details": [
+            {
+                "step_id": "STEP-001",
+                "detail_kind": "block_selection",
+                "basis": "document_extracted",
+                "claim_text": "Use the gain block from the paper.",
+                "supporting_evidence_refs": ["GEV-001"],
+                "convention_code": None,
+                "target": "B1",
+                "confirmation_reason_code": None,
+                "direction_hint": None,
+            }
+        ],
+        "gaps": [],
+    }
+
+
+def _plan_with_build_steps() -> subject.ModelGenerationPlan:
+    evidence = _document_evidence()
+    return subject.ModelGenerationPlan(
+        plan_id="PLAN-paper",
+        paper_spec_id="paper",
+        library_choice="simulink",
+        block_recommendations=[_block_recommendation()],
+        parameter_mapping=[_parameter_mapping()],
+        subsystem_breakdown=["Build gain"],
+        m_script_skeleton=None,
+        evidence=[evidence],
+        build_steps=[_model_build_step()],
+    )
+
+
+def _guidance_with_surviving_unverified() -> BuildGuidance:
+    return BuildGuidance(
+        version="v1",
+        assessment=GuidanceAssessment(
+            content_status="outline_with_gaps",
+            environment_status="not_checked",
+            overall_status="outline_with_gaps",
+            blocking_gap_ids=["GAP-001"],
+        ),
+        details=[
+            GuidanceDetail(
+                detail_id="GD-001",
+                step_id="STEP-001",
+                detail_kind="block_selection",
+                basis="document_extracted",
+                actionability="actionable",
+                display_text="Use the documented gain block.",
+                evidence=[_document_evidence()],
+                convention_code=None,
+                confirmation_reason_code=None,
+            ),
+            GuidanceDetail(
+                detail_id="GD-002",
+                step_id="STEP-001",
+                detail_kind="configuration",
+                basis="user_confirmation_required",
+                actionability="blocked_pending_confirmation",
+                display_text="Confirm STEP-001; the cited paper evidence could not be verified.",
+                evidence=[],
+                convention_code=None,
+                confirmation_reason_code="document_evidence_unverified",
+            ),
+        ],
+        gaps=[
+            GuidanceGap(
+                gap_id="GAP-001",
+                gap_kind="insufficient_document_evidence",
+                scope="step",
+                step_id="STEP-001",
+                basis="user_confirmation_required",
+                severity="blocking",
+                display_text="STEP-001 lacks verified configuration evidence.",
+            )
+        ],
+    )
+
+
+def _model_build_step() -> ModelBuildStep:
+    return ModelBuildStep(
+        step_id="STEP-001",
+        title="Place gain",
+        intent="Place the reusable gain block.",
+        block_refs=[
+            StepBlockRef(
+                block_ref_id="B1",
+                block_type="Gain",
+                library_path=None,
+                purpose="Scale the input signal",
+                paper_reference=_document_evidence(),
+            )
+        ],
+        parameter_refs=[ParameterMappingRef(paper_param_name="K", model_param_name="Gain.K")],
+        connection_hints=[],
+        configuration_hints=[],
+        depends_on=[],
+        evidence=[_document_evidence()],
+        display_text="Place the gain block.",
+    )
 
 
 def _build_step_payload(
