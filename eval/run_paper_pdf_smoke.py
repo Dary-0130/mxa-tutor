@@ -37,12 +37,16 @@ from adapters.storage.schema import init_schema
 from adapters.storage.sqlite_paper_cache import SqlitePaperBundleStore, SqlitePaperSpecCacheView
 from api.routes.paper_upload import UploadDocumentResponse, upload_document
 from app.config import AppSettings
-from core.domain.exceptions import PaperSpecGenerationError
-from core.domain.paper_plan import PaperPlanRecord
+from core.domain.exceptions import PaperPlanGenerationError, PaperSpecGenerationError
+from core.domain.paper_missing import MissingParameterPrompt
+from core.domain.paper_parameter_conflicts import validate_parameter_conflicts_materialized
+from core.domain.paper_plan import ModelBuildStep, ModelGenerationPlan, PaperPlanRecord
+from core.domain.paper_spec import PaperSpec
 from core.domain.paper_upload_job import PaperUploadJobRecord
 from core.interfaces.document_parser import DocumentParserRouter
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.paper._prompt_loader import load_prompt_template
+from features.paper.build_guidance_generator import GUIDANCE_ROLE_NAME, BuildGuidanceGenerator
 from features.paper.build_steps_dependency_audit import (
     DependencyAudit,
     audit_step_dependencies_from_payload,
@@ -52,11 +56,16 @@ from features.paper.paper_plan_helpers import (
     BuildStepsEvidenceError,
     BuildStepsRedLineError,
     BuildStepsStructuredError,
+    MissingBindingModel,
     ModelBuildStepDraft,
     build_plan_evidence_source_refs,
 )
 from features.paper.paper_plan_service import (
+    _UNSET,
     BUILD_STEP_ROLE_NAME,
+    MISSING_DETECTOR_ROLE_NAME,
+    PLAN_COMPOSER_ROLE_NAME,
+    PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS,
     PaperPlanService,
 )
 from features.paper.paper_reparse_service import PaperReparseLockRegistry
@@ -170,6 +179,10 @@ _CURRENT_PAIRED_BUILD_STEPS: ContextVar[bool] = ContextVar(
     "paper_pdf_smoke_paired_build_steps",
     default=False,
 )
+_CURRENT_PAIRED_BUILD_STEPS_FULL: ContextVar[bool] = ContextVar(
+    "paper_pdf_smoke_paired_build_steps_full",
+    default=False,
+)
 
 
 @dataclass(frozen=True)
@@ -221,6 +234,8 @@ class BuildStepsTelemetry:
     paired_downstream_arm: str | None = None
     paired_arm_order: list[str] = field(default_factory=list)
     paired_build_steps_arms: list[dict[str, Any]] = field(default_factory=list)
+    guidance_failure_reason: str | None = None
+    guidance_validator_machine_codes: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -386,6 +401,61 @@ class RecordingPaperSpecService(PaperSpecService):
         super()._record_spec_retry(exc, remaining_structured_retries)
 
 
+class RecordingBuildGuidanceGenerator(BuildGuidanceGenerator):
+    """Eval-only guidance generator that records terminal reason codes."""
+
+    def __init__(
+        self,
+        text_provider: TextProvider,
+        *,
+        telemetry: BuildStepsTelemetry,
+    ) -> None:
+        super().__init__(text_provider)
+        self._smoke_telemetry = telemetry
+
+    async def generate(
+        self,
+        spec: PaperSpec,
+        plan: ModelGenerationPlan,
+    ) -> ModelGenerationPlan:
+        self._smoke_telemetry.guidance_failure_reason = None
+        self._smoke_telemetry.guidance_validator_machine_codes = []
+        result = await super().generate(spec, plan)
+        if (
+            result.guidance_status == "generation_failed"
+            and self._smoke_telemetry.guidance_failure_reason is None
+        ):
+            self._smoke_telemetry.guidance_failure_reason = (
+                "guidance_validator_generated_output_changed"
+            )
+            self._smoke_telemetry.guidance_validator_machine_codes = [
+                "guidance_validator_generated_output_changed"
+            ]
+        return result
+
+    async def _call_llm_json(
+        self,
+        messages: list[LLMMessage],
+        retry_context: Any,
+    ) -> dict[str, Any]:
+        token = _CURRENT_LLM_ROLE.set(GUIDANCE_ROLE_NAME)
+        try:
+            return await super()._call_llm_json(messages, retry_context)
+        finally:
+            _CURRENT_LLM_ROLE.reset(token)
+
+    def _log_terminal(
+        self,
+        status: Literal["generation_failed", "no_document_basis"],
+        reason: str,
+        *,
+        retry_count: int,
+    ) -> None:
+        self._smoke_telemetry.guidance_failure_reason = reason
+        self._smoke_telemetry.guidance_validator_machine_codes = []
+        super()._log_terminal(status, reason, retry_count=retry_count)
+
+
 class RecordingPaperPlanService(PaperPlanService):
     """Eval-only subclass that records build-step fallback details."""
 
@@ -395,11 +465,19 @@ class RecordingPaperPlanService(PaperPlanService):
         *,
         telemetry: BuildStepsTelemetry,
         paired_build_steps: bool = False,
+        paired_build_steps_full: bool = False,
         pair_order_start: str = "off",
     ) -> None:
-        super().__init__(text_provider=text_provider)
+        super().__init__(
+            text_provider=text_provider,
+            build_guidance_generator=RecordingBuildGuidanceGenerator(
+                text_provider,
+                telemetry=telemetry,
+            ),
+        )
         self._smoke_telemetry = telemetry
         self._paired_build_steps = paired_build_steps
+        self._paired_build_steps_full = paired_build_steps_full
         self._pair_order_start = pair_order_start
 
     async def _call_llm_json(
@@ -412,6 +490,236 @@ class RecordingPaperPlanService(PaperPlanService):
             return await super()._call_llm_json(messages, role_name)
         finally:
             _CURRENT_LLM_ROLE.reset(token)
+
+    async def _generate_build_guidance(
+        self,
+        spec: PaperSpec,
+        plan: ModelGenerationPlan,
+    ) -> ModelGenerationPlan:
+        result = await super()._generate_build_guidance(spec, plan)
+        if (
+            result.guidance_status == "generation_failed"
+            and self._smoke_telemetry.guidance_failure_reason is None
+        ):
+            self._smoke_telemetry.guidance_failure_reason = "guidance_generator_exception"
+            self._smoke_telemetry.guidance_validator_machine_codes = [
+                "guidance_generator_exception"
+            ]
+        return result
+
+    async def _generate_with_retries(
+        self,
+        spec: PaperSpec,
+        paper_id: str,
+    ) -> tuple[ModelGenerationPlan, list[MissingParameterPrompt], list[MissingBindingModel]]:
+        if not self._paired_build_steps_full:
+            return await super()._generate_with_retries(spec, paper_id)
+
+        plan_id = f"PLAN-{paper_id}"
+        paper_spec_id = paper_id
+        try:
+            validate_parameter_conflicts_materialized(spec)
+        except ValueError:
+            raise PaperPlanGenerationError(
+                "parameter_conflicts_mismatch",
+                reason_code="parameter_conflicts_mismatch",
+            ) from None
+        self._preflight_spec_equation_namespace(spec)
+
+        # Full paired mode intentionally keeps the same upstream plan/missing/mscript
+        # material for both build-step arms, then runs validation and guidance per arm.
+        remaining_structured_retries = PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS
+        retried_leaves: set[str] = set()
+        plan_composer_output: ModelGenerationPlan | None = None
+        mscript: str | None = None
+        mscript_ready = False
+
+        while plan_composer_output is None:
+            if mscript_ready:
+                plan_result = await self._capture_plan_leaf(
+                    self._llm_plan_compose(spec, plan_id, paper_spec_id),
+                    PLAN_COMPOSER_ROLE_NAME,
+                )
+                mscript_result: str | BaseException | None = mscript
+            else:
+                plan_result, mscript_result = await asyncio.gather(
+                    self._capture_plan_leaf(
+                        self._llm_plan_compose(spec, plan_id, paper_spec_id),
+                        PLAN_COMPOSER_ROLE_NAME,
+                    ),
+                    self._llm_mscript_draft(spec),
+                    return_exceptions=True,
+                )
+                if not isinstance(mscript_result, BaseException):
+                    mscript = mscript_result
+                    mscript_ready = True
+
+            if isinstance(mscript_result, BaseException):
+                raise mscript_result
+            if isinstance(plan_result, BaseException):
+                if self._should_retry_plan_leaf(
+                    plan_result,
+                    PLAN_COMPOSER_ROLE_NAME,
+                    remaining_structured_retries,
+                ):
+                    remaining_structured_retries -= 1
+                    retried_leaves.add(PLAN_COMPOSER_ROLE_NAME)
+                    self._record_plan_retry(
+                        plan_result,
+                        PLAN_COMPOSER_ROLE_NAME,
+                        remaining_structured_retries,
+                    )
+                    continue
+                self._record_plan_exhausted(plan_result, PLAN_COMPOSER_ROLE_NAME)
+                raise plan_result
+            plan_composer_output = cast(ModelGenerationPlan, plan_result)
+            self._record_plan_rescue_if_needed(PLAN_COMPOSER_ROLE_NAME, retried_leaves)
+
+        sentinel_mappings = self._sentinel_mappings(plan_composer_output.parameter_mapping)
+        build_steps_result: object = _UNSET
+        missing_prompts: list[MissingParameterPrompt] | None = None
+        while missing_prompts is None:
+            if build_steps_result is _UNSET:
+                missing_result, build_steps_result = await asyncio.gather(
+                    self._capture_plan_leaf(
+                        self._llm_missing_detect(spec, paper_id, sentinel_mappings),
+                        MISSING_DETECTOR_ROLE_NAME,
+                    ),
+                    self._paired_build_step_drafts(
+                        plan_composer_output.block_recommendations,
+                        plan_composer_output.parameter_mapping,
+                        spec,
+                    ),
+                    return_exceptions=True,
+                )
+            else:
+                missing_result = await self._capture_plan_leaf(
+                    self._llm_missing_detect(spec, paper_id, sentinel_mappings),
+                    MISSING_DETECTOR_ROLE_NAME,
+                )
+            if isinstance(missing_result, BaseException):
+                if self._should_retry_plan_leaf(
+                    missing_result,
+                    MISSING_DETECTOR_ROLE_NAME,
+                    remaining_structured_retries,
+                ):
+                    remaining_structured_retries -= 1
+                    retried_leaves.add(MISSING_DETECTOR_ROLE_NAME)
+                    self._record_plan_retry(
+                        missing_result,
+                        MISSING_DETECTOR_ROLE_NAME,
+                        remaining_structured_retries,
+                    )
+                    continue
+                self._record_plan_exhausted(missing_result, MISSING_DETECTOR_ROLE_NAME)
+                raise missing_result
+            missing_prompts = cast(list[MissingParameterPrompt], missing_result)
+            self._record_plan_rescue_if_needed(MISSING_DETECTOR_ROLE_NAME, retried_leaves)
+
+        if isinstance(build_steps_result, BaseException):
+            raise build_steps_result
+        arm_results = cast(
+            dict[str, list[ModelBuildStepDraft] | BaseException],
+            build_steps_result,
+        )
+        arm_plans: dict[str, tuple[ModelGenerationPlan, list[MissingBindingModel]]] = {}
+        for arm_label in self._smoke_telemetry.paired_arm_order:
+            arm_plans[arm_label] = await self._assemble_and_guide_arm(
+                arm_label=arm_label,
+                arm_result=arm_results.get(arm_label),
+                spec=spec,
+                paper_id=paper_id,
+                plan_composer_output=plan_composer_output,
+                mscript=mscript,
+                missing_prompts=missing_prompts,
+            )
+
+        on_plan = arm_plans.get("on")
+        if on_plan is None:
+            raise AssertionError("paired full build-step on arm did not run")
+        return on_plan[0], missing_prompts, on_plan[1]
+
+    async def _assemble_and_guide_arm(
+        self,
+        *,
+        arm_label: str,
+        arm_result: list[ModelBuildStepDraft] | BaseException | None,
+        spec: PaperSpec,
+        paper_id: str,
+        plan_composer_output: ModelGenerationPlan,
+        mscript: str | None,
+        missing_prompts: list[MissingParameterPrompt],
+    ) -> tuple[ModelGenerationPlan, list[MissingBindingModel]]:
+        token = _CURRENT_LLM_ARM.set(arm_label)
+        is_downstream_arm = arm_label == "on"
+        payload = self._paired_arm_payload(arm_label)
+        build_steps: list[ModelBuildStep] | None
+        raw_reason_code: str | None = None
+        exception_type: str | None = None
+        try:
+            if isinstance(arm_result, BuildStepsStructuredError):
+                raise arm_result
+            if isinstance(arm_result, BaseException):
+                raise arm_result
+            if arm_result is None:
+                raise AssertionError(f"paired build-step {arm_label} arm did not run")
+            build_steps = self._plan_assembler.validate_and_derive_build_steps(
+                arm_result,
+                plan_composer_output.parameter_mapping,
+                plan_composer_output.block_recommendations,
+            )
+            self._validate_build_step_evidence(build_steps, spec)
+            subsystem_steps = [step.display_text for step in build_steps]
+            full_result_code: BuildStepsResultCode = "结构化成功"
+        except BuildStepsStructuredError as exc:
+            raw_reason_code = exc.reason_code
+            exception_type = type(exc).__name__
+            full_result_code = _classify_build_steps_failure(
+                raw_reason_code,
+                exception_type,
+            )
+            if is_downstream_arm:
+                self._log_build_steps_fallback(exc)
+            build_steps = None
+            subsystem_steps = await self._llm_subsystem_plan(
+                plan_composer_output.block_recommendations,
+                spec.evidence,
+            )
+        finally:
+            _CURRENT_LLM_ARM.reset(token)
+
+        token = _CURRENT_LLM_ARM.set(arm_label)
+        try:
+            assembled_plan, missing_bindings = self._plan_assembler.merge(
+                plan_composer_output=plan_composer_output,
+                subsystem_steps=subsystem_steps,
+                mscript=mscript,
+                missing_prompts=missing_prompts,
+                paper_id=paper_id,
+                build_steps=build_steps,
+            )
+            guided_plan = await self._generate_build_guidance(spec, assembled_plan)
+        finally:
+            _CURRENT_LLM_ARM.reset(token)
+
+        payload.update(
+            {
+                "full_pipeline_used": True,
+                "full_build_steps_success": build_steps is not None,
+                "full_build_steps_result_code": full_result_code,
+                "full_build_steps_raw_reason_code": raw_reason_code,
+                "full_build_steps_exception_type": exception_type,
+                "full_guidance_reached": bool(guided_plan.build_steps),
+                "full_guidance_status": guided_plan.guidance_status
+                if guided_plan.build_steps
+                else "未触达",
+                "full_guidance_failure_reason": self._smoke_telemetry.guidance_failure_reason,
+                "full_guidance_validator_machine_codes": list(
+                    self._smoke_telemetry.guidance_validator_machine_codes
+                ),
+            }
+        )
+        return guided_plan, missing_bindings
 
     async def _llm_build_steps(
         self,
@@ -452,6 +760,24 @@ class RecordingPaperPlanService(PaperPlanService):
         parameter_mapping,
         spec,
     ) -> list[ModelBuildStepDraft]:
+        arm_results = await self._paired_build_step_drafts(
+            block_recommendations,
+            parameter_mapping,
+            spec,
+        )
+        on_result = arm_results.get("on")
+        if isinstance(on_result, BaseException):
+            raise on_result
+        if on_result is None:
+            raise AssertionError("paired build-step on arm did not run")
+        return on_result
+
+    async def _paired_build_step_drafts(
+        self,
+        block_recommendations,
+        parameter_mapping,
+        spec,
+    ) -> dict[str, list[ModelBuildStepDraft] | BaseException]:
         order = ["on", "off"] if self._pair_order_start == "on" else ["off", "on"]
         self._smoke_telemetry.paired_build_steps_enabled = True
         self._smoke_telemetry.paired_downstream_arm = "on"
@@ -524,12 +850,14 @@ class RecordingPaperPlanService(PaperPlanService):
             "on",
             DependencyAudit.unavailable("draft_parse"),
         )
-        on_result = arm_results.get("on")
-        if isinstance(on_result, BaseException):
-            raise on_result
-        if on_result is None:
-            raise AssertionError("paired build-step on arm did not run")
-        return on_result
+        self._last_build_steps_dependency_audit = self._smoke_telemetry.dependency_audit
+        return arm_results
+
+    def _paired_arm_payload(self, arm_label: str) -> dict[str, Any]:
+        for arm in self._smoke_telemetry.paired_build_steps_arms:
+            if arm.get("arm_label") == arm_label:
+                return arm
+        raise AssertionError(f"paired build-step {arm_label} arm telemetry missing")
 
     def _record_build_steps_dto_validation_errors(
         self,
@@ -600,6 +928,7 @@ async def run_smoke(
     provider_factory: ProviderFactory | None = None,
     round_runner: RoundRunner | None = None,
     paired_build_steps: bool = False,
+    paired_build_steps_full: bool = False,
 ) -> tuple[SmokeRuntime, list[SmokeSummaryRow]]:
     if rounds < 1:
         raise SystemExit("--rounds must be >= 1")
@@ -613,7 +942,9 @@ async def run_smoke(
     runner = round_runner or _run_one_pdf_round
     provider_builder = provider_factory or _default_provider_factory
     rows: list[SmokeSummaryRow] = []
-    pair_token = _CURRENT_PAIRED_BUILD_STEPS.set(paired_build_steps)
+    paired_enabled = paired_build_steps or paired_build_steps_full
+    pair_token = _CURRENT_PAIRED_BUILD_STEPS.set(paired_enabled)
+    full_pair_token = _CURRENT_PAIRED_BUILD_STEPS_FULL.set(paired_build_steps_full)
     try:
         for paper in papers:
             for round_index in range(1, rounds + 1):
@@ -622,6 +953,7 @@ async def run_smoke(
                 write_summary_artifacts(runtime.output_dir, rows)
                 print(_format_progress_line(row), flush=True)
     finally:
+        _CURRENT_PAIRED_BUILD_STEPS_FULL.reset(full_pair_token)
         _CURRENT_PAIRED_BUILD_STEPS.reset(pair_token)
     return runtime, rows
 
@@ -643,11 +975,13 @@ async def _run_one_pdf_round(
         telemetry=telemetry,
     )
     paired_build_steps = _CURRENT_PAIRED_BUILD_STEPS.get()
+    paired_build_steps_full = _CURRENT_PAIRED_BUILD_STEPS_FULL.get()
     pair_order_start = _paired_build_steps_first_arm(round_index)
     plan_service = RecordingPaperPlanService(
         provider,
         telemetry=telemetry,
         paired_build_steps=paired_build_steps,
+        paired_build_steps_full=paired_build_steps_full,
         pair_order_start=pair_order_start,
     )
     response_payload: dict[str, Any] | None = None
@@ -817,8 +1151,16 @@ def classify_build_steps_result(
 ) -> BuildStepsResultCode:
     if plan_record is not None and plan_record.plan.build_steps:
         return "结构化成功"
-    reason = telemetry.fallback_reason_code
-    exc_type = telemetry.fallback_exception_type
+    return _classify_build_steps_failure(
+        telemetry.fallback_reason_code,
+        telemetry.fallback_exception_type,
+    )
+
+
+def _classify_build_steps_failure(
+    reason: str | None,
+    exc_type: str | None,
+) -> BuildStepsResultCode:
     if reason in BUILD_STEPS_BRIDGE_REASON_CODES:
         return cast(BuildStepsResultCode, reason)
     if reason == "dto_invalid":
@@ -1055,6 +1397,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Call BuildStepPlanner twice on the same upstream input: legacy off arm and salience on arm.",
     )
+    parser.add_argument(
+        "--paired-build-steps-full",
+        action="store_true",
+        help=(
+            "Call BuildStepPlanner twice on the same upstream input, then run full "
+            "build-step validation and build guidance for both arms. The on arm "
+            "remains the persisted main path."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1068,6 +1419,7 @@ async def async_main(argv: list[str] | None = None) -> int:
         pattern=args.pattern,
         limit=args.limit,
         paired_build_steps=args.paired_build_steps,
+        paired_build_steps_full=args.paired_build_steps_full,
     )
     print(f"summary_json={runtime.output_dir / 'paper_pdf_smoke.summary.json'}")
     print(f"summary_csv={runtime.output_dir / 'paper_pdf_smoke.summary.csv'}")

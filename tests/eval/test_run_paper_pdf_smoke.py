@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -166,6 +167,72 @@ async def test_paired_build_steps_runs_two_arms_on_same_upstream() -> None:
     assert arms[1]["dependency_audit"]["dependency_audit_status"] == "clean"
     assert arms[1]["downstream_used"] is True
     assert arms[1]["response_model"] == "deepseek-v4-flash"
+
+
+@pytest.mark.asyncio
+async def test_paired_full_records_per_arm_validation_and_guidance() -> None:
+    class StubGuidanceService(subject.RecordingPaperPlanService):
+        async def _generate_build_guidance(
+            self,
+            spec: object,
+            plan: subject.ModelGenerationPlan,
+        ) -> subject.ModelGenerationPlan:
+            _ = spec
+            self._smoke_telemetry.guidance_failure_reason = None
+            self._smoke_telemetry.guidance_validator_machine_codes = []
+            return replace(plan, guidance_status="generated")
+
+    fake_provider = _SequenceProvider(
+        [
+            _build_steps_payload(depends_on_third_step=["STEP-001", "STEP-002"]),
+            _build_steps_payload(depends_on_third_step=["STEP-001", "STEP-002"]),
+        ]
+    )
+    provider = subject.RecordingTextProvider(fake_provider)
+    telemetry = subject.BuildStepsTelemetry()
+    service = StubGuidanceService(
+        provider,
+        telemetry=telemetry,
+        paired_build_steps=True,
+        paired_build_steps_full=True,
+        pair_order_start="off",
+    )
+    spec = _paper_spec()
+    arm_results = await service._paired_build_step_drafts(
+        [_block_recommendation()],
+        [_parameter_mapping()],
+        spec,
+    )
+    plan = subject.ModelGenerationPlan(
+        plan_id="PLAN-paper",
+        paper_spec_id="paper",
+        library_choice="simulink",
+        block_recommendations=[_block_recommendation()],
+        parameter_mapping=[_parameter_mapping()],
+        subsystem_breakdown=[],
+        m_script_skeleton=None,
+        evidence=spec.evidence,
+    )
+
+    for arm_label in ("off", "on"):
+        await service._assemble_and_guide_arm(
+            arm_label=arm_label,
+            arm_result=arm_results[arm_label],
+            spec=spec,
+            paper_id="paper",
+            plan_composer_output=plan,
+            mscript=None,
+            missing_prompts=[],
+        )
+
+    arms = subject._paired_build_steps_arms_for_summary(telemetry, provider.calls)
+    assert [arm["arm_label"] for arm in arms] == ["off", "on"]
+    assert [arm["full_build_steps_result_code"] for arm in arms] == [
+        "结构化成功",
+        "结构化成功",
+    ]
+    assert [arm["full_guidance_status"] for arm in arms] == ["generated", "generated"]
+    assert all(arm["full_pipeline_used"] is True for arm in arms)
 
 
 @pytest.mark.asyncio
