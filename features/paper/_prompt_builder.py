@@ -45,13 +45,13 @@ from features.paper.paper_schemas import (
 
 from ._prompt_loader import load_prompt_template
 
-_DEPENDENCY_SALIENCE_TEMPLATE_LINES = (
+_BUILD_STEP_DEPENDENCY_TEMPLATE_LINES = (
     "- depends_on 不得自己依赖自己;只能引用别的步骤",
     "- 系统会自动排序步骤,depends_on 不必为书写顺序兜底",
     "- 没有前提就给空列表 [];尤其第一步通常就该是空依赖",
     "- 接线要连到别的步骤产生的模块,就必须把那个步骤写进依赖(depends_on)",
 )
-_DEPENDENCY_SALIENCE_CONSTRAINTS = """【depends_on 依赖/接线可见性机制】:
+_BUILD_STEP_DEPENDENCY_CONSTRAINTS = """【depends_on 依赖/接线可见性机制】:
 - depends_on 不得自己依赖自己;只能引用别的步骤
 - 系统会自动排序步骤,depends_on 不必为书写顺序兜底
 - 没有前提就给空列表 [];尤其第一步通常就该是空依赖
@@ -214,11 +214,43 @@ def build_messages_for_build_steps(
     parameter_mapping: list[ParameterMapping],
     evidence: list[PaperEvidenceEntry],
     source_refs: list[PlanEvidenceSourceRef],
-    *,
-    dependency_salience_enabled: bool = False,
 ) -> list[LLMMessage]:
     """Build BuildStepPlanner messages."""
 
+    return _build_messages_for_build_steps(
+        block_recommendations,
+        parameter_mapping,
+        evidence,
+        source_refs,
+        shared_constraints=_build_steps_constraints(),
+    )
+
+
+def build_messages_for_build_steps_legacy_dependency_eval(
+    block_recommendations: list[BlockRecommendation],
+    parameter_mapping: list[ParameterMapping],
+    evidence: list[PaperEvidenceEntry],
+    source_refs: list[PlanEvidenceSourceRef],
+) -> list[LLMMessage]:
+    """Build the legacy BuildStepPlanner prompt for eval paired control arms only."""
+
+    return _build_messages_for_build_steps(
+        block_recommendations,
+        parameter_mapping,
+        evidence,
+        source_refs,
+        shared_constraints=_build_steps_constraints_legacy_dependency_eval(),
+    )
+
+
+def _build_messages_for_build_steps(
+    block_recommendations: list[BlockRecommendation],
+    parameter_mapping: list[ParameterMapping],
+    evidence: list[PaperEvidenceEntry],
+    source_refs: list[PlanEvidenceSourceRef],
+    *,
+    shared_constraints: str,
+) -> list[LLMMessage]:
     template = load_prompt_template("paper_plan_build_steps.yaml")
     user = _render_user(
         template.user,
@@ -245,14 +277,9 @@ def build_messages_for_build_steps(
         },
     )
     return _role_messages(
-        _dependency_salience_template_system(
-            template.system,
-            dependency_salience_enabled=dependency_salience_enabled,
-        ),
+        _build_step_template_system(template.system),
         user,
-        shared_constraints=_build_steps_constraints(
-            dependency_salience_enabled=dependency_salience_enabled
-        ),
+        shared_constraints=shared_constraints,
     )
 
 
@@ -265,7 +292,6 @@ def build_messages_for_regenerate_build_steps(
     *,
     allowed_user_evidence_refs: set[UserEvidenceRef],
     allowed_user_prompt_ids: frozenset[str],
-    dependency_salience_enabled: bool = False,
 ) -> list[LLMMessage]:
     """Build regeneration-only BuildStepPlanner messages."""
 
@@ -303,14 +329,9 @@ def build_messages_for_regenerate_build_steps(
         },
     )
     return _role_messages(
-        _dependency_salience_template_system(
-            template.system,
-            dependency_salience_enabled=dependency_salience_enabled,
-        ),
+        _build_step_template_system(template.system),
         user,
-        shared_constraints=_regeneration_constraints(
-            dependency_salience_enabled=dependency_salience_enabled
-        ),
+        shared_constraints=_regeneration_constraints(),
     )
 
 
@@ -521,31 +542,20 @@ def _role_messages(
     ]
 
 
-def _dependency_salience_template_system(
-    system: str,
-    *,
-    dependency_salience_enabled: bool,
-) -> str:
-    _ = dependency_salience_enabled
-    for line in _DEPENDENCY_SALIENCE_TEMPLATE_LINES:
+def _build_step_template_system(system: str) -> str:
+    for line in _BUILD_STEP_DEPENDENCY_TEMPLATE_LINES:
         system = system.replace(f"{line}\n", "")
     return system
 
 
-def _with_dependency_salience_constraints(
-    base: str,
-    *,
-    dependency_salience_enabled: bool,
-) -> str:
-    if not dependency_salience_enabled:
-        return base
+def _with_build_step_dependency_constraints(base: str) -> str:
     return base.replace(
         "\n\n【字段名硬约束】",
-        f"\n\n{_DEPENDENCY_SALIENCE_CONSTRAINTS}\n\n【字段名硬约束】",
+        f"\n\n{_BUILD_STEP_DEPENDENCY_CONSTRAINTS}\n\n【字段名硬约束】",
     )
 
 
-def _regeneration_constraints(*, dependency_salience_enabled: bool = False) -> str:
+def _regeneration_constraints() -> str:
     base = """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
 
@@ -575,13 +585,10 @@ def _regeneration_constraints(*, dependency_salience_enabled: bool = False) -> s
 - 工程推断字段只在 SimPowerSystems 工程惯例下推断;若已有,直接复用,不重新编
 - 缺参时只保留 value 字面 "null";不编值
 - plan_id / paper_spec_id 不要自生成"""
-    return _with_dependency_salience_constraints(
-        base,
-        dependency_salience_enabled=dependency_salience_enabled,
-    )
+    return _with_build_step_dependency_constraints(base)
 
 
-def _build_steps_constraints(*, dependency_salience_enabled: bool = False) -> str:
+def _build_steps_constraints() -> str:
     base = """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
 
@@ -604,10 +611,32 @@ def _build_steps_constraints(*, dependency_salience_enabled: bool = False) -> st
 - 工程推断字段只在 SimPowerSystems 工程惯例下推断;若已有,直接复用,不重新编
 - 缺参时只保留 value 字面 "null";不编值
 - plan_id / paper_spec_id 不要自生成"""
-    return _with_dependency_salience_constraints(
-        base,
-        dependency_salience_enabled=dependency_salience_enabled,
-    )
+    return _with_build_step_dependency_constraints(base)
+
+
+def _build_steps_constraints_legacy_dependency_eval() -> str:
+    return """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
+只返回有效 JSON 对象;不要 markdown,不要解释文字。
+
+【build_steps 私有 draft evidence 契约】:
+- build_steps[*].block_refs[*].paper_reference / build_steps[*].configuration_hints[*].evidence[*] / build_steps[*].evidence[*] 只允许输出 {"source_ref":"REF-001"} 这种对象
+- source_ref 必须逐字来自 plan_evidence_sources_json;不得自创,不得留空,不得输出 null
+- 不输出 source / document_id / paper_section_id / equation_id / figure_id / locator / excerpt / missing_param_prompt_id / user_action / parameter_correction_id / correction_param_key
+- 后端会按 source_ref 唯一解析并盖章 source=document_extracted、document_id、canonical locator、excerpt;解析失败整份 build_steps fail-closed
+- 初始生成阶段禁止 user_supplied evidence
+
+【字段名硬约束】(逐字匹配,禁止自创字段名):
+- BlockRecommendation 3 字段:block_type / purpose / paper_reference
+- ParameterMapping 5 字段:paper_param_name / model_param_name / value / unit / source
+- ParameterMapping.unit 工程推断 / 无物理单位时优先填 null
+- 禁止字段名:locator / locators / paper_locator / param_name / parameter_name / param_symbol / param_value / param_unit
+- connection_hints.to_block_ref 必须是既有 block_ref_id 字符串,不得输出数字、对象或自创引用
+
+【反幻觉】:
+- 不输出 PaperSpec / 资料没给的参数 / 公式 / 图占位
+- 工程推断字段只在 SimPowerSystems 工程惯例下推断;若已有,直接复用,不重新编
+- 缺参时只保留 value 字面 "null";不编值
+- plan_id / paper_spec_id 不要自生成"""
 
 
 def _build_guidance_constraints() -> str:

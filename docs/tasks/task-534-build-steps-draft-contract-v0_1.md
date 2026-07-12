@@ -262,3 +262,40 @@ build_steps token telemetry（23 轮触达 build_step_planner；1 轮 spec 阶�
 老实记账：
 
 本次补跑没有证明总体成品率提升：build_steps 结构化成功仍为 10/24，严格 guidance generated 为 9/24。dto_invalid 从 7 降到 2，但 dto_invalid 归零本身不是目标；本次剩余 2 个 dto_invalid 是 from_block_ref strict string 问题，正确归为 DTO 失败，不应强行变成功。depends_on_self 升到 7，json_parse_failed 仍有 1 个 length 截断，parameter_value_leak 仍有 2 个，另有 1 个 spec 阶段硬失败；这些是后续卡信号，本卡不包治。
+
+## TASK-534 收尾：depends_on v0.3 转正
+
+生产路径更新：
+
+1. dependency_salience_enabled 实验开关从生产 prompt builder 签名移除。
+2. v0.3 depends_on 依赖/接线可见性约束成为 build_steps 与 regenerate build_steps 唯一生产文本。
+3. eval/run_paper_pdf_smoke.py 的配对台子保留 legacy 对照臂，只用于 eval 资产。
+
+硬验收哈希：
+
+| 路径 | 改前开关打开 | 拆后默认 |
+|---|---|
+| build_steps | 053561af7fd0539fa98d9cd17b7c501230ea84bcb77c9ec175edf9e728dd1f28 | 053561af7fd0539fa98d9cd17b7c501230ea84bcb77c9ec175edf9e728dd1f28 |
+| regenerate_build_steps | f5b564fca14663e58788dac627cb9042338d5c396f4e9e826f676f551e16dab8 | f5b564fca14663e58788dac627cb9042338d5c396f4e9e826f676f551e16dab8 |
+
+配对复现记账：
+
+1. 前两批配对合计：15 修 / 0 坏。
+2. 第三批 task534_pair_full_conn_20260712_182810：shadow audit fixed=9 / broke=0 / both=0 / neither=15。
+3. 三批累计：24 修 / 0 坏。
+4. 预登记线替换：留空上限 -> 跨步骤接线 >= 对照 x0.7（PM 拍板）。第三批实测 off=109 / on=123 / 死线=76.3。
+5. 跨天数字是烂尺子；指导层抖动记录在案（写爆 28 -> 10），成品率只按同批配对差读。
+
+第三批标准面板：
+
+1. off 臂 self shadow 违规 12 条 / 9 轮；unknown=0、cycle=0、not_prior=0。
+2. off 臂 self 位置：2003.10496 r01 step_index=0；2110.10333 r03 step_index=0；2403.04374 r03 step_index=0；2409.11267 r01 step_index=0；2410.04316 r03 step_index=0；2510.12335 r01 step_index=0/2/3/5；2510.12335 r03 step_index=0；2605.27553 r01 step_index=0；2605.27553 r02 step_index=0。实测第三批不是“全在第一步”。
+3. build_steps 全关成功率：off=11/24；on=19/24。
+4. build_steps 失败码：off depends_on_self=9、parameter_value_leak=1、dto_invalid=2、connection_ref_not_visible=1；on parameter_value_leak=2、parameter_ref_no_match=2、dto_invalid=1。
+5. 严格 guidance 成品率：off=8/24；on=15/24。
+6. guidance 失败码：off build_steps_unavailable=13、llm_unparseable=3；on evidence_resolution_failed=2、llm_unparseable=1、build_steps_unavailable=5、guidance_validator_generated_output_changed=1。
+7. 非首步空依赖总数：off=8（2107.02719 r01=4；2409.11267 r03=4）；on=10（2003.10496 r02=2；2107.02719 r02=2；2110.10333 r03=1；2403.04374 r01=1；2409.11267 r02=1；2510.12335 r01=1；2510.12335 r03=2）。
+8. connection_ref_not_visible 审计计数：off=12 / 4 轮（2107.02719 r01=3；2107.02719 r02=2；2510.12335 r02=2；2605.27553 r02=5）；on=2 / 1 轮（2510.12335 r03=2）。
+9. finish_reason=length 阶段分摊：spec=0；plan=0；build_steps(off)=2；build_steps(on)=0；guidance(off)=6；guidance(on)=2；other=0。
+10. system_fingerprint：fp_8b330d02d0_prod0820_fp8_kvcache_20260402 = 208，全程单一。
+11. bridge 七个子码全 0。

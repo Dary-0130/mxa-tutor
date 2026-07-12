@@ -742,7 +742,7 @@ class RecordingPaperPlanService(PaperPlanService):
                 block_recommendations,
                 parameter_mapping,
                 spec,
-                dependency_salience_enabled=False,
+                dependency_salience_enabled=True,
             ),
             BUILD_STEP_ROLE_NAME,
         )
@@ -882,14 +882,22 @@ class RecordingPaperPlanService(PaperPlanService):
         *,
         dependency_salience_enabled: bool,
     ):
-        from features.paper._prompt_builder import build_messages_for_build_steps
+        from features.paper._prompt_builder import (
+            build_messages_for_build_steps,
+            build_messages_for_build_steps_legacy_dependency_eval,
+        )
 
-        return build_messages_for_build_steps(
+        builder = (
+            build_messages_for_build_steps
+            if dependency_salience_enabled
+            else build_messages_for_build_steps_legacy_dependency_eval
+        )
+
+        return builder(
             block_recommendations,
             parameter_mapping,
             spec.evidence,
             build_plan_evidence_source_refs(spec),
-            dependency_salience_enabled=dependency_salience_enabled,
         )
 
     def _log_build_steps_fallback(self, exc: BuildStepsStructuredError) -> None:

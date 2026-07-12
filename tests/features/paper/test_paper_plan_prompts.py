@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +27,7 @@ from features.paper._prompt_builder import (
     _shared_paper_plan_constraints,
     build_messages_for_build_guidance,
     build_messages_for_build_steps,
+    build_messages_for_build_steps_legacy_dependency_eval,
     build_messages_for_missing_detect,
     build_messages_for_mscript_draft,
     build_messages_for_mscript_draft_from_mapping,
@@ -312,7 +314,7 @@ def test_original_build_step_prompt_still_forbids_user_supplied_evidence() -> No
     assert "correct_extracted" not in system
 
 
-def test_build_step_dependency_salience_is_gated_off_by_default() -> None:
+def test_build_step_dependency_text_is_default_with_eval_legacy_control() -> None:
     args = (
         [_block_recommendation()],
         [_sentinel_mapping()],
@@ -321,14 +323,14 @@ def test_build_step_dependency_salience_is_gated_off_by_default() -> None:
     )
 
     default_messages = build_messages_for_build_steps(*args)
-    off_messages = build_messages_for_build_steps(*args, dependency_salience_enabled=False)
-    on_messages = build_messages_for_build_steps(*args, dependency_salience_enabled=True)
+    legacy_messages = build_messages_for_build_steps_legacy_dependency_eval(*args)
 
-    assert default_messages == off_messages
-    assert "第一步通常就该是空依赖" not in off_messages[0].content
-    assert "必须把那个步骤写进依赖" not in off_messages[0].content
-    assert "第一步通常就该是空依赖" in on_messages[0].content
-    assert "必须把那个步骤写进依赖" in on_messages[0].content
+    assert "dependency_salience" not in inspect.signature(build_messages_for_build_steps).parameters
+    assert default_messages != legacy_messages
+    assert "第一步通常就该是空依赖" in default_messages[0].content
+    assert "必须把那个步骤写进依赖" in default_messages[0].content
+    assert "第一步通常就该是空依赖" not in legacy_messages[0].content
+    assert "必须把那个步骤写进依赖" not in legacy_messages[0].content
 
 
 def test_dependency_audit_env_does_not_change_default_build_step_prompt(
@@ -349,7 +351,7 @@ def test_dependency_audit_env_does_not_change_default_build_step_prompt(
     assert on_messages == off_messages
 
 
-def test_regenerate_dependency_salience_is_gated_off_by_default() -> None:
+def test_regenerate_dependency_text_is_default() -> None:
     record = _record_with_resolved_prompt()
     kwargs = {
         "allowed_user_evidence_refs": {
@@ -366,22 +368,13 @@ def test_regenerate_dependency_salience_is_gated_off_by_default() -> None:
     )
 
     default_messages = build_messages_for_regenerate_build_steps(*args, **kwargs)
-    off_messages = build_messages_for_regenerate_build_steps(
-        *args,
-        dependency_salience_enabled=False,
-        **kwargs,
-    )
-    on_messages = build_messages_for_regenerate_build_steps(
-        *args,
-        dependency_salience_enabled=True,
-        **kwargs,
-    )
 
-    assert default_messages == off_messages
-    assert "第一步通常就该是空依赖" not in off_messages[0].content
-    assert "必须把那个步骤写进依赖" not in off_messages[0].content
-    assert "第一步通常就该是空依赖" in on_messages[0].content
-    assert "必须把那个步骤写进依赖" in on_messages[0].content
+    assert (
+        "dependency_salience"
+        not in inspect.signature(build_messages_for_regenerate_build_steps).parameters
+    )
+    assert "第一步通常就该是空依赖" in default_messages[0].content
+    assert "必须把那个步骤写进依赖" in default_messages[0].content
 
 
 def test_regenerate_build_step_prompt_allows_resolved_user_evidence() -> None:
