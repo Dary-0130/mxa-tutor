@@ -15,6 +15,7 @@ from core.domain.paper_plan import (
     BuildGuidance,
     GuidanceAssessment,
     GuidanceDetail,
+    GuidanceGap,
     ModelBuildStep,
     ParameterMapping,
     ParameterMappingRef,
@@ -417,6 +418,67 @@ def test_summary_reports_three_unverified_layers_separately(tmp_path: Path) -> N
     assert row.guidance_evidence_clean is False
 
 
+def test_write_guidance_artifacts_outputs_raw_json_and_readable_text(tmp_path: Path) -> None:
+    guidance = _guidance_with_surviving_unverified()
+    plan = replace(_plan_with_build_steps(), build_guidance=guidance, guidance_status="generated")
+    telemetry = subject.BuildStepsTelemetry(
+        generator_downgraded_unverified_count=2,
+        validator_dropped_unverified_count=1,
+    )
+    paper = subject.SmokePaper(
+        path=tmp_path / "arxiv-2605.27553-test.pdf",
+        arxiv_id="2605.27553",
+        hybrid_candidate=False,
+    )
+    row = subject.build_summary_row(
+        paper=paper,
+        round_index=1,
+        runtime=_runtime(tmp_path),
+        telemetry=telemetry,
+        build_steps_call=None,
+        llm_calls=[],
+        job_record=None,
+        plan_record=subject.PaperPlanRecord(
+            paper_id="paper",
+            spec=_paper_spec(),
+            plan=plan,
+            missing_prompts=[],
+            missing_bindings=[],
+        ),
+        response_payload={"paper_id": "paper", "job_id": "job"},
+        unexpected_error=None,
+    )
+    snapshot = subject._guidance_snapshot_for_plan("main", plan, row=row)
+
+    paths = subject.write_guidance_artifacts(
+        tmp_path,
+        paper=paper,
+        round_index=1,
+        row=row,
+        snapshots=[snapshot],
+    )
+
+    json_path = next(path for path in paths if path.suffix == ".json")
+    text_path = next(path for path in paths if path.suffix == ".txt")
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    text = text_path.read_text(encoding="utf-8")
+    marker = "★ 未核实,请用户自行确认"
+    assert payload["paper_id"] == "paper"
+    assert payload["round_index"] == 1
+    assert payload["arm"] == "main"
+    assert payload["build_steps"][0]["step_id"] == "STEP-001"
+    assert (
+        payload["build_guidance"]["details"][1]["confirmation_reason_code"]
+        == "document_evidence_unverified"
+    )
+    assert payload["final_surviving_unverified_count"] == row.final_surviving_unverified_count
+    assert "[步骤 1] Place gain" in text
+    assert "出处:论文 DOC-001 第 S1 处" in text
+    assert f"出处:{marker}" in text
+    assert "缺口:[阻塞] STEP-001 lacks verified configuration evidence." in text
+    assert text.count(marker) == row.final_surviving_unverified_count
+
+
 def test_guidance_batch_gates_reject_invariants(tmp_path: Path) -> None:
     delivered_all_lost = replace(
         _summary_row(tmp_path),
@@ -716,7 +778,17 @@ def _guidance_with_surviving_unverified() -> BuildGuidance:
                 confirmation_reason_code="document_evidence_unverified",
             ),
         ],
-        gaps=[],
+        gaps=[
+            GuidanceGap(
+                gap_id="GAP-001",
+                gap_kind="insufficient_document_evidence",
+                scope="step",
+                step_id="STEP-001",
+                basis="user_confirmation_required",
+                severity="blocking",
+                display_text="STEP-001 lacks verified configuration evidence.",
+            )
+        ],
     )
 
 

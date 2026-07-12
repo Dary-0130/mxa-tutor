@@ -19,8 +19,9 @@ import sys
 import uuid
 from collections import Counter
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
@@ -304,6 +305,23 @@ class BuildStepsTelemetry:
     generator_downgraded_unverified_count: int | None = None
     validator_dropped_unverified_count: int | None = None
     all_document_details_lost: bool | None = None
+    guidance_artifact_snapshots: list[GuidanceArtifactSnapshot] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GuidanceArtifactSnapshot:
+    """Eval-only snapshot for writing readable build guidance artifacts."""
+
+    arm_label: str
+    plan: ModelGenerationPlan | None
+    guidance_status: str
+    guidance_delivered: bool
+    guidance_evidence_clean: bool
+    guidance_fully_actionable: bool
+    generator_downgraded_unverified_count: int | None
+    validator_dropped_unverified_count: int | None
+    final_surviving_unverified_count: int | None
+    blocking_gap_count: int | None
 
 
 @dataclass(frozen=True)
@@ -886,6 +904,13 @@ class RecordingPaperPlanService(PaperPlanService):
         finally:
             _CURRENT_LLM_ARM.reset(token)
 
+        self._smoke_telemetry.guidance_artifact_snapshots.append(
+            _guidance_snapshot_for_plan(
+                arm_label,
+                guided_plan,
+                telemetry=self._smoke_telemetry,
+            )
+        )
         payload.update(
             {
                 "full_pipeline_used": True,
@@ -1215,7 +1240,7 @@ async def _run_one_pdf_round(
         unexpected_error=unexpected_error,
         spec_validation_errors=telemetry.spec_validation_errors,
     )
-    return build_summary_row(
+    row = build_summary_row(
         paper=paper,
         round_index=round_index,
         runtime=runtime,
@@ -1230,6 +1255,21 @@ async def _run_one_pdf_round(
         response_payload=response_payload,
         unexpected_error=unexpected_error,
     )
+    snapshots = telemetry.guidance_artifact_snapshots or [
+        _guidance_snapshot_for_plan(
+            "on" if paired_build_steps else "main",
+            plan_record.plan if plan_record is not None else None,
+            row=row,
+        )
+    ]
+    write_guidance_artifacts(
+        runtime.output_dir,
+        paper=paper,
+        round_index=round_index,
+        row=row,
+        snapshots=snapshots,
+    )
+    return row
 
 
 def build_summary_row(
@@ -1411,6 +1451,229 @@ def build_summary_row(
         hybrid_guardrail_conclusion=hybrid_conclusion,
         hybrid_no_document_basis_misfire=hybrid_misfire,
     )
+
+
+def write_guidance_artifacts(
+    output_dir: Path,
+    *,
+    paper: SmokePaper,
+    round_index: int,
+    row: SmokeSummaryRow,
+    snapshots: list[GuidanceArtifactSnapshot],
+) -> list[Path]:
+    """Write eval-only raw and readable build guidance artifacts."""
+
+    artifact_dir = output_dir / "guidance_artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for snapshot in snapshots:
+        stem = (
+            f"{paper.slug}__round_{round_index:02d}"
+            f"__arm_{_safe_artifact_part(snapshot.arm_label)}"
+        )
+        payload = _guidance_artifact_payload(row, snapshot)
+        json_path = artifact_dir / f"{stem}.guidance.json"
+        text_path = artifact_dir / f"{stem}.guidance.txt"
+        json_path.write_text(
+            json.dumps(_jsonable(payload), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        text_path.write_text(
+            render_guidance_artifact_text(row, snapshot),
+            encoding="utf-8",
+        )
+        written.extend([json_path, text_path])
+    return written
+
+
+def _guidance_artifact_payload(
+    row: SmokeSummaryRow,
+    snapshot: GuidanceArtifactSnapshot,
+) -> dict[str, object]:
+    plan = snapshot.plan
+    return {
+        "paper_id": row.paper_id,
+        "round_index": row.round_index,
+        "arm": snapshot.arm_label,
+        "build_steps": plan.build_steps if plan is not None else None,
+        "build_guidance": plan.build_guidance if plan is not None else None,
+        "guidance_status": snapshot.guidance_status,
+        "guidance_delivered": snapshot.guidance_delivered,
+        "guidance_evidence_clean": snapshot.guidance_evidence_clean,
+        "guidance_fully_actionable": snapshot.guidance_fully_actionable,
+        "generator_downgraded_unverified_count": (snapshot.generator_downgraded_unverified_count),
+        "validator_dropped_unverified_count": snapshot.validator_dropped_unverified_count,
+        "final_surviving_unverified_count": snapshot.final_surviving_unverified_count,
+        "blocking_gap_count": snapshot.blocking_gap_count,
+    }
+
+
+def render_guidance_artifact_text(
+    row: SmokeSummaryRow,
+    snapshot: GuidanceArtifactSnapshot,
+) -> str:
+    """Render one build guidance artifact for direct human reading."""
+
+    plan = snapshot.plan
+    lines = [
+        f"paper_id: {row.paper_id or 'unknown'}",
+        f"round_index: {row.round_index}",
+        f"arm: {snapshot.arm_label}",
+        f"guidance_status: {snapshot.guidance_status}",
+        (
+            "judgement: "
+            f"delivered={snapshot.guidance_delivered}, "
+            f"evidence_clean={snapshot.guidance_evidence_clean}, "
+            f"fully_actionable={snapshot.guidance_fully_actionable}"
+        ),
+        (
+            "counts: "
+            "generator_downgraded_unverified_count="
+            f"{_display_count(snapshot.generator_downgraded_unverified_count)}, "
+            "validator_dropped_unverified_count="
+            f"{_display_count(snapshot.validator_dropped_unverified_count)}, "
+            "final_surviving_unverified_count="
+            f"{_display_count(snapshot.final_surviving_unverified_count)}, "
+            f"blocking_gap_count={_display_count(snapshot.blocking_gap_count)}"
+        ),
+        "",
+    ]
+    if plan is None or not plan.build_steps:
+        lines.append("（无 build_steps）")
+        return "\n".join(lines) + "\n"
+    if plan.build_guidance is None:
+        lines.append("（无 build_guidance）")
+
+    details_by_step: dict[str, list[Any]] = {}
+    gaps_by_step: dict[str, list[Any]] = {}
+    if plan.build_guidance is not None:
+        for detail in plan.build_guidance.details:
+            details_by_step.setdefault(detail.step_id, []).append(detail)
+        for gap in plan.build_guidance.gaps:
+            if gap.step_id is not None:
+                gaps_by_step.setdefault(gap.step_id, []).append(gap)
+
+    for index, step in enumerate(plan.build_steps, start=1):
+        lines.append(f"[步骤 {index}] {step.title}")
+        lines.append(f"  说明:{step.display_text or step.intent}")
+        lines.append(f"  参数:{_render_step_parameters(step)}")
+        for detail in details_by_step.get(step.step_id, []):
+            lines.append(f"  说明:{detail.display_text}")
+            lines.append(f"  出处:{_render_detail_source(detail)}")
+        for gap in gaps_by_step.get(step.step_id, []):
+            prefix = "[阻塞] " if gap.severity == "blocking" else ""
+            lines.append(f"  缺口:{prefix}{gap.display_text}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _guidance_snapshot_for_plan(
+    arm_label: str,
+    plan: ModelGenerationPlan | None,
+    *,
+    telemetry: BuildStepsTelemetry | None = None,
+    row: SmokeSummaryRow | None = None,
+) -> GuidanceArtifactSnapshot:
+    output_counts = _guidance_output_counts(plan)
+    guidance_status = plan.guidance_status if plan is not None else "not_generated"
+    guidance_delivered = guidance_status == "generated" and output_counts["has_guidance"] is True
+    final_unverified = output_counts["final_unverified_detail_count"]
+    guidance_evidence_clean = guidance_delivered and final_unverified == 0
+    guidance_fully_actionable = guidance_evidence_clean and output_counts["blocking_gap_count"] == 0
+    return GuidanceArtifactSnapshot(
+        arm_label=arm_label,
+        plan=plan,
+        guidance_status=guidance_status,
+        guidance_delivered=guidance_delivered,
+        guidance_evidence_clean=guidance_evidence_clean,
+        guidance_fully_actionable=guidance_fully_actionable,
+        generator_downgraded_unverified_count=_artifact_count(
+            "generator_downgraded_unverified_count",
+            guidance_delivered=guidance_delivered,
+            telemetry=telemetry,
+            row=row,
+        ),
+        validator_dropped_unverified_count=_artifact_count(
+            "validator_dropped_unverified_count",
+            guidance_delivered=guidance_delivered,
+            telemetry=telemetry,
+            row=row,
+        ),
+        final_surviving_unverified_count=final_unverified,
+        blocking_gap_count=output_counts["blocking_gap_count"],
+    )
+
+
+def _artifact_count(
+    field_name: str,
+    *,
+    guidance_delivered: bool,
+    telemetry: BuildStepsTelemetry | None,
+    row: SmokeSummaryRow | None,
+) -> int | None:
+    if not guidance_delivered:
+        return None
+    if row is not None:
+        value = getattr(row, field_name)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+    if telemetry is not None:
+        value = getattr(telemetry, field_name)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+    return None
+
+
+def _render_step_parameters(step: ModelBuildStep) -> str:
+    if not step.parameter_refs:
+        return "无"
+    return ", ".join(
+        f"{ref.paper_param_name} -> {ref.model_param_name}" for ref in step.parameter_refs
+    )
+
+
+def _render_detail_source(detail: Any) -> str:
+    if (
+        detail.basis == "user_confirmation_required"
+        and detail.confirmation_reason_code == "document_evidence_unverified"
+    ):
+        return "★ 未核实,请用户自行确认"
+    if detail.basis == "engineering_convention":
+        return f"工程惯例:{detail.convention_code or 'unspecified'}"
+    if not detail.evidence:
+        return "论文依据缺失"
+    return "; ".join(_render_evidence_locator(entry) for entry in detail.evidence)
+
+
+def _render_evidence_locator(entry: Any) -> str:
+    if entry.paper_section_id:
+        return f"论文 {entry.document_id or 'unknown'} 第 {entry.paper_section_id} 处"
+    if entry.equation_id:
+        return f"论文 {entry.document_id or 'unknown'} 公式 {entry.equation_id}"
+    if entry.figure_id:
+        return f"论文 {entry.document_id or 'unknown'} 图 {entry.figure_id}"
+    return f"论文 {entry.document_id or 'unknown'}"
+
+
+def _display_count(value: int | None) -> str:
+    return "null" if value is None else str(value)
+
+
+def _safe_artifact_part(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
+    return safe or "main"
+
+
+def _jsonable(value: object) -> object:
+    if is_dataclass(value) and not isinstance(value, type):
+        return _jsonable(asdict(value))
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    return value
 
 
 def classify_build_steps_result(

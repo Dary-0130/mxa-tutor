@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -344,6 +345,25 @@ async def test_attempt_telemetry_keeps_first_failure_when_retry_succeeds() -> No
     ]
     assert [attempt.attempt_index for attempt in generator.last_telemetry.attempts] == [1, 2]
     assert generator.last_telemetry.terminal_reason is None
+
+
+@pytest.mark.asyncio
+async def test_production_guidance_generator_does_not_write_guidance_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_write_text(self: Path, *args: object, **kwargs: object) -> int:
+        _ = self, args, kwargs
+        raise AssertionError("production guidance path wrote model body")
+
+    monkeypatch.setattr(Path, "write_text", fail_write_text)
+    provider = MetadataProvider(
+        [_response(json.dumps(_valid_guidance_payload()), finish_reason="stop")]
+    )
+
+    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generated"
+    assert updated.build_guidance is not None
 
 
 def test_termination_guard_distinguishes_wall_clock_and_hard_cap() -> None:
