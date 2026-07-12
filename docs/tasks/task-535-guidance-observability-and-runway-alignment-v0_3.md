@@ -1,7 +1,7 @@
-# TASK-535:建模指导层失败可观测量具 + 评测跑道口径对齐(v0.3)
+# TASK-535:建模指导层失败可观测量具 + 评测跑道口径对齐(v0.5)
 
 > **性质**:量具卡 / 诊断卡。**只修测量通道,不修任何失败。**
-> **v0.3 变更**:折入 **R1 设计审(条件通过,5 P0 / 6 P1 / 4 P2,采纳 13 条)** + **Codex Stage-0 只读核查(8 项 live 坐实,打回 R1 两条)** + 架构师新增的**折算选靶规则**。
+> **v0.5 变更**:v0.4 + **S7 产物正文落盘(eval-only)** + 主指标改为**证据干净率** + 新增「不许拿质量换产量」守门。
 > **前置**:main 含 TASK-534 + 依赖审计量具 + 依赖措辞 v0.3(均已合入)
 > **后继**:对齐后 48 轮观测跑 → 据数选靶 → 修复卡。**本卡不预设打哪层。**
 >
@@ -9,7 +9,7 @@
 
 ## 状态
 
-🔲 v0.3 待实现(R1 条件通过 + Codex Stage-0 完成;**实施前须过 §10 三项 confirm-and-stop**)
+🔲 v0.5 待实现(R1 条件通过 + Codex Stage-0 完成;**实施前须过 §10 三项 confirm-and-stop**)
 
 ---
 
@@ -79,6 +79,7 @@ TASK-534 as-built 同时记了**两个数**:
 - **S4** **机会数 + 分母 + 三层未核实计数**(反假通过的主口)
 - **S5** 批次有效性门 + 指标分档冻结
 - **S6** attempt 级完整记录 + 终止器归因 + 版本标识
+- **S7** 产物正文落盘(eval-only):JSON 原样 + 人可读渲染,让正文能和 summary 数字对上号
 
 **不是**:
 
@@ -90,7 +91,7 @@ TASK-534 as-built 同时记了**两个数**:
 - ❌ **不造 `handle_ambiguous` 事件码**(S0-5:结构上不可能发生。**造一个永远为 0 的字段是噪音,会让人误以为量到了什么。**)
 - ❌ **不用 `critical_steps_fully_covered`**(S0-4:代码里没有。「完全可执行」改用 `blocking_gap_count == 0` 定义)
 - ❌ 不动对外 schema / API / 持久化 / TS / 前端(若发现必须动 → **停手回报**)
-- ❌ 不落模型原文(决策 11)
+- ❌ 生产路径不落模型正文 / raw response / partial JSON(决策 11);S7 只允许 eval-only 本地公开论文产物
 - ❌ 不碰 `03_TASK_INDEX.md`(决策 07;索引单独 closeout PR)
 
 ---
@@ -379,14 +380,59 @@ termination_guard:
 
 ★ **`retry_cap_exhausted` 只是终止器,不是根因。** 有了 `termination_guard` + `elapsed_ms`,才分得清「模型连错三次」与「第一次很慢、撞 wall clock 后没机会再跑」。
 
+### S7 产物正文落盘(eval-only)
+
+**起因**:评测跑道历史上只落统计,不落 guidance 正文。24 个历史输出目录里没有一份可读指导正文,导致「交付」「证据干净」「完全可执行」这些数字无法被人直接核读。
+
+**每轮必须落一份 JSON 原样产物**(机器可复查):
+
+```
+paper_id
+round_index
+arm                         (若配对;非配对为 main)
+build_steps                 原样、完整
+build_guidance              原样、完整;不是摘要、不是计数
+guidance_status
+guidance_delivered
+guidance_evidence_clean
+guidance_fully_actionable
+generator_downgraded_unverified_count
+validator_dropped_unverified_count
+final_surviving_unverified_count
+blocking_gap_count
+```
+
+★ **正文必须能和数字对上号。** 否则读了正文也回答不了「这个被判成交付的东西,到底空不空」。
+
+**每轮还必须落一份人能直接读的文本渲染**:
+
+```
+[步骤 N] 步骤标题
+  说明:……
+  出处:论文 X 第 Y 处 / ★ 未核实,请用户自行确认
+  参数:……
+  缺口:……(若为阻塞缺口,标出来)
+```
+
+理由:这份东西是给人读的,不能让人对着大括号看。**人读不了 = 等于没落。**
+
+**落盘位置**:`eval/out/` 下,与现有 summary 并排;目录受 `.gitignore` 覆盖。
+
+**红线边界(防以后被当先例)**:
+
+- eval-only。**生产路径仍不落模型正文** —— 决策 11 现在无缺口,本卡不许开这个口子。
+- 只对本地 8 篇公开 arXiv 论文;不进仓库、不进 CI、不进日志、不进任何长期存储、不进数据库。
+- 决策 11 管的是用户数据与诊断日志;此处落的是我们自己的公开论文在本机评测目录下的产出,不冲突。**但边界必须写死。**
+
 ---
 
-## 6. 脱敏(决策 11,承 526-B §4.8,本卡不放宽)
+## 6. 脱敏(决策 11,承 526-B §4.8,生产与诊断日志不放宽)
 
-- 落档**只许**:机器码枚举 / 计数 / 布尔 / 粗长度桶 / token 数字 / 模型指纹 / 仓库内静态模板 hash / git revision
+- summary / csv / 日志落档**只许**:机器码枚举 / 计数 / 布尔 / 粗长度桶 / token 数字 / 模型指纹 / 仓库内静态模板 hash / git revision
 - **绝不落**:模型写的任何字符串、LLM raw response、partial JSON、异常 message、原始异常类名、字段值、Pydantic input·ctx、文件名、本机路径
 - **禁** `str(exc)` / `repr(exc)` / `exc_info` / traceback / `logger.exception`
-- Codex 已核:**指导层当前无模型原文落盘点**(`response.text` 只解析,不写库 / 不写文件)。**本卡不得开这个口子。**
+- Codex 已核:**生产指导层当前无模型原文落盘点**(`response.text` 只解析,不写库 / 不写文件)。**本卡不得在生产路径开这个口子。**
+- S7 正文产物是唯一例外,且必须受 §5-S7 eval-only / 公开论文 / 本地 gitignored 目录边界约束。
 
 ---
 
@@ -407,6 +453,10 @@ termination_guard:
 13. **`termination_guard` 可分**:构造 wall-clock 超时 / hard cap 耗尽两例,断言落**不同**枚举值
 14. **脱敏零命中**:扫落档产物(summary.json / csv / 日志),无模型字符串 / 无 message / 无 traceback / 无原始异常类名 / 无本机路径 / 无 raw response
 15. `make check` **全绿(全管道,禁拆 CI step 列)**
+16. **正文落盘可读**:跑一轮(可用 fake provider / 固定输入),产出至少一份人可读渲染;架构师会直接读它 —— 读不懂 = 不通过
+17. **正文与数字对得上**:同一轮的正文里「未核实」条目数,必须等于 summary 里的 `final_surviving_unverified_count`
+18. **生产零落盘**:确定性测试证明生产路径仍不落模型正文(决策 11 无缺口)
+19. **不进仓库**:`git status` 证明落盘产物全部在 `.gitignore` 覆盖下
 
 ---
 
@@ -423,12 +473,19 @@ termination_guard:
 **第 2 门 — 先报三档产品结果**(不选靶,先看清水位):
 
 ```
-交付率       = guidance_delivered / 48
-证据干净率   = guidance_evidence_clean / 48
+主指标:证据干净率 = guidance_evidence_clean / 48
+辅助读数:交付率   = guidance_delivered / 48
 完全可执行率 = guidance_fully_actionable / 48
 ```
 
 同时报:机会数(`guidance_invoked` 轮数)、各分母的 null 轮数、`final_unverified_detail_count` 的 P50 / P95。
+
+★ **主指标 = 证据干净率。交付率降为辅助读数。**
+理由:交付率可以靠「把内容推给用户确认」刷高,而那恰好是这套框架里最便宜的通过方式(降级路径不算失败)。优化什么,系统就往什么方向漂。
+
+★ **硬守门(预登记,不得事后改)**:
+任何「修产出率」的改动,若使证据干净率下降 → 一律不许合并,哪怕交付率上升。
+**不许拿产物质量换产出率。**
 
 **第 3 门 — 静默降级门**:
 
@@ -579,7 +636,7 @@ guidance 本地 wall-clock cap / 180.0s / 180.0s(同一层,另一层 cap)
 
 ---
 
-**版本**:v0.4(v0.3 + Stage 1 实测折入:失败码时点表 / 组合表 / 三层计数做法 / 生产 timeout=120;新增 retry_cap_exhausted 名不副实特例、no_document_basis 归属待定桶 guidance_input_defect 及其前置门 0)
+**版本**:v0.5(v0.4 + S7 产物正文落盘 + 主指标改为证据干净率 + 不许拿质量换产量守门)
 **作者**:Claude(架构师)
 **依据**:Codex R6 只读核查 ×2(2026-07-12)+ R1 设计审(条件通过,采纳 13 / 打回 2)
 **审批**:R1 条件通过 → PM 拍 → 派 Codex(须先过 §10 三项 confirm-and-stop)
