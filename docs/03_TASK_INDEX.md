@@ -350,9 +350,9 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅✅⏸✅✅]  8/9
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 26/27 (paper-to-model TASK-500~508 + TASK-523/524/525/526/528/529 + TASK-530(PDF 活动内容闸) + TASK-531/532/533(长度上限放宽 + spec 校验诊断)+ TASK-520/521/522(🔍 追问/多文件/解析纠错子线未完全收口);MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍] 27/28 (paper-to-model TASK-500~508 + TASK-523/524/525/526/528/529 + TASK-530(PDF 活动内容闸) + TASK-531/532/533(长度上限放宽 + spec 校验诊断) + TASK-534(build_steps 契约/依赖量具/配对评测/depends_on 措辞转正)+ TASK-520/521/522(🔍 追问/多文件/解析纠错子线未完全收口);MATLAB bridge/engine TASK-510~519)
 
-总计: 57/60
+总计: 58/61
 ```
 
 ---
@@ -404,6 +404,7 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-531 | 主路内部长度上限放宽(raw_text 门槛 + spec 生成预算) | ✅ | Codex | 已合并 main;MAX_PAPER_RAW_TEXT_CHARS 80k→150k、DEFAULT_PAPER_SPEC_MAX_TOKENS 8000→16000;主路实模型经核为 deepseek-v4-flash(1M 窗口/384K 输出上限,非注释所写 V3),两处均属自设保守值、远未触及模型能力;按 R1 裁决 plan/guidance 预算(8000)不顺带抬、改设触发条件(finish_reason=length 或 P95 逼近上限即另起卡);纯内部常量、schema export 零 diff、不触发决策 13;新增确定性边界测试(150k 放行/150001 拒/80001 放行/spy 断言下发 max_tokens=16000/finish_reason=length 不被残缺 JSON 掩盖)+ 三篇截断篇各 3 轮真机;试车道 ready 2/8→6/8 |
 | TASK-532 | PaperSpec.abstract 上限 1000→1500(对外 schema 同步) | ✅ | Codex | 已合并 main;走决策 13 全清单(schema 源 + 重导出 + 06 契约 + prompt + 边界测试),12 个 paper schema 仅 paper_spec 的 abstract maxLength 变、其余 11 零 diff;不 bump CURRENT_SCHEMA_VERSION(仍 8,无 DDL/迁移);超长仍 fail、不静默截断(决策 17);prompt bump v0.3→v0.4,新写防照抄指令并把「推荐 300-800 字」与「硬上限 1500」分开写(防 1500 被模型当目标长度)——本卡只降低照抄概率、不声称已兜住,整段复制硬检测拆独立后续卡;真机 8 篇 ready 6/8→8/8,2403(1188)/2409(1238)实测均超旧撞线值 1162,印证 1500 余量必要 |
 | TASK-533 | spec 校验失败记录字段级诊断(loc/type/count) | ✅ | Codex | 已合并 main;补主路观测盲区——此前 spec pydantic 校验失败只记 schema_validation 大类,无法归因到字段,导致「长度闸打通后露出的失败是不是第四道闸」无法从记录判断;现只提取 loc/type/count(长度类另记纯数字 max_length/actual_length),严格剔除 msg/input/字段值/raw/stack(决策 11);试车道 summary/actual 带 spec_validation_errors;凭此当场坐实 2410/2409 失败均为 abstract/string_too_long/max_length=1000、排除第四道约束,直接支撑 TASK-532 放行;纯观测、不改行为、schema export 零 diff |
+| TASK-534 | build_steps 草稿契约分离 + 依赖量具 + 同场配对评测台 + depends_on 措辞转正 | ✅ | Codex | 决策 27 |
 | 评测 PDF 试车道 | 本地固定论文集真机主路 smoke lane(非 TASK 编号,评测基建) | ✅ | Codex | 已合并 main(PR #193);eval/run_paper_pdf_smoke.py 对本地论文集逐篇跑完整真机主路(upload→parse→spec→plan→guidance)输出标准口径 summary,产物落 eval/out/(gitignore);与 stripped-md CI golden 并存不替换,默认不进 CI、跑真机;决策 12 §7.1 豁免 R 轮 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
