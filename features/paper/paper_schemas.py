@@ -312,9 +312,9 @@ class ParameterMappingRefModel(_StrictBaseModel):
 
 
 class ConnectionHintModel(_StrictBaseModel):
-    from_block_ref: str = Field(min_length=1)
+    from_block_ref: Annotated[str, StringConstraints(min_length=1, strict=True)]
     from_port: str | None = Field(min_length=1)
-    to_block_ref: str = Field(min_length=1)
+    to_block_ref: Annotated[str, StringConstraints(min_length=1, strict=True)]
     to_port: str | None = Field(min_length=1)
     signal_meaning: str | None = Field(min_length=1)
 

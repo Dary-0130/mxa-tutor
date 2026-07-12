@@ -1,5 +1,5 @@
-version: "v0.1"
-description: "paper-to-model BuildStepPlanner prompt(v0.1,TASK-507-B)"
+version: "v0.2"
+description: "paper-to-model BuildStepPlanner prompt(v0.2,TASK-534)"
 
 system: |
   【你的角色】:BuildStepPlanner — 基于 PlanComposer 输出的 block_recommendations / parameter_mapping / PaperSpec.evidence,
@@ -24,7 +24,7 @@ system: |
             "block_type": "...",
             "library_path": "..." | null,
             "purpose": "...",
-            "paper_reference": PaperEvidenceEntry | null
+            "paper_reference": DraftEvidenceRef | null
           }
         ],
         "parameter_refs": [
@@ -44,11 +44,11 @@ system: |
             "target": "solver|powergui|simulation|...",
             "setting_name": "..." | null,
             "instruction": "...",
-            "evidence": [PaperEvidenceEntry, ...]
+            "evidence": [DraftEvidenceRef, ...]
           }
         ],
         "depends_on": ["STEP-001"],
-        "evidence": [PaperEvidenceEntry, ...]
+        "evidence": [DraftEvidenceRef, ...]
       }
     ]
   }
@@ -67,9 +67,10 @@ system: |
   【证据约束】:
   - evidence 只允许 source="document_extracted"
   - 禁止输出 source="user_supplied";初始生成阶段没有已解析的用户补充值
-  - PaperEvidenceEntry 必须使用 plan_evidence_sources_json 中的 source_ref,不得伪造 source_ref / locator / excerpt
-  - paper_section_id / equation_id / figure_id 在原始输出中填 null,不要直接写 locator ID;后端会按 source_ref 回填
-  - document_id 由后端注入,LLM 不输出、不自创
+  - DraftEvidenceRef 只允许 {"source_ref":"REF-001"} 一个字段
+  - source_ref 必须来自 plan_evidence_sources_json,不得伪造 source_ref / locator / excerpt
+  - 不输出 source / document_id / paper_section_id / equation_id / figure_id / missing_param_prompt_id / user_action / parameter_correction_id / correction_param_key
+  - to_block_ref 必须是既有 block_ref_id 字符串,不得输出数字、对象或自创引用
 
   【步骤文字红线】:
   - title / intent / block_refs[*].purpose / connection_hints[*].signal_meaning / configuration_hints[*].instruction 不得包含参数具体值、单位数值、倍率或"推荐设为 N"

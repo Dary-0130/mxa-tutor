@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 import features.paper.paper_plan_service as service_module
 from core.domain.exceptions import LLMRateLimitError, PaperPlanGenerationError
-from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
+from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_plan import (
@@ -30,11 +30,13 @@ from core.domain.paper_spec import (
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
+    BuildStepsDtoValidationError,
     BuildStepsJsonParseError,
     BuildStepsStructuredError,
     EvidenceTagger,
     MissingBindingModel,
     ModelBuildStepDraft,
+    UserEvidenceRef,
 )
 from features.paper.paper_plan_service import PaperPlanService
 from features.paper.paper_schemas import ModelGenerationPlanModel, StepBlockRefModel
@@ -236,13 +238,13 @@ def test_block_ref_draft_rejects_invalid_payloads_fail_red(case_name: str) -> No
     payload = _build_steps_payload()
     block_ref = payload["build_steps"][0]["block_refs"][0]
     if case_name == "invalid_paper_reference_shape":
-        block_ref["paper_reference"]["source_ref"] = "REF-999"
+        block_ref["paper_reference"] = _document_evidence_payload()
     elif case_name == "missing_required_field":
         block_ref.pop("block_type")
     elif case_name == "extra_field":
         block_ref["unexpected_field"] = "forbidden"
 
-    with pytest.raises(ValidationError):
+    with pytest.raises((ValidationError, BuildStepsDtoValidationError)):
         _drafts_from_build_steps_payload(payload)
 
 
@@ -293,6 +295,167 @@ async def test_omitted_block_ref_paper_reference_logs_metadata_only(
     assert "The report states the machine parameter." not in logged
     assert "source_ref" not in logged
     assert "paper_reference" in logged
+
+
+@pytest.mark.asyncio
+async def test_build_step_draft_evidence_resolves_three_entry_points_from_source_ref() -> None:
+    service = PayloadPaperPlanService({"build_step_planner": _build_steps_payload()})
+
+    drafts = await service._llm_build_steps(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        _spec(),
+    )
+
+    assert drafts[0].block_refs[0].paper_reference == _document_evidence()
+    assert drafts[0].evidence == [_document_evidence()]
+    assert drafts[2].configuration_hints[0].evidence == [_document_evidence()]
+
+
+@pytest.mark.parametrize(
+    ("draft_evidence", "reason_code"),
+    [
+        ({}, "source_ref_missing"),
+        ({"source_ref": None}, "source_ref_missing"),
+        ({"source_ref": ""}, "source_ref_missing"),
+        ({"source_ref": 1}, "source_ref_type_invalid"),
+        ({"source_ref": "REF-999"}, "source_ref_no_match"),
+        (
+            {"source_ref": "REF-001", "document_id": "DOC-001"},
+            "draft_schema_invalid",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_build_step_draft_evidence_fail_closed_with_machine_codes(
+    draft_evidence: dict[str, Any],
+    reason_code: str,
+) -> None:
+    payload = _build_steps_payload()
+    payload["build_steps"][0]["evidence"][0] = draft_evidence
+    service = PayloadPaperPlanService({"build_step_planner": payload})
+
+    with pytest.raises(BuildStepsDtoValidationError) as exc_info:
+        await service._llm_build_steps(
+            [_block_recommendation()],
+            [_sentinel_mapping()],
+            _spec(),
+        )
+
+    assert exc_info.value.reason_code == reason_code
+
+
+@pytest.mark.asyncio
+async def test_build_step_draft_evidence_ambiguous_source_ref_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    refs = service_module.build_plan_evidence_source_refs(_spec())
+    monkeypatch.setattr(
+        service_module,
+        "build_plan_evidence_source_refs",
+        lambda spec: [refs[0], refs[0]],
+    )
+    service = PayloadPaperPlanService({"build_step_planner": _build_steps_payload()})
+
+    with pytest.raises(BuildStepsDtoValidationError) as exc_info:
+        await service._llm_build_steps(
+            [_block_recommendation()],
+            [_sentinel_mapping()],
+            _spec(),
+        )
+
+    assert exc_info.value.reason_code == "source_ref_ambiguous"
+
+
+@pytest.mark.asyncio
+async def test_build_step_bridge_final_evidence_invalid_still_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        service_module,
+        "build_plan_evidence_source_refs",
+        lambda spec: [
+            service_module.PlanEvidenceSourceRef(
+                source_ref="REF-001",
+                document_id="",
+                locator_kind="paper_section_id",
+                locator_id="S1",
+                filename="paper.pdf",
+                excerpt="The report states the machine parameter.",
+            )
+        ],
+    )
+    service = PayloadPaperPlanService({"build_step_planner": _build_steps_payload()})
+
+    with pytest.raises(BuildStepsDtoValidationError) as exc_info:
+        await service._llm_build_steps(
+            [_block_recommendation()],
+            [_sentinel_mapping()],
+            _spec(),
+        )
+
+    assert exc_info.value.reason_code == "final_evidence_invalid"
+
+
+def test_build_step_public_dto_rejects_source_ref_leak() -> None:
+    payload = service_module._resolve_build_steps_draft_evidence_payload(
+        _build_steps_payload(),
+        document_source_refs=service_module.build_plan_evidence_source_refs(_spec()),
+        user_source_refs=[],
+    )
+    payload["build_steps"][0]["evidence"][0]["source_ref"] = "REF-001"
+
+    with pytest.raises(ValidationError) as exc_info:
+        service_module._BuildStepsOutputModel.model_validate(payload)
+
+    assert service_module._build_steps_final_validation_reason(exc_info.value) == (
+        "source_ref_leaked"
+    )
+
+
+@pytest.mark.asyncio
+async def test_build_step_to_block_ref_non_string_fails_dto_validation() -> None:
+    payload = _build_steps_payload()
+    payload["build_steps"][2]["connection_hints"] = [
+        {
+            "from_block_ref": "B1",
+            "from_port": None,
+            "to_block_ref": 1,
+            "to_port": None,
+            "signal_meaning": "machine signal",
+        }
+    ]
+    service = PayloadPaperPlanService({"build_step_planner": payload})
+
+    with pytest.raises(BuildStepsDtoValidationError) as exc_info:
+        await service._llm_build_steps(
+            [_block_recommendation()],
+            [_sentinel_mapping()],
+            _spec(),
+        )
+
+    assert exc_info.value.reason_code == "dto_invalid"
+
+
+@pytest.mark.asyncio
+async def test_regenerate_build_steps_resolves_user_supplied_source_ref() -> None:
+    user_evidence = _user_evidence()
+    payload = _build_steps_payload()
+    payload["build_steps"][1]["evidence"][0] = {"source_ref": "USER-001"}
+    payload["build_steps"][2]["configuration_hints"][0]["evidence"][0] = {"source_ref": "USER-001"}
+    service = PayloadPaperPlanService({"build_step_regenerator": payload})
+
+    drafts = await service._llm_build_steps_for_regeneration(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        _spec(),
+        [_document_evidence(), user_evidence],
+        {UserEvidenceRef(kind=UserEvidenceAction.FILL_MISSING, key="MISS-1")},
+        frozenset({"MISS-1"}),
+    )
+
+    assert drafts[1].evidence == [user_evidence]
+    assert drafts[2].configuration_hints[0].evidence == [user_evidence]
 
 
 @pytest.mark.asyncio
@@ -1237,14 +1400,14 @@ def _build_steps_payload(
                         "block_type": "Synchronous Machine",
                         "library_path": None,
                         "purpose": "Model the generator.",
-                        "paper_reference": _document_evidence_payload(),
+                        "paper_reference": _document_draft_evidence_payload(),
                     }
                 ],
                 "parameter_refs": [],
                 "connection_hints": [],
                 "configuration_hints": [],
                 "depends_on": [],
-                "evidence": [_document_evidence_payload()],
+                "evidence": [_document_draft_evidence_payload()],
             },
             {
                 "step_id": "STEP-002",
@@ -1260,7 +1423,7 @@ def _build_steps_payload(
                 "connection_hints": [],
                 "configuration_hints": [],
                 "depends_on": ["STEP-001"],
-                "evidence": [_document_evidence_payload()],
+                "evidence": [_document_draft_evidence_payload()],
             },
             {
                 "step_id": "STEP-003",
@@ -1274,11 +1437,11 @@ def _build_steps_payload(
                         "target": "simulation",
                         "setting_name": "Signal logging",
                         "instruction": "Record the generated current signal.",
-                        "evidence": [_document_evidence_payload()],
+                        "evidence": [_document_draft_evidence_payload()],
                     }
                 ],
                 "depends_on": ["STEP-001"],
-                "evidence": [_document_evidence_payload()],
+                "evidence": [_document_draft_evidence_payload()],
             },
         ]
     }
@@ -1289,11 +1452,11 @@ def _build_step_drafts() -> list[ModelBuildStepDraft]:
 
 
 def _drafts_from_build_steps_payload(payload: dict[str, Any]) -> list[ModelBuildStepDraft]:
-    bridged_payload = service_module.apply_plan_evidence_reference_bridge(
+    bridged_payload = service_module._resolve_build_steps_draft_evidence_payload(
         payload,
-        service_module.build_plan_evidence_source_refs(_spec()),
+        document_source_refs=service_module.build_plan_evidence_source_refs(_spec()),
+        user_source_refs=[],
     )
-    service_module._preserve_present_invalid_block_ref_paper_references(payload, bridged_payload)
     return service_module._BuildStepsOutputModel.model_validate(bridged_payload).to_drafts()
 
 
@@ -1498,6 +1661,21 @@ def _document_evidence_payload(
     }
 
 
+def _document_draft_evidence_payload(
+    *,
+    paper_section_id: str | None = "S1",
+    equation_id: str | None = None,
+    figure_id: str | None = None,
+) -> dict[str, Any]:
+    source_ref = "REF-001"
+    if equation_id is not None:
+        source_ref = "REF-002"
+    if figure_id is not None:
+        source_ref = "REF-003"
+    _ = paper_section_id
+    return {"source_ref": source_ref}
+
+
 def _user_evidence_payload() -> dict[str, Any]:
     return {
         "source": "user_supplied",
@@ -1511,3 +1689,16 @@ def _user_evidence_payload() -> dict[str, Any]:
         "parameter_correction_id": None,
         "correction_param_key": None,
     }
+
+
+def _user_evidence() -> PaperEvidenceEntry:
+    return PaperEvidenceEntry(
+        source=EvidenceSource.USER_SUPPLIED,
+        document_id=None,
+        paper_section_id=None,
+        equation_id=None,
+        figure_id=None,
+        excerpt=None,
+        missing_param_prompt_id="MISS-1",
+        user_action=UserEvidenceAction.FILL_MISSING,
+    )

@@ -19,7 +19,7 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import aiosqlite
 from fastapi import UploadFile
@@ -42,20 +42,15 @@ from core.domain.paper_upload_job import PaperUploadJobRecord
 from core.interfaces.document_parser import DocumentParserRouter
 from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapability, TextProvider
 from features.paper.paper_plan_helpers import (
-    BuildStepsDtoValidationError,
     BuildStepsEvidenceError,
     BuildStepsRedLineError,
     BuildStepsStructuredError,
     ModelBuildStepDraft,
-    apply_plan_evidence_reference_bridge,
     build_plan_evidence_source_refs,
 )
 from features.paper.paper_plan_service import (
     BUILD_STEP_ROLE_NAME,
     PaperPlanService,
-    _BuildStepsOutputModel,
-    _log_omitted_build_step_block_reference_count,
-    _preserve_present_invalid_block_ref_paper_references,
 )
 from features.paper.paper_reparse_service import PaperReparseLockRegistry
 from features.paper.paper_spec_service import PaperSpecService
@@ -75,8 +70,26 @@ BuildStepsResultCode = Literal[
     "redline",
     "evidence_invalid",
     "coverage_missing",
+    "draft_schema_invalid",
+    "source_ref_missing",
+    "source_ref_type_invalid",
+    "source_ref_no_match",
+    "source_ref_ambiguous",
+    "final_evidence_invalid",
+    "source_ref_leaked",
     "其它",
 ]
+BUILD_STEPS_BRIDGE_REASON_CODES = frozenset(
+    {
+        "draft_schema_invalid",
+        "source_ref_missing",
+        "source_ref_type_invalid",
+        "source_ref_no_match",
+        "source_ref_ambiguous",
+        "final_evidence_invalid",
+        "source_ref_leaked",
+    }
+)
 
 SUMMARY_COLUMNS = [
     "run_id",
@@ -299,18 +312,21 @@ class RecordingPaperPlanService(PaperPlanService):
             BUILD_STEP_ROLE_NAME,
         )
         source_refs = build_plan_evidence_source_refs(spec)
-        raw_data = data
-        data = apply_plan_evidence_reference_bridge(data, source_refs)
-        _preserve_present_invalid_block_ref_paper_references(raw_data, data)
-        _log_omitted_build_step_block_reference_count(raw_data, role_name=BUILD_STEP_ROLE_NAME)
-        if data.get("build_steps") == []:
-            raise BuildStepsDtoValidationError("empty_steps")
-        try:
-            model = _BuildStepsOutputModel.model_validate(data)
-        except ValidationError as exc:
-            self._smoke_telemetry.dto_invalid_errors = _pydantic_loc_type_errors(exc)
-            raise BuildStepsDtoValidationError("dto_invalid") from None
-        return model.to_drafts()
+        return self._parse_build_steps_output(
+            data,
+            document_source_refs=source_refs,
+            user_source_refs=[],
+            role_name=BUILD_STEP_ROLE_NAME,
+        )
+
+    def _record_build_steps_dto_validation_errors(
+        self,
+        exc: ValidationError,
+        *,
+        role_name: str,
+    ) -> None:
+        _ = role_name
+        self._smoke_telemetry.dto_invalid_errors = _pydantic_loc_type_errors(exc)
 
     def _build_step_messages(self, block_recommendations, parameter_mapping, spec):
         from features.paper._prompt_builder import build_messages_for_build_steps
@@ -518,6 +534,8 @@ def classify_build_steps_result(
         return "结构化成功"
     reason = telemetry.fallback_reason_code
     exc_type = telemetry.fallback_exception_type
+    if reason in BUILD_STEPS_BRIDGE_REASON_CODES:
+        return cast(BuildStepsResultCode, reason)
     if reason == "dto_invalid":
         return "dto_invalid"
     if reason == "json_parse_failed":
@@ -672,11 +690,66 @@ def _pydantic_loc_type_errors(exc: ValidationError) -> list[dict[str, str]]:
         error_type = item.get("type")
         errors.append(
             {
-                "loc": ".".join(str(part) for part in loc) if isinstance(loc, tuple) else "root",
+                "loc": _sanitize_pydantic_loc(loc),
                 "type": str(error_type or "unknown"),
             }
         )
     return errors
+
+
+_SAFE_PYDANTIC_LOC_PARTS = frozenset(
+    {
+        "build_steps",
+        "step_id",
+        "title",
+        "intent",
+        "block_refs",
+        "block_ref_id",
+        "block_type",
+        "library_path",
+        "purpose",
+        "paper_reference",
+        "parameter_refs",
+        "paper_param_name",
+        "model_param_name",
+        "connection_hints",
+        "from_block_ref",
+        "from_port",
+        "to_block_ref",
+        "to_port",
+        "signal_meaning",
+        "configuration_hints",
+        "target",
+        "setting_name",
+        "instruction",
+        "depends_on",
+        "evidence",
+        "source",
+        "document_id",
+        "paper_section_id",
+        "equation_id",
+        "figure_id",
+        "excerpt",
+        "missing_param_prompt_id",
+        "user_action",
+        "parameter_correction_id",
+        "correction_param_key",
+        "source_ref",
+    }
+)
+
+
+def _sanitize_pydantic_loc(loc: object) -> str:
+    if not isinstance(loc, tuple):
+        return "root"
+    parts: list[str] = []
+    for part in loc:
+        text = str(part)
+        if isinstance(part, int) or text.isdigit() or text in _SAFE_PYDANTIC_LOC_PARTS:
+            parts.append(text)
+        else:
+            parts.append("<dynamic_key>")
+    return ".".join(parts)
 
 
 def _record_spec_validation_errors(

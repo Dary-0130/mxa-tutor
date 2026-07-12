@@ -83,7 +83,7 @@ def test_load_paper_plan_subsystem_yaml() -> None:
 def test_load_paper_plan_build_steps_yaml() -> None:
     template = load_prompt_template("paper_plan_build_steps.yaml")
 
-    assert template.version == "v0.1"
+    assert template.version == "v0.2"
     assert "BuildStepPlanner" in template.system
     assert "{block_recommendations_json}" in template.user
     assert "{parameter_mapping_json}" in template.user
@@ -93,7 +93,7 @@ def test_load_paper_plan_build_steps_yaml() -> None:
 def test_load_paper_plan_build_steps_regenerate_yaml() -> None:
     template = load_prompt_template("paper_plan_build_steps_regenerate.yaml")
 
-    assert template.version == "v0.1"
+    assert template.version == "v0.2"
     assert "BuildStepPlanner(Regenerate)" in template.system
     assert "{allowed_user_evidence_json}" in template.user
     assert "{resolved_prompt_ids_json}" in template.user
@@ -182,19 +182,13 @@ def test_shared_snippet_contains_plan_id_injection_rule() -> None:
     assert "plan_id / paper_spec_id 不要自生成,由系统注入,逐字照抄" in snippet
 
 
-def test_5_role_systems_all_inject_shared_snippet() -> None:
+def test_non_build_step_plan_role_systems_inject_shared_snippet() -> None:
     systems = [
         build_messages_for_missing_detect(_spec(), [_sentinel_mapping()])[0].content,
         build_messages_for_plan_compose(_spec(), "PLAN-PAPER-001", "PAPER-001")[0].content,
         build_messages_for_subsystem_plan([_block_recommendation()], [_document_evidence()])[
             0
         ].content,
-        build_messages_for_build_steps(
-            [_block_recommendation()],
-            [_sentinel_mapping()],
-            [_document_evidence()],
-            build_plan_evidence_source_refs(_spec()),
-        )[0].content,
         build_messages_for_mscript_draft(_spec().equations, _spec().parameter_table)[0].content,
     ]
 
@@ -301,7 +295,8 @@ def test_build_step_planner_system_specifies_structured_redline_contract() -> No
     assert "build_steps 必须 3-10 步" in system
     assert "不得输出空数组 []" in system
     assert "逐字复用 block_recommendations" in system
-    assert 'source="document_extracted"' in system
+    assert "DraftEvidenceRef" in system
+    assert '{"source_ref":"REF-001"}' in system
     assert '禁止输出 source="user_supplied"' in system
     assert "不得包含参数具体值" in system
     assert '禁止写"增大 10%"' in system
@@ -331,10 +326,12 @@ def test_regenerate_build_step_prompt_allows_resolved_user_evidence() -> None:
     system = messages[0].content
     user = messages[1].content
 
-    assert "重生成阶段 evidence 双源契约" in system
+    assert "重生成阶段私有 draft evidence 契约" in system
+    assert "USER-001" in system
     assert "fill_missing" in system
     assert "correct_extracted" in system
     assert "allowed_user_evidence_json" in user
+    assert '"source_ref": "USER-001"' in user
     assert '"MISS-1"' in user
     assert '"MISS-2"' not in user
 
@@ -352,6 +349,11 @@ def test_build_messages_for_build_steps_includes_blocks_params_and_evidence() ->
     assert '"paper_param_name": "H 惯性时间常数"' in user
     assert '"paper_section_id": "S1"' in user
     assert '"source_ref": "REF-001"' in user
+    source_list = user.split("plan_evidence_sources_json:", maxsplit=1)[1]
+    assert '"document_id"' not in source_list
+    assert '"locator_kind"' not in source_list
+    assert '"locator_id"' not in source_list
+    assert '"excerpt"' not in source_list
 
 
 def test_build_messages_for_build_guidance_uses_private_evidence_cards_only() -> None:
