@@ -97,6 +97,34 @@ def test_audit_counts_connection_refs_not_visible_without_recording_ids() -> Non
     assert "B2" not in payload
 
 
+def test_audit_counts_cross_step_connections_and_inbound_deps_without_recording_ids() -> None:
+    audit = audit_step_dependencies(
+        [
+            _step(1, [], block_ref_ids=["B1"]),
+            _step(
+                2,
+                ["STEP-001"],
+                block_ref_ids=["B2"],
+                connection_ref_pairs=[("B2", "B1")],
+            ),
+            _step(
+                3,
+                ["STEP-001", "STEP-002"],
+                block_ref_ids=["B3"],
+                connection_ref_pairs=[("B1", "B2")],
+            ),
+        ]
+    )
+    payload = json.dumps(audit.to_dict(), ensure_ascii=False)
+
+    assert audit.per_step_connection_counts == [0, 1, 1]
+    assert audit.per_step_cross_step_connection_counts == [0, 1, 1]
+    assert audit.per_step_inbound_dep_counts == [2, 1, 0]
+    assert "B1" not in payload
+    assert "B2" not in payload
+    assert "B3" not in payload
+
+
 def test_audit_truncates_violation_edges_but_preserves_total_count() -> None:
     audit = audit_step_dependencies(
         [_step(1, [f"STEP-{index:03d}" for index in range(100, 160)]), _step(2, []), _step(3, [])],
@@ -156,6 +184,7 @@ def _step(
     source_ref: str | None = None,
     block_ref_ids: list[str] | None = None,
     connection_refs: list[str] | None = None,
+    connection_ref_pairs: list[tuple[str | None, str | None]] | None = None,
 ) -> dict[str, object]:
     evidence = [{"source_ref": source_ref}] if source_ref is not None else []
     block_refs = [
@@ -163,7 +192,15 @@ def _step(
         for block_ref_id in block_ref_ids or []
     ]
     connection_hints = []
-    if connection_refs:
+    if connection_ref_pairs:
+        for from_ref, to_ref in connection_ref_pairs:
+            connection_hints.append(
+                {
+                    "from_block_ref": from_ref,
+                    "to_block_ref": to_ref,
+                }
+            )
+    elif connection_refs:
         connection_hints.append(
             {
                 "from_block_ref": connection_refs[0],

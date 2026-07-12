@@ -47,6 +47,7 @@ class _StepShape:
     step_id: object
     depends_on: list[object]
     block_ref_ids: list[object]
+    connection_ref_pairs: list[tuple[object, object]]
     connection_ref_ids: list[object]
     chosen_source_ref_ordinal: int | None
 
@@ -81,6 +82,9 @@ class DependencyAudit:
     same_number_probe_count: int = 0
     dep_ordinal_equals_source_ref_ordinal_count: int = 0
     connection_ref_not_visible_count: int | None = None
+    per_step_connection_counts: list[int] = field(default_factory=list)
+    per_step_cross_step_connection_counts: list[int] = field(default_factory=list)
+    per_step_inbound_dep_counts: list[int] = field(default_factory=list)
     evidence_ref_count: int | None = None
     block_candidate_count: int | None = None
     parameter_mapping_count: int | None = None
@@ -230,6 +234,12 @@ def _audit_step_dependencies_unchecked(
 
     same_number_probes = _same_number_probes(steps, edge_records)
     connection_ref_not_visible_count = _connection_ref_not_visible_count(steps, edge_records)
+    per_step_connection_counts = [len(step.connection_ref_pairs) for step in steps]
+    per_step_cross_step_connection_counts = _per_step_cross_step_connection_counts(
+        steps,
+        edge_records,
+    )
+    per_step_inbound_dep_counts = _per_step_inbound_dep_counts(steps, edge_records)
     status: DependencyAuditStatus = (
         "violations" if violation_edges or duplicate_step_id_count > 0 else "clean"
     )
@@ -255,6 +265,9 @@ def _audit_step_dependencies_unchecked(
             1 for probe in same_number_probes if probe.dep_ordinal_equals_source_ref_ordinal
         ),
         connection_ref_not_visible_count=connection_ref_not_visible_count,
+        per_step_connection_counts=per_step_connection_counts,
+        per_step_cross_step_connection_counts=per_step_cross_step_connection_counts,
+        per_step_inbound_dep_counts=per_step_inbound_dep_counts,
     )
 
 
@@ -279,6 +292,7 @@ def _extract_step_shape(step: object) -> _StepShape:
         step_id=step_id,
         depends_on=depends_on_items,
         block_ref_ids=_block_ref_ids(block_refs),
+        connection_ref_pairs=_connection_ref_pairs(connection_hints),
         connection_ref_ids=_connection_ref_ids(connection_hints),
         chosen_source_ref_ordinal=_chosen_source_ref_ordinal(evidence),
     )
@@ -465,6 +479,76 @@ def _connection_ref_not_visible_count(
     return total
 
 
+def _per_step_cross_step_connection_counts(
+    steps: list[_StepShape],
+    edge_records: list[_EdgeRecord],
+) -> list[int]:
+    deps_by_step = _deps_by_step(steps, edge_records)
+    counts: list[int] = []
+    for step_index, step in enumerate(steps):
+        visible_step_indexes = {step_index, *_dependency_closure_indexes(step_index, deps_by_step)}
+        visible_refs = [
+            block_ref_id
+            for visible_step_index in visible_step_indexes
+            for block_ref_id in steps[visible_step_index].block_ref_ids
+            if isinstance(block_ref_id, str)
+        ]
+        visible_counts = Counter(visible_refs)
+        unique_visible_ref_owner: dict[str, int] = {}
+        for visible_step_index in visible_step_indexes:
+            for block_ref_id in steps[visible_step_index].block_ref_ids:
+                if isinstance(block_ref_id, str) and visible_counts.get(block_ref_id, 0) == 1:
+                    unique_visible_ref_owner[block_ref_id] = visible_step_index
+
+        cross_step_count = 0
+        for from_ref, to_ref in step.connection_ref_pairs:
+            if _pair_has_cross_step_ref(
+                from_ref,
+                to_ref,
+                step_index=step_index,
+                unique_visible_ref_owner=unique_visible_ref_owner,
+            ):
+                cross_step_count += 1
+        counts.append(cross_step_count)
+    return counts
+
+
+def _pair_has_cross_step_ref(
+    from_ref: object,
+    to_ref: object,
+    *,
+    step_index: int,
+    unique_visible_ref_owner: dict[str, int],
+) -> bool:
+    for ref in (from_ref, to_ref):
+        if isinstance(ref, str) and unique_visible_ref_owner.get(ref) not in {None, step_index}:
+            return True
+    return False
+
+
+def _per_step_inbound_dep_counts(
+    steps: list[_StepShape],
+    edge_records: list[_EdgeRecord],
+) -> list[int]:
+    counts = [0 for _ in steps]
+    for record in edge_records:
+        dep_index = record.dep_index
+        if record.dep_match_count == 1 and dep_index is not None and dep_index != record.step_index:
+            counts[dep_index] += 1
+    return counts
+
+
+def _deps_by_step(
+    steps: list[_StepShape],
+    edge_records: list[_EdgeRecord],
+) -> dict[int, list[int]]:
+    deps_by_step: dict[int, list[int]] = {index: [] for index in range(len(steps))}
+    for record in edge_records:
+        if record.dep_match_count == 1 and record.dep_index is not None:
+            deps_by_step[record.step_index].append(record.dep_index)
+    return deps_by_step
+
+
 def _dependency_closure_indexes(
     step_index: int,
     deps_by_step: dict[int, list[int]],
@@ -498,13 +582,31 @@ def _connection_ref_ids(connection_hints: object) -> list[object]:
     if not isinstance(connection_hints, list):
         return []
     result: list[object] = []
+    for from_ref, to_ref in _connection_ref_pairs(connection_hints):
+        result.append(from_ref)
+        result.append(to_ref)
+    return result
+
+
+def _connection_ref_pairs(connection_hints: object) -> list[tuple[object, object]]:
+    if not isinstance(connection_hints, list):
+        return []
+    result: list[tuple[object, object]] = []
     for connection_hint in connection_hints:
         if isinstance(connection_hint, dict):
-            result.append(connection_hint.get("from_block_ref"))
-            result.append(connection_hint.get("to_block_ref"))
+            result.append(
+                (
+                    connection_hint.get("from_block_ref"),
+                    connection_hint.get("to_block_ref"),
+                )
+            )
         else:
-            result.append(getattr(connection_hint, "from_block_ref", None))
-            result.append(getattr(connection_hint, "to_block_ref", None))
+            result.append(
+                (
+                    getattr(connection_hint, "from_block_ref", None),
+                    getattr(connection_hint, "to_block_ref", None),
+                )
+            )
     return result
 
 

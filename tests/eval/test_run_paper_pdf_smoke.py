@@ -100,6 +100,12 @@ def test_write_summary_artifacts_uses_fixed_schema(tmp_path: Path) -> None:
     assert json.loads(csv_row["violations_by_code"]) == row.violations_by_code
     assert json.loads(csv_row["violation_edges"]) == row.violation_edges
     assert json.loads(csv_row["same_number_probes"]) == row.same_number_probes
+    assert json.loads(csv_row["per_step_connection_counts"]) == row.per_step_connection_counts
+    assert (
+        json.loads(csv_row["per_step_cross_step_connection_counts"])
+        == row.per_step_cross_step_connection_counts
+    )
+    assert json.loads(csv_row["per_step_inbound_dep_counts"]) == row.per_step_inbound_dep_counts
 
 
 def test_llm_model_summary_marks_missing_version_fingerprint() -> None:
@@ -374,6 +380,9 @@ def _summary_row(
             }
         ],
         connection_ref_not_visible_count=0,
+        per_step_connection_counts=[0, 1, 0],
+        per_step_cross_step_connection_counts=[0, 1, 0],
+        per_step_inbound_dep_counts=[0, 0, 0],
         evidence_ref_count=4,
         block_candidate_count=2,
         parameter_mapping_count=1,

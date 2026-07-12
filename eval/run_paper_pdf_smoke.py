@@ -161,6 +161,9 @@ SUMMARY_COLUMNS = [
     "dep_ordinal_equals_source_ref_ordinal_count",
     "same_number_probes",
     "connection_ref_not_visible_count",
+    "per_step_connection_counts",
+    "per_step_cross_step_connection_counts",
+    "per_step_inbound_dep_counts",
     "evidence_ref_count",
     "block_candidate_count",
     "parameter_mapping_count",
@@ -293,6 +296,9 @@ class SmokeSummaryRow:
     dep_ordinal_equals_source_ref_ordinal_count: int
     same_number_probes: list[dict[str, Any]]
     connection_ref_not_visible_count: int | None
+    per_step_connection_counts: list[int]
+    per_step_cross_step_connection_counts: list[int]
+    per_step_inbound_dep_counts: list[int]
     evidence_ref_count: int | None
     block_candidate_count: int | None
     parameter_mapping_count: int | None
@@ -1134,6 +1140,11 @@ def build_summary_row(
         ),
         same_number_probes=[asdict(probe) for probe in dependency_audit.same_number_probes],
         connection_ref_not_visible_count=dependency_audit.connection_ref_not_visible_count,
+        per_step_connection_counts=list(dependency_audit.per_step_connection_counts),
+        per_step_cross_step_connection_counts=list(
+            dependency_audit.per_step_cross_step_connection_counts
+        ),
+        per_step_inbound_dep_counts=list(dependency_audit.per_step_inbound_dep_counts),
         evidence_ref_count=dependency_audit.evidence_ref_count,
         block_candidate_count=dependency_audit.block_candidate_count,
         parameter_mapping_count=dependency_audit.parameter_mapping_count,
@@ -1249,6 +1260,9 @@ def write_summary_artifacts(output_dir: Path, rows: list[SmokeSummaryRow]) -> No
                 "violations_by_code",
                 "violation_edges",
                 "same_number_probes",
+                "per_step_connection_counts",
+                "per_step_cross_step_connection_counts",
+                "per_step_inbound_dep_counts",
             ):
                 payload[json_column] = json.dumps(
                     payload[json_column],
