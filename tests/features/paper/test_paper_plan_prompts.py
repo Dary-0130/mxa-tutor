@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +27,7 @@ from features.paper._prompt_builder import (
     _shared_paper_plan_constraints,
     build_messages_for_build_guidance,
     build_messages_for_build_steps,
+    build_messages_for_build_steps_legacy_dependency_eval,
     build_messages_for_missing_detect,
     build_messages_for_mscript_draft,
     build_messages_for_mscript_draft_from_mapping,
@@ -83,7 +85,7 @@ def test_load_paper_plan_subsystem_yaml() -> None:
 def test_load_paper_plan_build_steps_yaml() -> None:
     template = load_prompt_template("paper_plan_build_steps.yaml")
 
-    assert template.version == "v0.2"
+    assert template.version == "v0.3"
     assert "BuildStepPlanner" in template.system
     assert "{block_recommendations_json}" in template.user
     assert "{parameter_mapping_json}" in template.user
@@ -93,7 +95,7 @@ def test_load_paper_plan_build_steps_yaml() -> None:
 def test_load_paper_plan_build_steps_regenerate_yaml() -> None:
     template = load_prompt_template("paper_plan_build_steps_regenerate.yaml")
 
-    assert template.version == "v0.2"
+    assert template.version == "v0.3"
     assert "BuildStepPlanner(Regenerate)" in template.system
     assert "{allowed_user_evidence_json}" in template.user
     assert "{resolved_prompt_ids_json}" in template.user
@@ -300,6 +302,8 @@ def test_build_step_planner_system_specifies_structured_redline_contract() -> No
     assert '禁止输出 source="user_supplied"' in system
     assert "不得包含参数具体值" in system
     assert '禁止写"增大 10%"' in system
+    assert "第一步通常就该是空依赖" in system
+    assert "必须把那个步骤写进依赖" in system
 
 
 def test_original_build_step_prompt_still_forbids_user_supplied_evidence() -> None:
@@ -308,6 +312,69 @@ def test_original_build_step_prompt_still_forbids_user_supplied_evidence() -> No
     assert '禁止输出 source="user_supplied"' in system
     assert "allowed_user_evidence_json" not in system
     assert "correct_extracted" not in system
+
+
+def test_build_step_dependency_text_is_default_with_eval_legacy_control() -> None:
+    args = (
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        [_document_evidence()],
+        build_plan_evidence_source_refs(_spec()),
+    )
+
+    default_messages = build_messages_for_build_steps(*args)
+    legacy_messages = build_messages_for_build_steps_legacy_dependency_eval(*args)
+
+    assert "dependency_salience" not in inspect.signature(build_messages_for_build_steps).parameters
+    assert default_messages != legacy_messages
+    assert "第一步通常就该是空依赖" in default_messages[0].content
+    assert "必须把那个步骤写进依赖" in default_messages[0].content
+    assert "第一步通常就该是空依赖" not in legacy_messages[0].content
+    assert "必须把那个步骤写进依赖" not in legacy_messages[0].content
+
+
+def test_dependency_audit_env_does_not_change_default_build_step_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = (
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        [_document_evidence()],
+        build_plan_evidence_source_refs(_spec()),
+    )
+
+    monkeypatch.delenv("MXA_BUILD_STEPS_DEPENDENCY_AUDIT", raising=False)
+    off_messages = build_messages_for_build_steps(*args)
+    monkeypatch.setenv("MXA_BUILD_STEPS_DEPENDENCY_AUDIT", "1")
+    on_messages = build_messages_for_build_steps(*args)
+
+    assert on_messages == off_messages
+
+
+def test_regenerate_dependency_text_is_default() -> None:
+    record = _record_with_resolved_prompt()
+    kwargs = {
+        "allowed_user_evidence_refs": {
+            UserEvidenceRef(kind=UserEvidenceAction.FILL_MISSING, key="MISS-1")
+        },
+        "allowed_user_prompt_ids": frozenset({"MISS-1"}),
+    }
+    args = (
+        record.plan.block_recommendations,
+        record.plan.parameter_mapping,
+        record.spec.evidence,
+        record.plan.evidence,
+        build_plan_evidence_source_refs(record.spec),
+    )
+
+    default_messages = build_messages_for_regenerate_build_steps(*args, **kwargs)
+
+    assert (
+        "dependency_salience"
+        not in inspect.signature(build_messages_for_regenerate_build_steps).parameters
+    )
+    assert "第一步通常就该是空依赖" in default_messages[0].content
+    assert "必须把那个步骤写进依赖" in default_messages[0].content
 
 
 def test_regenerate_build_step_prompt_allows_resolved_user_evidence() -> None:

@@ -132,12 +132,13 @@ class DeepSeekTextProvider(TextProvider):
                 response = _to_llm_response(completion, latency_ms)
                 logger.info(
                     "LLM call: model={} tokens_in={} tokens_out={} latency_ms={} "
-                    "finish_reason={}",
+                    "finish_reason={} system_fingerprint={}",
                     response.model,
                     response.prompt_tokens,
                     response.completion_tokens,
                     response.latency_ms,
                     response.finish_reason,
+                    response.system_fingerprint,
                 )
                 return response
             except Exception as exc:
@@ -180,4 +181,10 @@ def _to_llm_response(completion: Any, latency_ms: int) -> LLMResponse:
         model=completion.model,
         latency_ms=latency_ms,
         finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+        system_fingerprint=_metadata_str(completion, "system_fingerprint"),
     )
+
+
+def _metadata_str(completion: Any, field_name: str) -> str | None:
+    value = getattr(completion, field_name, None)
+    return value if isinstance(value, str) and value else None

@@ -1,5 +1,5 @@
-version: "v0.2"
-description: "paper-to-model BuildStepPlanner prompt(v0.2,TASK-534)"
+version: "v0.3"
+description: "paper-to-model BuildStepPlanner prompt(v0.3,TASK-534 dependency salience)"
 
 system: |
   【你的角色】:BuildStepPlanner — 基于 PlanComposer 输出的 block_recommendations / parameter_mapping / PaperSpec.evidence,
@@ -58,6 +58,10 @@ system: |
   - build_steps 必须 3-10 步;不得输出空数组 []
   - step_id 使用 STEP-001 / STEP-002 / ... 稳定格式
   - depends_on 只能引用前序 step_id;不得引用未来步骤或自身
+  - depends_on 不得自己依赖自己;只能引用别的步骤
+  - 系统会自动排序步骤,depends_on 不必为书写顺序兜底
+  - 没有前提就给空列表 [];尤其第一步通常就该是空依赖
+  - 接线要连到别的步骤产生的模块,就必须把那个步骤写进依赖(depends_on)
   - block_ref_id 在所有步骤中全局唯一;connection_hints 只能引用本步骤或依赖步骤中可见的 block_ref_id
   - block_refs[*].block_type 与 block_refs[*].purpose 必须逐字复用 block_recommendations 中某一项的 block_type / purpose
   - parameter_refs 只能逐字复用 parameter_mapping 中的 paper_param_name / model_param_name
