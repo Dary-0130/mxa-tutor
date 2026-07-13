@@ -29,7 +29,10 @@
       "additionalProperties": false,
       "properties": {
         "version": {
-          "const": "v1",
+          "enum": [
+            "v1",
+            "v2"
+          ],
           "title": "Version",
           "type": "string"
         },
@@ -209,6 +212,24 @@
           },
           "title": "Blocking Gap Ids",
           "type": "array"
+        },
+        "pending_user_choice_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Pending User Choice Count",
+          "type": "integer"
+        },
+        "pending_environment_probe_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Pending Environment Probe Count",
+          "type": "integer"
+        },
+        "open_requirement_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Open Requirement Count",
+          "type": "integer"
         }
       },
       "required": [
@@ -249,8 +270,13 @@
         "basis": {
           "enum": [
             "document_extracted",
-            "engineering_convention",
-            "user_confirmation_required"
+            "document_derived",
+            "domain_default",
+            "engineering_choice",
+            "user_environment",
+            "user_decision",
+            "user_confirmation_required",
+            "document_claim_unverified"
           ],
           "title": "Basis",
           "type": "string"
@@ -299,6 +325,79 @@
             }
           ],
           "title": "Confirmation Reason Code"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GuidanceTargetModel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "obligation_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "determine_parameter_value",
+                "select_component",
+                "configure_setting",
+                "connect_signal"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Obligation Kind"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolution"
+        },
+        "execution_closure": {
+          "default": "open",
+          "enum": [
+            "closed",
+            "guided_choice",
+            "guided_probe",
+            "open"
+          ],
+          "title": "Execution Closure",
+          "type": "string"
+        },
+        "input_fact_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Fact Refs",
+          "type": "array"
+        },
+        "punt_reason_code": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Punt Reason Code"
         }
       },
       "required": [
@@ -358,10 +457,7 @@
           "title": "Step Id"
         },
         "basis": {
-          "enum": [
-            "engineering_convention",
-            "user_confirmation_required"
-          ],
+          "const": "user_confirmation_required",
           "title": "Basis",
           "type": "string"
         },
@@ -377,6 +473,59 @@
           "minLength": 1,
           "title": "Display Text",
           "type": "string"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GuidanceTargetModel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "obligation_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "determine_parameter_value",
+                "select_component",
+                "configure_setting",
+                "connect_signal"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Obligation Kind"
+        },
+        "execution_closure": {
+          "default": "open",
+          "enum": [
+            "closed",
+            "guided_choice",
+            "guided_probe",
+            "open"
+          ],
+          "title": "Execution Closure",
+          "type": "string"
+        },
+        "failure_code": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure Code"
         }
       },
       "required": [
@@ -389,6 +538,156 @@
         "display_text"
       ],
       "title": "GuidanceGapModel",
+      "type": "object"
+    },
+    "GuidanceTargetModel": {
+      "additionalProperties": false,
+      "properties": {
+        "target_kind": {
+          "enum": [
+            "parameter",
+            "configuration",
+            "block_choice",
+            "connection"
+          ],
+          "title": "Target Kind",
+          "type": "string"
+        },
+        "model_param": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Param"
+        },
+        "paper_param": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paper Param"
+        },
+        "owner_ref": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Ref"
+        },
+        "setting_name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setting Name"
+        },
+        "block_role_ref": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Role Ref"
+        },
+        "from_block": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Block"
+        },
+        "from_port": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Port"
+        },
+        "to_block": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Block"
+        },
+        "to_port": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Port"
+        },
+        "signal_role": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signal Role"
+        }
+      },
+      "required": [
+        "target_kind"
+      ],
+      "title": "GuidanceTargetModel",
       "type": "object"
     },
     "MissingParameterPromptModel": {

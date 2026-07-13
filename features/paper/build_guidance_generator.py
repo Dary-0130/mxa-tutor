@@ -41,21 +41,31 @@ from features.paper.build_guidance_observability import (
     termination_guard_for_exception,
     termination_guard_for_retry_reason,
 )
+from features.paper.build_guidance_requirements import (
+    GuidanceRequirement,
+    actionability_for_closure,
+    claim_mentions_other_requirement,
+    closure_from_resolution,
+    critical_steps,
+    detail_has_document_basis,
+    detail_kind_for_target,
+    enumerate_guidance_requirements,
+    guidance_requirements_prompt_payload,
+    reduce_guidance_requirements,
+    render_detail_display_text,
+    required_object_coverage,
+)
 from features.paper.build_guidance_rules import (
     CONFIRMATION_REASON_TEMPLATES,
     CONVENTION_TEMPLATES,
     DISPLAY_BLOCK_TERMS,
-    GAP_SYNTHESIS_RULES,
     REAL_BLOCK_ALLOW_TERMS,
     ControlledGuidanceTargets,
     DetailBasis,
     DetailKind,
-    GeneratedGuidanceOverallStatus,
     GroundingTruthIndex,
-    GuidanceContentStatus,
     GuidanceEvidenceCard,
     GuidanceEvidencePool,
-    confirmation_display_text,
     convention_display_text,
     high_risk_claim_tokens,
 )
@@ -66,22 +76,7 @@ from features.paper.build_guidance_rules import (
     clean_display_text as _clean_display_text,
 )
 from features.paper.build_guidance_rules import (
-    configuration_key as _configuration_key,
-)
-from features.paper.build_guidance_rules import (
-    connection_key as _connection_key,
-)
-from features.paper.build_guidance_rules import (
     evidence_key as _evidence_key,
-)
-from features.paper.build_guidance_rules import (
-    gap_text as _gap_text,
-)
-from features.paper.build_guidance_rules import (
-    parameter_ref_key as _parameter_ref_key,
-)
-from features.paper.build_guidance_rules import (
-    unsafe_direction_hint as _unsafe_direction_hint,
 )
 from features.paper.build_guidance_rules import (
     unsafe_freeform_text as _unsafe_freeform_text,
@@ -220,8 +215,9 @@ class GuidanceDetailDraftModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    step_id: str = Field(min_length=1)
-    detail_kind: DetailKind
+    requirement_ref: str | None = Field(default=None, min_length=1)
+    step_id: str | None = Field(default=None, min_length=1)
+    detail_kind: DetailKind | None = None
     basis: DetailBasis
     claim_text: str = Field(min_length=1)
     supporting_evidence_refs: list[str] = Field(default_factory=list)
@@ -229,6 +225,9 @@ class GuidanceDetailDraftModel(BaseModel):
     target: str | None = Field(default=None, min_length=1)
     confirmation_reason_code: str | None = Field(default=None, min_length=1)
     direction_hint: str | None = Field(default=None, min_length=1)
+    resolution: dict[str, Any] | None = None
+    input_fact_refs: list[str] = Field(default_factory=list)
+    punt_reason_code: str | None = Field(default=None, min_length=1)
 
 
 class GuidanceGapDraftModel(BaseModel):
@@ -298,13 +297,18 @@ class BuildGuidanceGenerator:
         pool = build_guidance_evidence_pool(spec, plan, self._evidence_tagger)
         truth_index = GroundingTruthIndex.from_spec_plan(spec, plan, pool)
         targets = ControlledGuidanceTargets(plan.build_steps)
+        requirements = enumerate_guidance_requirements(plan.paper_spec_id, plan.build_steps)
         attempts: list[DraftAttemptStats] = []
         retry_context = self._retry_context_factory()
 
         for attempt_index in range(GUIDANCE_FULL_ATTEMPTS):
             try:
                 call_result = await self._call_llm_json(
-                    build_messages_for_build_guidance(plan, pool.cards),
+                    build_messages_for_build_guidance(
+                        plan,
+                        pool.cards,
+                        guidance_requirements_prompt_payload(requirements),
+                    ),
                     retry_context,
                 )
             except GuidanceRetryExceeded as exc:
@@ -359,6 +363,7 @@ class BuildGuidanceGenerator:
                 truth_index=truth_index,
                 targets=targets,
                 build_steps=plan.build_steps,
+                requirements=requirements,
             )
             attempts.append(result.stats)
             attempt_record = GuidanceAttemptTelemetry(
@@ -391,29 +396,20 @@ class BuildGuidanceGenerator:
                 termination_guard="none",
             )
             document_details = [
-                detail for detail in result.details if detail.basis == "document_extracted"
+                detail for detail in result.details if detail_has_document_basis(detail)
             ]
             if not document_details:
                 attempt_records.append(attempt_record)
                 continue
 
-            gaps = synthesize_guidance_gaps(
-                build_steps=plan.build_steps,
-                details=result.details,
-                pool=pool,
-                truth_index=truth_index,
-            )
-            assessment = compute_guidance_assessment(
-                build_steps=plan.build_steps,
-                details=result.details,
-                gaps=gaps,
-                pool=pool,
+            reduction = reduce_guidance_requirements(
+                requirements=requirements, details=result.details
             )
             guidance = BuildGuidance(
-                version="v1",
-                assessment=assessment,
+                version="v2",
+                assessment=reduction.assessment,
                 details=_dedupe_details(result.details),
-                gaps=gaps,
+                gaps=reduction.gaps,
             )
             self._log_success(
                 guidance,
@@ -681,6 +677,7 @@ def parse_and_ground_guidance_draft(
     truth_index: GroundingTruthIndex,
     targets: ControlledGuidanceTargets,
     build_steps: list[ModelBuildStep],
+    requirements: list[GuidanceRequirement],
 ) -> GuidanceDraftResult:
     """Parse valid units, capture raw counters, and fail closed per detail."""
 
@@ -700,7 +697,8 @@ def parse_and_ground_guidance_draft(
     resolver_error_count = raw_counters.resolver_error_count
     resolver_event_codes: list[str] = []
     step_by_id = {step.step_id: step for step in build_steps}
-    seen_keys: set[tuple[str, str, str, str]] = set()
+    requirement_by_ref = {requirement.requirement_ref: requirement for requirement in requirements}
+    accepted_detail_id_by_requirement_ref: dict[str, str] = {}
 
     for raw_item in raw_items:
         try:
@@ -708,22 +706,38 @@ def parse_and_ground_guidance_draft(
         except ValidationError:
             dropped_count += 1
             continue
-        if not targets.step_exists(draft.step_id):
+        if draft.requirement_ref is None:
+            dropped_count += 1
+            resolver_error_count += 1
+            resolver_event_codes.append("requirement_ref_missing")
+            continue
+        requirement = requirement_by_ref.get(draft.requirement_ref)
+        if requirement is None:
+            dropped_count += 1
+            resolver_error_count += 1
+            resolver_event_codes.append("requirement_ref_unknown")
+            continue
+        if draft.step_id is not None and draft.step_id != requirement.step_id:
+            dropped_count += 1
+            resolver_error_count += 1
+            resolver_event_codes.append("requirement_mismatch")
+            continue
+        if not targets.step_exists(requirement.step_id):
             dropped_count += 1
             continue
-        step = step_by_id[draft.step_id]
-        key = (
-            draft.step_id,
-            draft.detail_kind,
-            draft.basis,
-            _canonicalize(draft.target or draft.claim_text),
-        )
-        if key in seen_keys:
+        if claim_mentions_other_requirement(draft.claim_text, requirement, requirements):
+            dropped_count += 1
+            resolver_error_count += 1
+            resolver_event_codes.append("requirement_mismatch")
             continue
-        seen_keys.add(key)
+        draft.input_fact_refs = [
+            accepted_detail_id_by_requirement_ref.get(ref, ref) for ref in draft.input_fact_refs
+        ]
+        step = step_by_id[requirement.step_id]
         if draft.basis == "document_extracted":
             resolution = _document_detail_from_draft(
                 draft,
+                requirement=requirement,
                 pool=pool,
                 truth_index=truth_index,
                 targets=targets,
@@ -735,27 +749,58 @@ def parse_and_ground_guidance_draft(
             downgraded_unverified_count += resolution.downgraded_unverified_count
             if resolution.detail is not None:
                 details.append(resolution.detail)
+                accepted_detail_id_by_requirement_ref[requirement.requirement_ref] = (
+                    resolution.detail.detail_id
+                )
             continue
-        if draft.basis == "engineering_convention":
+        if draft.basis == "document_derived":
+            detail, code = _derived_detail_from_draft(
+                draft,
+                requirement=requirement,
+                pool=pool,
+                truth_index=truth_index,
+                step=step,
+                ordinal=len(details) + 1,
+            )
+            if detail is not None:
+                details.append(detail)
+                accepted_detail_id_by_requirement_ref[requirement.requirement_ref] = (
+                    detail.detail_id
+                )
+            else:
+                dropped_count += 1
+                resolver_error_count += 1
+                if code is not None:
+                    resolver_event_codes.append(code)
+            continue
+        if draft.basis == "engineering_choice" and draft.convention_code is not None:
             detail = _convention_detail_from_draft(
                 draft,
+                requirement=requirement,
                 targets=targets,
                 ordinal=len(details) + 1,
             )
             if detail is not None:
                 details.append(detail)
+                accepted_detail_id_by_requirement_ref[requirement.requirement_ref] = (
+                    detail.detail_id
+                )
             else:
                 dropped_count += 1
             continue
-        detail = _confirmation_detail_from_draft(
+        detail, code = _non_document_detail_from_draft(
             draft,
-            targets=targets,
+            requirement=requirement,
             ordinal=len(details) + 1,
         )
         if detail is not None:
             details.append(detail)
+            accepted_detail_id_by_requirement_ref[requirement.requirement_ref] = detail.detail_id
         else:
             dropped_count += 1
+            resolver_error_count += 1
+            if code is not None:
+                resolver_event_codes.append(code)
 
     return GuidanceDraftResult(
         details=details,
@@ -778,55 +823,11 @@ def synthesize_guidance_gaps(
     pool: GuidanceEvidencePool,
     truth_index: GroundingTruthIndex,
 ) -> list[GuidanceGap]:
-    """Synthesize object-granular gaps from deterministic rules."""
+    """Synthesize v2 gaps by reducing object-level requirement closure."""
 
-    _ = truth_index
-    gaps: list[GuidanceGap] = []
-    covered_params = set(pool.parameter_mapping_evidence)
-    document_detail_steps = {
-        detail.step_id for detail in details if detail.basis == "document_extracted"
-    }
-    for step in _critical_steps(build_steps):
-        for kind, object_key, covered in _required_object_coverage(step, covered_params):
-            if covered:
-                continue
-            gaps.append(
-                _gap_from_rule(
-                    "GAP",
-                    len(gaps) + 1,
-                    kind,
-                    step.step_id,
-                    object_key,
-                )
-            )
-        if step.step_id not in document_detail_steps:
-            gaps.append(
-                _gap_from_rule(
-                    "GAP",
-                    len(gaps) + 1,
-                    "blocked_detail",
-                    step.step_id,
-                    step.step_id,
-                )
-            )
-    for detail in details:
-        if detail.actionability != "blocked_pending_confirmation":
-            continue
-        if any(
-            gap.step_id == detail.step_id and gap.gap_kind == "insufficient_document_evidence"
-            for gap in gaps
-        ):
-            continue
-        gaps.append(
-            _gap_from_rule(
-                "GAP",
-                len(gaps) + 1,
-                "blocked_detail",
-                detail.step_id,
-                detail.step_id,
-            )
-        )
-    return gaps
+    _ = pool, truth_index
+    requirements = enumerate_guidance_requirements("legacy", build_steps)
+    return reduce_guidance_requirements(requirements=requirements, details=details).gaps
 
 
 def compute_guidance_assessment(
@@ -836,40 +837,41 @@ def compute_guidance_assessment(
     gaps: list[GuidanceGap],
     pool: GuidanceEvidencePool,
 ) -> GuidanceAssessment:
-    """Compute internal guidance assessment without producing ready status."""
+    """Compute internal guidance assessment from reducer-owned gaps."""
 
-    critical_steps = _critical_steps(build_steps)
+    _ = details, pool
+    critical_steps_list = _critical_steps(build_steps)
     blocking_gap_ids = [gap.gap_id for gap in gaps if gap.severity == "blocking"]
-    critical_confirmation_count = sum(
-        1
-        for detail in details
-        if detail.actionability == "blocked_pending_confirmation"
-        and any(step.step_id == detail.step_id for step in critical_steps)
-    )
     if blocking_gap_ids:
-        content_status: GuidanceContentStatus = "outline_with_gaps"
-    elif (
-        pool.has_build_step_linked_evidence and critical_steps and critical_confirmation_count == 0
-    ):
+        content_status = "outline_with_gaps"
+    elif critical_steps_list:
         content_status = "reproducible_candidate"
     else:
         content_status = "outline_only"
-    overall_status: GeneratedGuidanceOverallStatus = (
+    overall_status = (
         "reproducible_candidate_env_unchecked"
         if content_status == "reproducible_candidate"
         else content_status
     )
     return GuidanceAssessment(
-        content_status=content_status,
+        content_status=cast(Any, content_status),
         environment_status="not_checked",
-        overall_status=overall_status,
+        overall_status=cast(Any, overall_status),
         blocking_gap_ids=blocking_gap_ids,
+        pending_user_choice_count=sum(
+            1 for detail in details if detail.execution_closure == "guided_choice"
+        ),
+        pending_environment_probe_count=sum(
+            1 for detail in details if detail.execution_closure == "guided_probe"
+        ),
+        open_requirement_count=len(blocking_gap_ids),
     )
 
 
 def _document_detail_from_draft(
     draft: GuidanceDetailDraftModel,
     *,
+    requirement: GuidanceRequirement,
     pool: GuidanceEvidencePool,
     truth_index: GroundingTruthIndex,
     targets: ControlledGuidanceTargets,
@@ -888,15 +890,28 @@ def _document_detail_from_draft(
         resolved.append(card.evidence)
     resolved = _dedupe_evidence(resolved)
     high_risk_tokens = high_risk_claim_tokens(draft.claim_text, step)
+    closure, code = closure_from_resolution(
+        basis=draft.basis,
+        target=requirement.target,
+        resolution=draft.resolution,
+        input_fact_refs=draft.input_fact_refs,
+        punt_reason_code=draft.punt_reason_code,
+    )
+    if closure is None:
+        return GuidanceDocumentResolution(
+            detail=None,
+            resolver_error_count=resolver_errors + 1,
+            resolver_event_codes=_unique_codes(
+                [*resolver_event_codes, code or "resolution_missing"]
+            ),
+            downgraded_unverified_count=0,
+        )
     if not resolved or not truth_index.contains_all(high_risk_tokens):
         if resolved:
             resolver_event_codes.append("grounding_whitelist_no_match")
         return GuidanceDocumentResolution(
-            detail=_confirmation_detail(
-                step_id=draft.step_id,
-                detail_kind=draft.detail_kind,
-                reason_code="document_evidence_unverified",
-                target=targets.label(draft.step_id, draft.target),
+            detail=_claim_unverified_detail(
+                requirement=requirement,
                 ordinal=ordinal,
             ),
             resolver_error_count=resolver_errors + (0 if resolved else 1),
@@ -906,14 +921,24 @@ def _document_detail_from_draft(
     return GuidanceDocumentResolution(
         detail=GuidanceDetail(
             detail_id=f"GD-{ordinal:03d}",
-            step_id=draft.step_id,
-            detail_kind=draft.detail_kind,
+            step_id=requirement.step_id,
+            detail_kind=cast(Any, detail_kind_for_target(requirement.target.target_kind)),
             basis="document_extracted",
-            actionability="actionable",
-            display_text=_clean_display_text(draft.claim_text),
+            actionability=actionability_for_closure(closure),
+            display_text=render_detail_display_text(
+                basis="document_extracted",
+                target=requirement.target,
+                resolution=draft.resolution,
+            ),
             evidence=resolved,
             convention_code=None,
             confirmation_reason_code=None,
+            target=requirement.target,
+            obligation_kind=requirement.obligation_kind,
+            resolution=draft.resolution,
+            execution_closure=closure,
+            input_fact_refs=list(draft.input_fact_refs),
+            punt_reason_code=None,
         ),
         resolver_error_count=resolver_errors,
         resolver_event_codes=_unique_codes(resolver_event_codes),
@@ -921,74 +946,189 @@ def _document_detail_from_draft(
     )
 
 
+def _derived_detail_from_draft(
+    draft: GuidanceDetailDraftModel,
+    *,
+    requirement: GuidanceRequirement,
+    pool: GuidanceEvidencePool,
+    truth_index: GroundingTruthIndex,
+    step: ModelBuildStep,
+    ordinal: int,
+) -> tuple[GuidanceDetail | None, str | None]:
+    if not draft.input_fact_refs:
+        return None, "derivation_input_unresolved"
+    resolved: list[PaperEvidenceEntry] = []
+    for handle in draft.supporting_evidence_refs:
+        card = pool.by_handle.get(handle)
+        if card is None:
+            return None, "input_fact_ref_unknown"
+        resolved.append(card.evidence)
+    resolved = _dedupe_evidence(resolved)
+    high_risk_tokens = high_risk_claim_tokens(draft.claim_text, step)
+    if not resolved or not truth_index.contains_all(high_risk_tokens):
+        return (
+            _claim_unverified_detail(requirement=requirement, ordinal=ordinal),
+            "grounding_whitelist_no_match" if resolved else "input_fact_ref_unknown",
+        )
+    closure, code = closure_from_resolution(
+        basis=draft.basis,
+        target=requirement.target,
+        resolution=draft.resolution,
+        input_fact_refs=draft.input_fact_refs,
+        punt_reason_code=draft.punt_reason_code,
+    )
+    if closure is None:
+        return None, code
+    return (
+        GuidanceDetail(
+            detail_id=f"GD-{ordinal:03d}",
+            step_id=requirement.step_id,
+            detail_kind=cast(Any, detail_kind_for_target(requirement.target.target_kind)),
+            basis="document_derived",
+            actionability=actionability_for_closure(closure),
+            display_text=render_detail_display_text(
+                basis="document_derived",
+                target=requirement.target,
+                resolution=draft.resolution,
+            ),
+            evidence=resolved,
+            convention_code=None,
+            confirmation_reason_code=None,
+            target=requirement.target,
+            obligation_kind=requirement.obligation_kind,
+            resolution=draft.resolution,
+            execution_closure=closure,
+            input_fact_refs=list(draft.input_fact_refs),
+            punt_reason_code=None,
+        ),
+        None,
+    )
+
+
 def _convention_detail_from_draft(
     draft: GuidanceDetailDraftModel,
     *,
+    requirement: GuidanceRequirement,
     targets: ControlledGuidanceTargets,
     ordinal: int,
 ) -> GuidanceDetail | None:
     code = draft.convention_code
     if code not in CONVENTION_TEMPLATES:
         return None
-    detail_kind, actionability = CONVENTION_TEMPLATES[code]
+    detail_kind, _actionability = CONVENTION_TEMPLATES[code]
     if _unsafe_freeform_text(draft.target):
         return None
-    target = targets.label(draft.step_id, draft.target)
+    closure, machine_code = closure_from_resolution(
+        basis="engineering_choice",
+        target=requirement.target,
+        resolution=draft.resolution,
+        input_fact_refs=draft.input_fact_refs,
+        punt_reason_code=draft.punt_reason_code,
+    )
+    if closure is None:
+        _ = machine_code
+        return None
+    target = targets.label(requirement.step_id, draft.target)
     return GuidanceDetail(
         detail_id=f"GD-{ordinal:03d}",
-        step_id=draft.step_id,
+        step_id=requirement.step_id,
         detail_kind=detail_kind,
-        basis="engineering_convention",
-        actionability=actionability,
-        display_text=convention_display_text(code, target),
+        basis="engineering_choice",
+        actionability=actionability_for_closure(closure),
+        display_text=(
+            convention_display_text(code, target)
+            if draft.resolution is None
+            else render_detail_display_text(
+                basis="engineering_choice",
+                target=requirement.target,
+                resolution=draft.resolution,
+            )
+        ),
         evidence=[],
         convention_code=code,
         confirmation_reason_code=None,
+        target=requirement.target,
+        obligation_kind=requirement.obligation_kind,
+        resolution=draft.resolution,
+        execution_closure=closure,
+        input_fact_refs=list(draft.input_fact_refs),
+        punt_reason_code=None,
     )
 
 
-def _confirmation_detail_from_draft(
+def _non_document_detail_from_draft(
     draft: GuidanceDetailDraftModel,
     *,
-    targets: ControlledGuidanceTargets,
+    requirement: GuidanceRequirement,
     ordinal: int,
-) -> GuidanceDetail | None:
-    reason_code = draft.confirmation_reason_code
-    if reason_code not in CONFIRMATION_REASON_TEMPLATES:
-        return None
-    direction_hint = None if _unsafe_direction_hint(draft.direction_hint) else draft.direction_hint
-    target = targets.label(draft.step_id, draft.target)
-    return GuidanceDetail(
-        detail_id=f"GD-{ordinal:03d}",
-        step_id=draft.step_id,
-        detail_kind=draft.detail_kind,
-        basis="user_confirmation_required",
-        actionability="blocked_pending_confirmation",
-        display_text=confirmation_display_text(reason_code, target, direction_hint),
-        evidence=[],
-        convention_code=None,
-        confirmation_reason_code=reason_code,
+) -> tuple[GuidanceDetail | None, str | None]:
+    if draft.supporting_evidence_refs:
+        return None, "non_document_evidence_present"
+    closure, code = closure_from_resolution(
+        basis=draft.basis,
+        target=requirement.target,
+        resolution=draft.resolution,
+        input_fact_refs=draft.input_fact_refs,
+        punt_reason_code=draft.punt_reason_code,
+    )
+    if closure is None:
+        return None, code
+    return (
+        GuidanceDetail(
+            detail_id=f"GD-{ordinal:03d}",
+            step_id=requirement.step_id,
+            detail_kind=cast(Any, detail_kind_for_target(requirement.target.target_kind)),
+            basis=draft.basis,
+            actionability=actionability_for_closure(closure),
+            display_text=render_detail_display_text(
+                basis=draft.basis,
+                target=requirement.target,
+                resolution=draft.resolution,
+                punt_reason_code=draft.punt_reason_code,
+            ),
+            evidence=[],
+            convention_code=None,
+            confirmation_reason_code=(
+                draft.confirmation_reason_code
+                if draft.confirmation_reason_code in CONFIRMATION_REASON_TEMPLATES
+                else None
+            ),
+            target=requirement.target,
+            obligation_kind=requirement.obligation_kind,
+            resolution=draft.resolution,
+            execution_closure=closure,
+            input_fact_refs=list(draft.input_fact_refs),
+            punt_reason_code=draft.punt_reason_code,
+        ),
+        None,
     )
 
 
-def _confirmation_detail(
+def _claim_unverified_detail(
     *,
-    step_id: str,
-    detail_kind: DetailKind,
-    reason_code: str,
-    target: str,
+    requirement: GuidanceRequirement,
     ordinal: int,
 ) -> GuidanceDetail:
     return GuidanceDetail(
         detail_id=f"GD-{ordinal:03d}",
-        step_id=step_id,
-        detail_kind=detail_kind,
-        basis="user_confirmation_required",
+        step_id=requirement.step_id,
+        detail_kind=cast(Any, detail_kind_for_target(requirement.target.target_kind)),
+        basis="document_claim_unverified",
         actionability="blocked_pending_confirmation",
-        display_text=CONFIRMATION_REASON_TEMPLATES[reason_code].format(target=target),
+        display_text=render_detail_display_text(
+            basis="document_claim_unverified",
+            target=requirement.target,
+            resolution=None,
+        ),
         evidence=[],
         convention_code=None,
-        confirmation_reason_code=reason_code,
+        confirmation_reason_code="document_evidence_unverified",
+        target=requirement.target,
+        obligation_kind=requirement.obligation_kind,
+        resolution=None,
+        execution_closure="open",
+        input_fact_refs=[],
+        punt_reason_code=None,
     )
 
 
@@ -998,7 +1138,7 @@ def _raw_counters(raw_items: list[Any]) -> DraftAttemptStats:
     for item in raw_items:
         if not isinstance(item, dict):
             continue
-        if item.get("basis") == "document_extracted":
+        if item.get("basis") in {"document_extracted", "document_derived"}:
             document_claim_count += 1
         refs = item.get("supporting_evidence_refs")
         if isinstance(refs, list):
@@ -1011,19 +1151,11 @@ def _raw_counters(raw_items: list[Any]) -> DraftAttemptStats:
 
 
 def _critical_steps(build_steps: list[ModelBuildStep]) -> list[ModelBuildStep]:
-    return [step for step in build_steps if _is_critical_step(step)]
+    return critical_steps(build_steps)
 
 
 def _is_critical_step(step: ModelBuildStep) -> bool:
-    if step.parameter_refs or step.configuration_hints:
-        return True
-    if step.connection_hints and not all(
-        _connection_is_display_only(step, hint) for hint in step.connection_hints
-    ):
-        return True
-    if not step.block_refs:
-        return False
-    return any(_block_ref_is_real(block_ref) for block_ref in step.block_refs)
+    return step in critical_steps([step])
 
 
 def _block_ref_is_real(block_ref: StepBlockRef) -> bool:
@@ -1046,41 +1178,7 @@ def _required_object_coverage(
     step: ModelBuildStep,
     covered_params: set[tuple[str, str]],
 ) -> list[tuple[str, str, bool]]:
-    result: list[tuple[str, str, bool]] = []
-    for block_ref in step.block_refs:
-        covered = (
-            block_ref.paper_reference is not None
-            and block_ref.paper_reference.source is EvidenceSource.DOCUMENT_EXTRACTED
-        )
-        result.append(("block", block_ref.block_ref_id, covered))
-    for parameter_ref in step.parameter_refs:
-        key = (parameter_ref.paper_param_name, parameter_ref.model_param_name)
-        result.append(("parameter", _parameter_ref_key(parameter_ref), key in covered_params))
-    for index, connection in enumerate(step.connection_hints, start=1):
-        result.append(("connection", _connection_key(connection, index), False))
-    for index, hint in enumerate(step.configuration_hints, start=1):
-        covered = any(entry.source is EvidenceSource.DOCUMENT_EXTRACTED for entry in hint.evidence)
-        result.append(("configuration", _configuration_key(step.step_id, hint, index), covered))
-    return result
-
-
-def _gap_from_rule(
-    prefix: str,
-    ordinal: int,
-    missing_object_kind: str,
-    step_id: str,
-    object_key: str,
-) -> GuidanceGap:
-    gap_kind, basis, severity = GAP_SYNTHESIS_RULES[missing_object_kind]
-    return GuidanceGap(
-        gap_id=f"{prefix}-{ordinal:03d}",
-        gap_kind=cast(Any, gap_kind),
-        scope="step",
-        step_id=step_id,
-        basis=cast(Any, basis),
-        severity=cast(Any, severity),
-        display_text=_gap_text(gap_kind, step_id, object_key),
-    )
+    return required_object_coverage(step, covered_params)
 
 
 def _unique_codes(codes: list[str]) -> list[str]:
@@ -1219,20 +1317,7 @@ def _evidence_mentions_parameter(
 
 
 def _dedupe_details(details: list[GuidanceDetail]) -> list[GuidanceDetail]:
-    seen: set[tuple[str, str, str, str]] = set()
-    result: list[GuidanceDetail] = []
-    for detail in details:
-        key = (
-            detail.step_id,
-            detail.detail_kind,
-            detail.basis,
-            _canonicalize(detail.display_text),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(replace(detail, detail_id=f"GD-{len(result) + 1:03d}"))
-    return result
+    return [replace(detail, detail_id=f"GD-{index:03d}") for index, detail in enumerate(details, 1)]
 
 
 def _dedupe_evidence(entries: list[PaperEvidenceEntry]) -> list[PaperEvidenceEntry]:

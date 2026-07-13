@@ -1,7 +1,7 @@
 """Pure Python ModelGenerationPlan domain contract."""
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
@@ -14,6 +14,51 @@ GuidanceStatus = Literal[
     "generation_failed",
     "no_document_basis",
 ]
+
+GuidanceBasis = Literal[
+    "document_extracted",
+    "document_derived",
+    "domain_default",
+    "engineering_choice",
+    "user_environment",
+    "user_decision",
+    "user_confirmation_required",
+    "document_claim_unverified",
+]
+GuidanceDetailKind = Literal[
+    "block_selection",
+    "subsystem_internal_structure",
+    "connection",
+    "parameter_value",
+    "configuration",
+    "verification",
+    "gap_notice",
+]
+GuidanceExecutionClosure = Literal["closed", "guided_choice", "guided_probe", "open"]
+GuidanceObligationKind = Literal[
+    "determine_parameter_value",
+    "select_component",
+    "configure_setting",
+    "connect_signal",
+]
+GuidanceTargetKind = Literal["parameter", "configuration", "block_choice", "connection"]
+
+
+@dataclass(frozen=True)
+class GuidanceTarget:
+    """Public target identity for one guidance requirement."""
+
+    target_kind: GuidanceTargetKind
+    model_param: str | None = None
+    paper_param: str | None = None
+    owner_ref: str | None = None
+    setting_name: str | None = None
+    block_role_ref: str | None = None
+    from_block: str | None = None
+    from_port: str | None = None
+    to_block: str | None = None
+    to_port: str | None = None
+    signal_role: str | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +150,9 @@ class GuidanceAssessment:
         "outline_only",
     ]
     blocking_gap_ids: list[str]
+    pending_user_choice_count: int = 0
+    pending_environment_probe_count: int = 0
+    open_requirement_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -113,20 +161,8 @@ class GuidanceDetail:
 
     detail_id: str
     step_id: str
-    detail_kind: Literal[
-        "block_selection",
-        "subsystem_internal_structure",
-        "connection",
-        "parameter_value",
-        "configuration",
-        "verification",
-        "gap_notice",
-    ]
-    basis: Literal[
-        "document_extracted",
-        "engineering_convention",
-        "user_confirmation_required",
-    ]
+    detail_kind: GuidanceDetailKind
+    basis: GuidanceBasis
     actionability: Literal[
         "actionable",
         "notice_only",
@@ -136,6 +172,12 @@ class GuidanceDetail:
     evidence: list[PaperEvidenceEntry]
     convention_code: str | None
     confirmation_reason_code: str | None
+    target: GuidanceTarget | None = None
+    obligation_kind: GuidanceObligationKind | None = None
+    resolution: dict[str, Any] | None = None
+    execution_closure: GuidanceExecutionClosure = "open"
+    input_fact_refs: list[str] | None = None
+    punt_reason_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -154,16 +196,20 @@ class GuidanceGap:
     ]
     scope: Literal["plan", "step", "subsystem"]
     step_id: str | None
-    basis: Literal["engineering_convention", "user_confirmation_required"]
+    basis: Literal["user_confirmation_required"]
     severity: Literal["blocking", "warning"]
     display_text: str
+    target: GuidanceTarget | None = None
+    obligation_kind: GuidanceObligationKind | None = None
+    execution_closure: GuidanceExecutionClosure = "open"
+    failure_code: str | None = None
 
 
 @dataclass(frozen=True)
 class BuildGuidance:
     """Structured build guidance contract for later generation phases."""
 
-    version: Literal["v1"]
+    version: Literal["v1", "v2"]
     assessment: GuidanceAssessment
     details: list[GuidanceDetail]
     gaps: list[GuidanceGap]

@@ -16,6 +16,7 @@ from core.domain.paper_plan import (
     GuidanceAssessment,
     GuidanceDetail,
     GuidanceGap,
+    GuidanceTarget,
     ModelBuildStep,
     ParameterMapping,
     ParameterMappingRef,
@@ -475,8 +476,48 @@ def test_write_guidance_artifacts_outputs_raw_json_and_readable_text(tmp_path: P
     assert "[步骤 1] Place gain" in text
     assert "出处:论文 DOC-001 第 S1 处" in text
     assert f"出处:{marker}" in text
-    assert "缺口:[阻塞] STEP-001 lacks verified configuration evidence." in text
+    assert "缺口:[阻塞] 需要确定参数 K -> Gain.K。" in text
     assert text.count(marker) == row.final_surviving_unverified_count
+
+
+def test_write_guidance_draft_artifacts_outputs_sanitized_drafts(tmp_path: Path) -> None:
+    paper = subject.SmokePaper(
+        path=tmp_path / "arxiv-2605.27553-test.pdf",
+        arxiv_id="2605.27553",
+        hybrid_candidate=False,
+    )
+    drafts = [
+        {
+            "attempt_index": 1,
+            "arm_label": "main",
+            "details": [
+                {
+                    "step_id": "STEP-001",
+                    "requirement_ref": "REQ-001",
+                    "basis": "document_extracted",
+                    "claim_text": "Use the gain block from the paper.",
+                    "supporting_evidence_refs": ["GEV-001"],
+                    "target": "B1",
+                    "confirmation_reason_code": None,
+                    "direction_hint": None,
+                    "punt_reason_code": None,
+                }
+            ],
+        }
+    ]
+
+    paths = subject.write_guidance_draft_artifacts(
+        tmp_path,
+        paper=paper,
+        round_index=1,
+        drafts=drafts,
+    )
+
+    assert len(paths) == 1
+    assert paths[0].parent.name == "guidance_drafts"
+    payload = json.loads(paths[0].read_text(encoding="utf-8"))
+    assert payload["details"][0]["claim_text"] == "Use the gain block from the paper."
+    assert payload["details"][0]["supporting_evidence_refs"] == ["GEV-001"]
 
 
 def test_guidance_batch_gates_reject_invariants(tmp_path: Path) -> None:
@@ -573,6 +614,8 @@ def _summary_row(
         guidance_retry_count=None,
         guidance_generator_exception=None,
         guidance_validator_machine_codes=[],
+        guidance_requirement_ref_missing_count=None,
+        guidance_requirement_ref_unknown_count=None,
         guidance_attempt_record_count=0,
         guidance_attempts=[],
         guidance_terminal_termination_guard=None,
@@ -715,6 +758,7 @@ def _guidance_payload() -> dict[str, object]:
     return {
         "details": [
             {
+                "requirement_ref": "REQ-001",
                 "step_id": "STEP-001",
                 "detail_kind": "block_selection",
                 "basis": "document_extracted",
@@ -724,6 +768,9 @@ def _guidance_payload() -> dict[str, object]:
                 "target": "B1",
                 "confirmation_reason_code": None,
                 "direction_hint": None,
+                "resolution": {"kind": "enum_selection", "selected": "Gain"},
+                "input_fact_refs": [],
+                "punt_reason_code": None,
             }
         ],
         "gaps": [],
@@ -747,12 +794,13 @@ def _plan_with_build_steps() -> subject.ModelGenerationPlan:
 
 def _guidance_with_surviving_unverified() -> BuildGuidance:
     return BuildGuidance(
-        version="v1",
+        version="v2",
         assessment=GuidanceAssessment(
             content_status="outline_with_gaps",
             environment_status="not_checked",
             overall_status="outline_with_gaps",
             blocking_gap_ids=["GAP-001"],
+            open_requirement_count=1,
         ),
         details=[
             GuidanceDetail(
@@ -765,28 +813,52 @@ def _guidance_with_surviving_unverified() -> BuildGuidance:
                 evidence=[_document_evidence()],
                 convention_code=None,
                 confirmation_reason_code=None,
+                target=GuidanceTarget(target_kind="block_choice", block_role_ref="B1"),
+                obligation_kind="select_component",
+                resolution={"kind": "enum_selection", "selected": "Gain"},
+                execution_closure="closed",
+                input_fact_refs=[],
+                punt_reason_code=None,
             ),
             GuidanceDetail(
                 detail_id="GD-002",
                 step_id="STEP-001",
-                detail_kind="configuration",
-                basis="user_confirmation_required",
+                detail_kind="parameter_value",
+                basis="document_claim_unverified",
                 actionability="blocked_pending_confirmation",
-                display_text="Confirm STEP-001; the cited paper evidence could not be verified.",
+                display_text="论文依据未核实（未采用）：参数 K -> Gain.K。",
                 evidence=[],
                 convention_code=None,
                 confirmation_reason_code="document_evidence_unverified",
+                target=GuidanceTarget(
+                    target_kind="parameter",
+                    model_param="Gain.K",
+                    paper_param="K",
+                ),
+                obligation_kind="determine_parameter_value",
+                resolution=None,
+                execution_closure="open",
+                input_fact_refs=[],
+                punt_reason_code=None,
             ),
         ],
         gaps=[
             GuidanceGap(
                 gap_id="GAP-001",
-                gap_kind="insufficient_document_evidence",
+                gap_kind="missing_parameter_value",
                 scope="step",
                 step_id="STEP-001",
                 basis="user_confirmation_required",
                 severity="blocking",
-                display_text="STEP-001 lacks verified configuration evidence.",
+                display_text="需要确定参数 K -> Gain.K。",
+                target=GuidanceTarget(
+                    target_kind="parameter",
+                    model_param="Gain.K",
+                    paper_param="K",
+                ),
+                obligation_kind="determine_parameter_value",
+                execution_closure="open",
+                failure_code="does_not_close_gap",
             )
         ],
     )

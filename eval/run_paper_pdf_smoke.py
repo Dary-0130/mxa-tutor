@@ -171,6 +171,8 @@ SUMMARY_COLUMNS = [
     "guidance_retry_count",
     "guidance_generator_exception",
     "guidance_validator_machine_codes",
+    "guidance_requirement_ref_missing_count",
+    "guidance_requirement_ref_unknown_count",
     "guidance_attempt_record_count",
     "guidance_attempts",
     "guidance_terminal_termination_guard",
@@ -306,6 +308,7 @@ class BuildStepsTelemetry:
     validator_dropped_unverified_count: int | None = None
     all_document_details_lost: bool | None = None
     guidance_artifact_snapshots: list[GuidanceArtifactSnapshot] = field(default_factory=list)
+    guidance_drafts: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -370,6 +373,8 @@ class SmokeSummaryRow:
     guidance_retry_count: int | None
     guidance_generator_exception: str | None
     guidance_validator_machine_codes: list[str]
+    guidance_requirement_ref_missing_count: int | None
+    guidance_requirement_ref_unknown_count: int | None
     guidance_attempt_record_count: int
     guidance_attempts: list[dict[str, object]]
     guidance_terminal_termination_guard: str | None
@@ -585,6 +590,7 @@ class RecordingBuildGuidanceGenerator(BuildGuidanceGenerator):
         self._smoke_telemetry.generator_downgraded_unverified_count = None
         self._smoke_telemetry.validator_dropped_unverified_count = None
         self._smoke_telemetry.all_document_details_lost = None
+        self._smoke_telemetry.guidance_drafts = []
         result = await super().generate(spec, plan)
         self._sync_guidance_telemetry()
         if (
@@ -634,7 +640,15 @@ class RecordingBuildGuidanceGenerator(BuildGuidanceGenerator):
     ) -> Any:
         token = _CURRENT_LLM_ROLE.set(GUIDANCE_ROLE_NAME)
         try:
-            return await super()._call_llm_json(messages, retry_context)
+            result = await super()._call_llm_json(messages, retry_context)
+            self._smoke_telemetry.guidance_drafts.append(
+                _guidance_draft_capture_payload(
+                    result.payload,
+                    attempt_index=len(self._smoke_telemetry.guidance_drafts) + 1,
+                    arm_label=_CURRENT_LLM_ARM.get(),
+                )
+            )
+            return result
         finally:
             _CURRENT_LLM_ROLE.reset(token)
 
@@ -1269,6 +1283,12 @@ async def _run_one_pdf_round(
         row=row,
         snapshots=snapshots,
     )
+    write_guidance_draft_artifacts(
+        runtime.output_dir,
+        paper=paper,
+        round_index=round_index,
+        drafts=telemetry.guidance_drafts,
+    )
     return row
 
 
@@ -1382,6 +1402,16 @@ def build_summary_row(
         guidance_retry_count=telemetry.guidance_retry_count,
         guidance_generator_exception=telemetry.guidance_generator_exception,
         guidance_validator_machine_codes=list(telemetry.guidance_validator_machine_codes),
+        guidance_requirement_ref_missing_count=_guidance_resolver_code_count(
+            telemetry.guidance_attempts,
+            "requirement_ref_missing",
+            guidance_invoked=guidance_invoked,
+        ),
+        guidance_requirement_ref_unknown_count=_guidance_resolver_code_count(
+            telemetry.guidance_attempts,
+            "requirement_ref_unknown",
+            guidance_invoked=guidance_invoked,
+        ),
         guidance_attempt_record_count=len(telemetry.guidance_attempts),
         guidance_attempts=list(telemetry.guidance_attempts),
         guidance_terminal_termination_guard=telemetry.guidance_terminal_termination_guard,
@@ -1484,6 +1514,63 @@ def write_guidance_artifacts(
         )
         written.extend([json_path, text_path])
     return written
+
+
+def write_guidance_draft_artifacts(
+    output_dir: Path,
+    *,
+    paper: SmokePaper,
+    round_index: int,
+    drafts: list[dict[str, Any]],
+) -> list[Path]:
+    """Write eval-only sanitized guidance draft payloads for direct inspection."""
+
+    if not drafts:
+        return []
+    draft_dir = output_dir / "guidance_drafts"
+    draft_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for index, draft in enumerate(drafts, start=1):
+        stem = f"{paper.slug}__round_{round_index:02d}__attempt_{index:02d}"
+        path = draft_dir / f"{stem}.guidance_draft.json"
+        path.write_text(
+            json.dumps(draft, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        written.append(path)
+    return written
+
+
+def _guidance_draft_capture_payload(
+    payload: dict[str, Any],
+    *,
+    attempt_index: int,
+    arm_label: str | None,
+) -> dict[str, Any]:
+    details: list[dict[str, Any]] = []
+    raw_details = payload.get("details")
+    if isinstance(raw_details, list):
+        for item in raw_details:
+            if not isinstance(item, dict):
+                continue
+            details.append(
+                {
+                    "step_id": item.get("step_id"),
+                    "requirement_ref": item.get("requirement_ref"),
+                    "basis": item.get("basis"),
+                    "claim_text": item.get("claim_text"),
+                    "supporting_evidence_refs": item.get("supporting_evidence_refs"),
+                    "target": item.get("target"),
+                    "confirmation_reason_code": item.get("confirmation_reason_code"),
+                    "direction_hint": item.get("direction_hint"),
+                    "punt_reason_code": item.get("punt_reason_code"),
+                }
+            )
+    return {
+        "attempt_index": attempt_index,
+        "arm_label": arm_label,
+        "details": details,
+    }
 
 
 def _guidance_artifact_payload(
@@ -1622,6 +1709,22 @@ def _artifact_count(
     return None
 
 
+def _guidance_resolver_code_count(
+    attempts: list[dict[str, object]],
+    code: str,
+    *,
+    guidance_invoked: bool,
+) -> int | None:
+    if not guidance_invoked:
+        return None
+    count = 0
+    for attempt in attempts:
+        codes = attempt.get("resolver_event_codes")
+        if isinstance(codes, list):
+            count += sum(1 for item in codes if item == code)
+    return count
+
+
 def _render_step_parameters(step: ModelBuildStep) -> str:
     if not step.parameter_refs:
         return "无"
@@ -1631,7 +1734,7 @@ def _render_step_parameters(step: ModelBuildStep) -> str:
 
 
 def _render_detail_source(detail: Any) -> str:
-    if (
+    if detail.basis == "document_claim_unverified" or (
         detail.basis == "user_confirmation_required"
         and detail.confirmation_reason_code == "document_evidence_unverified"
     ):
@@ -1720,8 +1823,11 @@ def _final_unverified_detail_count(plan: ModelGenerationPlan) -> int:
     return sum(
         1
         for detail in plan.build_guidance.details
-        if detail.basis == "user_confirmation_required"
-        and detail.confirmation_reason_code == "document_evidence_unverified"
+        if detail.basis == "document_claim_unverified"
+        or (
+            detail.basis == "user_confirmation_required"
+            and detail.confirmation_reason_code == "document_evidence_unverified"
+        )
     )
 
 

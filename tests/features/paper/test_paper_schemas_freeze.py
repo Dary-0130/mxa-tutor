@@ -25,6 +25,7 @@ from core.domain.paper_plan import (
     GuidanceAssessment,
     GuidanceDetail,
     GuidanceGap,
+    GuidanceTarget,
     ModelBuildStep,
     ModelGenerationPlan,
     ParameterMapping,
@@ -556,7 +557,7 @@ def test_build_guidance_literals_required_nullable_fields_and_schema_are_frozen(
 
     invalid_payloads = []
     invalid = deepcopy(payload)
-    invalid["version"] = "v2"
+    invalid["version"] = "v3"
     invalid_payloads.append(invalid)
     invalid = deepcopy(payload)
     invalid["assessment"]["content_status"] = "ready"
@@ -603,15 +604,15 @@ def test_build_guidance_literals_required_nullable_fields_and_schema_are_frozen(
     with pytest.raises(ValidationError):
         BuildGuidanceModel.model_validate(missing_nullable_gap)
 
-    convention_payload = deepcopy(payload)
-    convention_payload["details"][0]["basis"] = "engineering_convention"
-    convention_payload["details"][0]["convention_code"] = "simulink_standard_component"
-    assert BuildGuidanceModel.model_validate(convention_payload).details[0].basis == (
-        "engineering_convention"
+    engineering_choice_payload = deepcopy(payload)
+    engineering_choice_payload["details"][0]["basis"] = "engineering_choice"
+    engineering_choice_payload["details"][0]["convention_code"] = "simulink_standard_component"
+    assert BuildGuidanceModel.model_validate(engineering_choice_payload).details[0].basis == (
+        "engineering_choice"
     )
 
     schema = BuildGuidanceModel.model_json_schema()
-    assert schema["properties"]["version"]["const"] == "v1"
+    assert set(schema["properties"]["version"]["enum"]) == {"v1", "v2"}
     assert set(schema["required"]) == {"version", "assessment", "details", "gaps"}
     assert "convention_code" in schema["$defs"]["GuidanceDetailModel"]["required"]
     assert "step_id" in schema["$defs"]["GuidanceGapModel"]["required"]
@@ -1151,12 +1152,15 @@ def _build_step_payload() -> dict[str, object]:
 
 def _build_guidance_payload() -> dict[str, object]:
     return {
-        "version": "v1",
+        "version": "v2",
         "assessment": {
             "content_status": "reproducible_candidate",
             "environment_status": "not_checked",
             "overall_status": "reproducible_candidate_env_unchecked",
             "blocking_gap_ids": ["GAP-001"],
+            "pending_user_choice_count": 0,
+            "pending_environment_probe_count": 0,
+            "open_requirement_count": 1,
         },
         "details": [
             {
@@ -1176,6 +1180,24 @@ def _build_guidance_payload() -> dict[str, object]:
                 ],
                 "convention_code": None,
                 "confirmation_reason_code": None,
+                "target": {
+                    "target_kind": "block_choice",
+                    "model_param": None,
+                    "paper_param": None,
+                    "owner_ref": None,
+                    "setting_name": None,
+                    "block_role_ref": "B1",
+                    "from_block": None,
+                    "from_port": None,
+                    "to_block": None,
+                    "to_port": None,
+                    "signal_role": None,
+                },
+                "obligation_kind": "select_component",
+                "resolution": {"kind": "enum_selection", "selected": "Synchronous Machine"},
+                "execution_closure": "closed",
+                "input_fact_refs": [],
+                "punt_reason_code": None,
             }
         ],
         "gaps": [
@@ -1187,6 +1209,22 @@ def _build_guidance_payload() -> dict[str, object]:
                 "basis": "user_confirmation_required",
                 "severity": "blocking",
                 "display_text": "Confirm the toolbox variant before treating this as ready.",
+                "target": {
+                    "target_kind": "configuration",
+                    "model_param": None,
+                    "paper_param": None,
+                    "owner_ref": "simulation",
+                    "setting_name": "solver",
+                    "block_role_ref": None,
+                    "from_block": None,
+                    "from_port": None,
+                    "to_block": None,
+                    "to_port": None,
+                    "signal_role": None,
+                },
+                "obligation_kind": "configure_setting",
+                "execution_closure": "open",
+                "failure_code": "does_not_close_gap",
             }
         ],
     }
@@ -1258,12 +1296,15 @@ def _build_steps() -> list[ModelBuildStep]:
 def _build_guidance() -> BuildGuidance:
     evidence = _document_evidence()
     return BuildGuidance(
-        version="v1",
+        version="v2",
         assessment=GuidanceAssessment(
             content_status="reproducible_candidate",
             environment_status="not_checked",
             overall_status="reproducible_candidate_env_unchecked",
             blocking_gap_ids=["GAP-001"],
+            pending_user_choice_count=0,
+            pending_environment_probe_count=0,
+            open_requirement_count=1,
         ),
         details=[
             GuidanceDetail(
@@ -1276,6 +1317,12 @@ def _build_guidance() -> BuildGuidance:
                 evidence=[evidence],
                 convention_code=None,
                 confirmation_reason_code=None,
+                target=GuidanceTarget(target_kind="block_choice", block_role_ref="B1"),
+                obligation_kind="select_component",
+                resolution={"kind": "enum_selection", "selected": "Synchronous Machine"},
+                execution_closure="closed",
+                input_fact_refs=[],
+                punt_reason_code=None,
             )
         ],
         gaps=[
@@ -1287,6 +1334,14 @@ def _build_guidance() -> BuildGuidance:
                 basis="user_confirmation_required",
                 severity="blocking",
                 display_text="Confirm the toolbox variant before treating this as ready.",
+                target=GuidanceTarget(
+                    target_kind="configuration",
+                    owner_ref="simulation",
+                    setting_name="solver",
+                ),
+                obligation_kind="configure_setting",
+                execution_closure="open",
+                failure_code="does_not_close_gap",
             )
         ],
     )

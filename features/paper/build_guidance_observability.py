@@ -12,7 +12,7 @@ from core.domain.exceptions import (
     LLMTimeoutError,
 )
 
-SUMMARY_SCHEMA_VERSION = "paper_pdf_smoke_guidance_observability_v1"
+SUMMARY_SCHEMA_VERSION = "paper_pdf_smoke_guidance_observability_v2"
 LENGTH_FINISH_COMPLETION_RATIO_FLOOR = 0.9
 
 GuidanceFailureReasonCode = Literal[

@@ -11,10 +11,22 @@ from core.domain.paper_plan import (
     GuidanceAssessment,
     GuidanceDetail,
     GuidanceGap,
+    GuidanceTarget,
     ModelBuildStep,
     ModelGenerationPlan,
 )
 from core.domain.paper_spec import PaperSpec
+from features.paper.build_guidance_requirements import (
+    actionability_for_closure,
+    closure_from_resolution,
+    detail_has_document_basis,
+    detail_kind_for_target,
+    enumerate_guidance_requirements,
+    reduce_guidance_requirements,
+    render_detail_display_text,
+    requirement_key_for_detail,
+    requirement_key_without_paper,
+)
 from features.paper.build_guidance_rules import (
     CONFIRMATION_REASON_TEMPLATES,
     CONVENTION_TEMPLATES,
@@ -64,8 +76,13 @@ _VALID_DETAIL_KINDS = frozenset(
 _VALID_DETAIL_BASES = frozenset(
     {
         "document_extracted",
-        "engineering_convention",
+        "document_derived",
+        "domain_default",
+        "engineering_choice",
+        "user_environment",
+        "user_decision",
         "user_confirmation_required",
+        "document_claim_unverified",
     }
 )
 _VALID_ACTIONABILITY = frozenset(
@@ -87,7 +104,7 @@ _VALID_GAP_KINDS = frozenset(
     }
 )
 _VALID_GAP_SCOPES = frozenset({"plan", "step", "subsystem"})
-_VALID_GAP_BASES = frozenset({"engineering_convention", "user_confirmation_required"})
+_VALID_GAP_BASES = frozenset({"user_confirmation_required"})
 _VALID_GAP_SEVERITIES = frozenset({"blocking", "warning"})
 _VALID_CONTENT_STATUS = frozenset(
     {
@@ -232,6 +249,12 @@ def scrub_build_guidance_payload(payload: Any) -> RawGuidanceScrubResult:
         machine_codes.append("guidance_validator_raw_guidance_unreadable")
         return RawGuidanceScrubResult(payload=migrated, changed=True, machine_codes=machine_codes)
 
+    if guidance.get("version") == "v1":
+        migrated["guidance_status"] = "stale_pending_regeneration"
+        migrated["build_guidance"] = None
+        machine_codes.append("guidance_validator_legacy_v1_stale")
+        return RawGuidanceScrubResult(payload=migrated, changed=True, machine_codes=machine_codes)
+
     scrubbed_guidance, guidance_changed, guidance_codes = _scrub_guidance_dict(guidance)
     migrated["build_guidance"] = scrubbed_guidance
     return RawGuidanceScrubResult(
@@ -293,20 +316,19 @@ def validate_build_guidance_semantics(
         record("guidance", None, "drop", "guidance_validator_generated_guidance_missing")
         return _result(plan, next_plan, item_actions, "mark_generation_failed", machine_codes)
 
-    if plan.build_guidance.version != "v1":
-        whole_action: WholeAction = (
-            "mark_stale_empty"
-            if plan.guidance_status == "stale_pending_regeneration"
-            else "mark_generation_failed"
+    if plan.build_guidance.version == "v1":
+        next_plan = replace(
+            plan,
+            build_guidance=None,
+            guidance_status="stale_pending_regeneration",
         )
-        status = (
-            "stale_pending_regeneration"
-            if plan.guidance_status == "stale_pending_regeneration"
-            else "generation_failed"
-        )
-        next_plan = replace(plan, build_guidance=None, guidance_status=status)
+        record("guidance", None, "drop", "guidance_validator_legacy_v1_stale")
+        return _result(plan, next_plan, item_actions, "mark_stale_empty", machine_codes)
+
+    if plan.build_guidance.version != "v2":
+        next_plan = replace(plan, build_guidance=None, guidance_status="generation_failed")
         record("guidance", None, "drop", "guidance_validator_version_invalid")
-        return _result(plan, next_plan, item_actions, whole_action, machine_codes)
+        return _result(plan, next_plan, item_actions, "mark_generation_failed", machine_codes)
 
     if plan.guidance_status == "generated" and plan.build_steps is None:
         next_plan = replace(plan, build_guidance=None, guidance_status="generation_failed")
@@ -318,9 +340,18 @@ def validate_build_guidance_semantics(
         if plan.guidance_status == "stale_pending_regeneration"
         else "current_generated"
     )
+    if mode == "stale_snapshot":
+        return GuidanceSemanticValidationResult(
+            plan=plan,
+            changed=False,
+            item_actions=[],
+            whole_action="keep",
+            machine_codes=[],
+        )
     build_steps = plan.build_steps or []
     step_by_id = {step.step_id: step for step in build_steps}
     targets = ControlledGuidanceTargets(build_steps)
+    requirements = enumerate_guidance_requirements(plan.paper_spec_id, build_steps)
 
     details = _validated_details(
         spec=spec,
@@ -329,19 +360,14 @@ def validate_build_guidance_semantics(
         step_by_id=step_by_id,
         targets=targets,
         tagger=tagger,
+        requirements=requirements,
         record=record,
     )
-    gaps = _validated_gaps(
-        gaps=plan.build_guidance.gaps,
-        mode=mode,
-        step_by_id=step_by_id,
-        record=record,
-    )
-    assessment = _validated_assessment(
-        plan.build_guidance.assessment,
-        gaps,
-        record=record,
-    )
+    reduction = reduce_guidance_requirements(requirements=requirements, details=details)
+    for code in reduction.machine_codes:
+        record("guidance", None, "normalize", code)
+    gaps = reduction.gaps
+    assessment = reduction.assessment
     sanitized_guidance = replace(
         plan.build_guidance,
         assessment=assessment,
@@ -349,7 +375,7 @@ def validate_build_guidance_semantics(
         gaps=gaps,
     )
 
-    if not any(detail.basis == "document_extracted" for detail in details):
+    if not any(detail_has_document_basis(detail) for detail in details):
         if mode == "stale_snapshot":
             next_plan = replace(
                 plan,
@@ -374,10 +400,13 @@ def _validated_details(
     step_by_id: dict[str, ModelBuildStep],
     targets: ControlledGuidanceTargets,
     tagger: EvidenceTagger,
+    requirements: list[Any],
     record: Any,
 ) -> list[GuidanceDetail]:
     seen_ids: set[str] = set()
     result: list[GuidanceDetail] = []
+    requirement_keys = {requirement_key_without_paper(item) for item in requirements}
+    detail_by_id = {detail.detail_id: detail for detail in details}
     for detail in details:
         if detail.detail_id in seen_ids:
             record("detail", detail.detail_id, "drop", "guidance_validator_detail_id_duplicate")
@@ -396,38 +425,231 @@ def _validated_details(
                 "guidance_validator_stale_snapshot_step_ref_ignored",
             )
 
-        if detail.basis == "document_extracted":
-            validated = _validated_document_detail(
-                spec=spec,
-                detail=detail,
-                step=step,
-                mode=mode,
-                targets=targets,
-                tagger=tagger,
-                record=record,
-            )
+        if detail.basis not in _VALID_DETAIL_BASES:
+            record("detail", detail.detail_id, "drop", "guidance_validator_detail_basis_invalid")
+            continue
+        if detail.target is None or detail.obligation_kind is None:
+            record("detail", detail.detail_id, "drop", "requirement_mismatch")
+            continue
+        if requirement_key_for_detail(detail) not in requirement_keys:
+            record("detail", detail.detail_id, "drop", "requirement_mismatch")
+            continue
+        if detail.detail_kind != detail_kind_for_target(detail.target.target_kind):
+            record("detail", detail.detail_id, "drop", "requirement_mismatch")
+            continue
+        validated = _validated_v2_detail(
+            spec=spec,
+            detail=detail,
+            step=step,
+            mode=mode,
+            targets=targets,
+            tagger=tagger,
+            detail_by_id=detail_by_id,
+            record=record,
+        )
+        if validated is not None:
             result.append(validated)
-            continue
-        if detail.basis == "engineering_convention":
-            convention_detail = _validated_convention_detail(
-                detail=detail,
-                targets=targets,
-                record=record,
-            )
-            if convention_detail is not None:
-                result.append(convention_detail)
-            continue
-        if detail.basis == "user_confirmation_required":
-            confirmation_detail = _validated_confirmation_detail(
-                detail=detail,
-                targets=targets,
-                record=record,
-            )
-            if confirmation_detail is not None:
-                result.append(confirmation_detail)
-            continue
-        record("detail", detail.detail_id, "drop", "guidance_validator_detail_basis_invalid")
     return result
+
+
+def _validated_v2_detail(
+    *,
+    spec: PaperSpec,
+    detail: GuidanceDetail,
+    step: ModelBuildStep | None,
+    mode: ValidationMode,
+    targets: ControlledGuidanceTargets,
+    tagger: EvidenceTagger,
+    detail_by_id: dict[str, GuidanceDetail],
+    record: Any,
+) -> GuidanceDetail | None:
+    target = cast(GuidanceTarget, detail.target)
+    input_fact_refs = list(detail.input_fact_refs or [])
+    input_code = _input_fact_ref_error(detail, detail_by_id)
+    if input_code is not None:
+        record("detail", detail.detail_id, "drop", input_code)
+        return None
+
+    closure, resolution_code = closure_from_resolution(
+        basis=detail.basis,
+        target=target,
+        resolution=detail.resolution,
+        input_fact_refs=input_fact_refs,
+        punt_reason_code=detail.punt_reason_code,
+    )
+    if closure is None:
+        record("detail", detail.detail_id, "drop", resolution_code or "resolution_missing")
+        return None
+
+    if detail.basis in {"document_extracted", "document_derived"}:
+        evidence_code = _document_evidence_error(
+            spec=spec,
+            detail=detail,
+            step=step,
+            mode=mode,
+            tagger=tagger,
+        )
+        if evidence_code is not None:
+            downgraded = _document_claim_unverified_detail(detail, target)
+            record("detail", detail.detail_id, "downgrade", evidence_code)
+            return downgraded
+    else:
+        evidence_code = _non_document_evidence_error(detail.evidence)
+        if evidence_code is not None:
+            record("detail", detail.detail_id, "drop", evidence_code)
+            return None
+
+    if detail.basis == "document_claim_unverified" and (
+        detail.evidence or detail.resolution is not None or input_fact_refs
+    ):
+        normalized = _document_claim_unverified_detail(detail, target)
+        record("detail", detail.detail_id, "normalize", "relabel_without_resolution")
+        return normalized
+
+    actionability = actionability_for_closure(closure)
+    display_text = render_detail_display_text(
+        basis=detail.basis,
+        target=target,
+        resolution=detail.resolution,
+        punt_reason_code=detail.punt_reason_code,
+    )
+    normalized = replace(
+        detail,
+        actionability=actionability,
+        display_text=display_text,
+        execution_closure=closure,
+        input_fact_refs=input_fact_refs,
+        evidence=detail.evidence
+        if detail.basis in {"document_extracted", "document_derived"}
+        else [],
+        convention_code=(detail.convention_code if detail.basis == "engineering_choice" else None),
+        confirmation_reason_code=(
+            detail.confirmation_reason_code
+            if detail.basis in {"user_confirmation_required", "document_claim_unverified"}
+            else None
+        ),
+    )
+    if normalized != detail:
+        record("detail", detail.detail_id, "normalize", "guidance_validator_detail_normalized")
+    _ = targets
+    return normalized
+
+
+def _document_evidence_error(
+    *,
+    spec: PaperSpec,
+    detail: GuidanceDetail,
+    step: ModelBuildStep | None,
+    mode: ValidationMode,
+    tagger: EvidenceTagger,
+) -> str | None:
+    if not detail.evidence:
+        return "resolution_missing"
+    if not _inline_document_evidence_looks_valid(detail.evidence):
+        return "non_document_evidence_present"
+    if mode == "current_generated":
+        try:
+            tagger.validate_for_spec(detail.evidence, spec)
+        except Exception:
+            return "non_document_locator_present"
+    claim_surface = _resolution_grounding_surface(detail.resolution)
+    tokens = high_risk_text_tokens(claim_surface)
+    truth_index = GroundingTruthIndex.from_inline_evidence(
+        detail.evidence,
+        spec=spec if mode == "current_generated" else None,
+    )
+    if not truth_index.contains_all(tokens):
+        return "guidance_validator_display_text_grounding_failed"
+    return None
+
+
+def _non_document_evidence_error(evidence: list[PaperEvidenceEntry]) -> str | None:
+    for entry in evidence:
+        if entry.document_id is not None:
+            return "non_document_document_id_present"
+        if any((entry.paper_section_id, entry.equation_id, entry.figure_id)):
+            return "non_document_locator_present"
+        if entry.excerpt:
+            return "non_document_excerpt_present"
+        if entry.source is EvidenceSource.DOCUMENT_EXTRACTED:
+            return "non_document_evidence_present"
+    return "non_document_evidence_present" if evidence else None
+
+
+def _resolution_grounding_surface(resolution: dict[str, Any] | None) -> str:
+    if not isinstance(resolution, dict):
+        return ""
+    if resolution.get("kind") == "fixed":
+        return " ".join(
+            str(part)
+            for part in (resolution.get("value"), resolution.get("unit"))
+            if part is not None
+        )
+    return " ".join(str(value) for value in resolution.values() if value is not None)
+
+
+def _input_fact_ref_error(
+    detail: GuidanceDetail,
+    detail_by_id: dict[str, GuidanceDetail],
+) -> str | None:
+    refs = list(detail.input_fact_refs or [])
+    if detail.detail_id in refs:
+        return "input_fact_ref_cycle"
+    for ref in refs:
+        referenced = detail_by_id.get(ref)
+        if referenced is None:
+            return "input_fact_ref_unknown"
+        if _input_fact_ref_reaches(ref, detail.detail_id, detail_by_id, set()):
+            return "input_fact_ref_cycle"
+        if detail.basis == "document_derived":
+            if referenced.basis not in {"document_extracted", "document_derived"}:
+                return "input_fact_ref_forbidden_basis"
+            if referenced.execution_closure != "closed":
+                return "input_fact_ref_forbidden_basis"
+    return None
+
+
+def _input_fact_ref_reaches(
+    current_id: str,
+    target_id: str,
+    detail_by_id: dict[str, GuidanceDetail],
+    seen: set[str],
+) -> bool:
+    if current_id in seen:
+        return False
+    seen.add(current_id)
+    current = detail_by_id.get(current_id)
+    if current is None:
+        return False
+    for ref in current.input_fact_refs or []:
+        if ref == target_id:
+            return True
+        if _input_fact_ref_reaches(ref, target_id, detail_by_id, seen):
+            return True
+    return False
+
+
+def _document_claim_unverified_detail(
+    detail: GuidanceDetail,
+    target: GuidanceTarget,
+) -> GuidanceDetail:
+    return replace(
+        detail,
+        basis="document_claim_unverified",
+        actionability="blocked_pending_confirmation",
+        display_text=render_detail_display_text(
+            basis="document_claim_unverified",
+            target=target,
+            resolution=None,
+        ),
+        evidence=[],
+        convention_code=None,
+        confirmation_reason_code="document_evidence_unverified",
+        resolution=None,
+        execution_closure="open",
+        input_fact_refs=[],
+        punt_reason_code=None,
+    )
 
 
 def _validated_document_detail(
@@ -663,8 +885,8 @@ def _scrub_guidance_dict(guidance: dict[str, Any]) -> tuple[dict[str, Any], bool
     scrubbed = dict(guidance)
     changed = False
     machine_codes: list[str] = []
-    if scrubbed.get("version") != "v1":
-        scrubbed["version"] = "v1"
+    if scrubbed.get("version") not in {"v1", "v2"}:
+        scrubbed["version"] = "v2"
         changed = True
         machine_codes.append("guidance_validator_raw_version_defaulted")
 

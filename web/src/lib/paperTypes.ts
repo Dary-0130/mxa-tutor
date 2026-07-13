@@ -73,12 +73,32 @@ export type GuidanceDetailKind =
   | "gap_notice";
 export type GuidanceBasis =
   | "document_extracted"
-  | "engineering_convention"
-  | "user_confirmation_required";
+  | "document_derived"
+  | "domain_default"
+  | "engineering_choice"
+  | "user_environment"
+  | "user_decision"
+  | "user_confirmation_required"
+  | "document_claim_unverified";
 export type GuidanceActionability =
   | "actionable"
   | "notice_only"
   | "blocked_pending_confirmation";
+export type GuidanceClosure =
+  | "closed"
+  | "guided_choice"
+  | "guided_probe"
+  | "open";
+export type GuidanceTargetKind =
+  | "parameter"
+  | "configuration"
+  | "block_choice"
+  | "connection";
+export type GuidanceObligationKind =
+  | "determine_parameter_value"
+  | "select_component"
+  | "configure_setting"
+  | "connect_signal";
 export type GuidanceGapKind =
   | "missing_support_component"
   | "missing_parameter_value"
@@ -258,6 +278,23 @@ export interface GuidanceAssessment {
   environment_status: GuidanceEnvironmentStatus;
   overall_status: GuidanceOverallStatus;
   blocking_gap_ids: string[];
+  pending_user_choice_count: number;
+  pending_environment_probe_count: number;
+  open_requirement_count: number;
+}
+
+export interface GuidanceTarget {
+  target_kind: GuidanceTargetKind;
+  model_param: string | null;
+  paper_param: string | null;
+  owner_ref: string | null;
+  setting_name: string | null;
+  block_role_ref: string | null;
+  from_block: string | null;
+  from_port: string | null;
+  to_block: string | null;
+  to_port: string | null;
+  signal_role: string | null;
 }
 
 export interface GuidanceDetail {
@@ -270,6 +307,12 @@ export interface GuidanceDetail {
   evidence: PaperEvidenceEntry[];
   convention_code: string | null;
   confirmation_reason_code: string | null;
+  target: GuidanceTarget | null;
+  obligation_kind: GuidanceObligationKind | null;
+  resolution: Record<string, unknown> | null;
+  execution_closure: GuidanceClosure;
+  input_fact_refs: string[];
+  punt_reason_code: string | null;
 }
 
 export interface GuidanceGap {
@@ -277,13 +320,17 @@ export interface GuidanceGap {
   gap_kind: GuidanceGapKind;
   scope: GuidanceScope;
   step_id: string | null;
-  basis: Exclude<GuidanceBasis, "document_extracted">;
+  basis: "user_confirmation_required";
   severity: GuidanceSeverity;
   display_text: string;
+  target: GuidanceTarget | null;
+  obligation_kind: GuidanceObligationKind | null;
+  execution_closure: GuidanceClosure;
+  failure_code: string | null;
 }
 
 export interface BuildGuidance {
-  version: "v1";
+  version: "v1" | "v2";
   assessment: GuidanceAssessment;
   details: GuidanceDetail[];
   gaps: GuidanceGap[];

@@ -29,8 +29,13 @@ DetailKind = Literal[
 ]
 DetailBasis = Literal[
     "document_extracted",
-    "engineering_convention",
+    "document_derived",
+    "domain_default",
+    "engineering_choice",
+    "user_environment",
+    "user_decision",
     "user_confirmation_required",
+    "document_claim_unverified",
 ]
 GuidanceContentStatus = Literal["reproducible_candidate", "outline_with_gaps", "outline_only"]
 GeneratedGuidanceOverallStatus = Literal[
@@ -47,28 +52,25 @@ CONVENTION_TEMPLATES: dict[str, tuple[DetailKind, Literal["actionable", "notice_
 }
 
 CONFIRMATION_REASON_TEMPLATES: dict[str, str] = {
-    "missing_parameter_value": "Confirm the parameter value for {target}; check the source model or paper table.",
-    "library_variant_unresolved": "Confirm the Simulink block variant for {target}; check the local library version.",
-    "toolbox_unverified": "Confirm toolbox availability for {target}; check the installed MATLAB products.",
-    "solver_unverified": "Confirm the solver choice for {target}; check the reproduction environment.",
-    "sample_time_unverified": "Confirm sample-time handling for {target}; check the source model setup.",
-    "connection_detail_missing": "Confirm the connection detail for {target}; inspect the source diagram or model.",
-    "initial_condition_unverified": "Confirm initial-condition handling for {target}; check the source model setup.",
-    "switching_frequency_unverified": "Confirm switching-frequency handling for {target}; check the source model setup.",
-    "simulation_time_unverified": "Confirm simulation-time handling for {target}; check the source model setup.",
-    "configuration_unverified": "Confirm the configuration detail for {target}; check the source model setup.",
-    "document_evidence_unverified": "Confirm {target}; the cited paper evidence could not be verified for this detail.",
-    "engineering_decision_unverified": "Confirm the engineering decision for {target}; check the source model setup.",
+    "missing_parameter_value": "需要确认 {target} 的参数值；请查看可复现实验材料或本地模型设置。",
+    "library_variant_unresolved": "需要确认 {target} 的 Simulink 模块变体；请查看本地库版本。",
+    "toolbox_unverified": "需要确认 {target} 的工具箱可用性；请查看已安装 MATLAB 产品。",
+    "solver_unverified": "需要确认 {target} 的 solver 选择；请查看复现环境。",
+    "sample_time_unverified": "需要确认 {target} 的采样时间处理；请查看本地模型设置。",
+    "connection_detail_missing": "需要确认 {target} 的连接细节；请查看源模型图。",
+    "initial_condition_unverified": "需要确认 {target} 的初始条件处理；请查看本地模型设置。",
+    "switching_frequency_unverified": "需要确认 {target} 的开关频率处理；请查看本地模型设置。",
+    "simulation_time_unverified": "需要确认 {target} 的仿真时长处理；请查看本地模型设置。",
+    "configuration_unverified": "需要确认 {target} 的配置细节；请查看本地模型设置。",
+    "document_evidence_unverified": "需要确认 {target}；该条声称的论文依据未能核实。",
+    "engineering_decision_unverified": "需要确认 {target} 的工程选择；请查看本地模型设置。",
 }
 
-GAP_SYNTHESIS_RULES: dict[
-    str, tuple[str, Literal["engineering_convention", "user_confirmation_required"], str]
-] = {
+GAP_SYNTHESIS_RULES: dict[str, tuple[str, Literal["user_confirmation_required"], str]] = {
     "block": ("missing_support_component", "user_confirmation_required", "blocking"),
     "parameter": ("missing_parameter_value", "user_confirmation_required", "blocking"),
     "connection": ("missing_connection_detail", "user_confirmation_required", "blocking"),
     "configuration": ("missing_configuration_detail", "user_confirmation_required", "blocking"),
-    "blocked_detail": ("insufficient_document_evidence", "user_confirmation_required", "blocking"),
 }
 
 NON_NUMERIC_ENGINEERING_TERMS = frozenset(
@@ -332,24 +334,12 @@ def high_risk_text_tokens(text: str) -> list[str]:
 
 def convention_display_text(code: str, target: str) -> str:
     if code == "pi_controller_standard_structure":
-        return (
-            f"Use a standard PI structure for {target}: error summing plus proportional and "
-            "integral paths."
-        )
+        return f"本方案选择（可改）：{target} 使用标准 PI 结构：误差求和 + 比例/积分通道。"
     if code == "pid_controller_standard_structure":
-        return (
-            f"Use a standard PID structure for {target}: error summing plus proportional, "
-            "integral, and derivative paths."
-        )
+        return f"本方案选择（可改）：{target} 使用标准 PID 结构：误差求和 + 比例/积分/微分通道。"
     if code == "clarke_transform_structure":
-        return (
-            f"Treat Clarke transform details for {target} as a basic structure notice; confirm "
-            "scaling and phase convention separately."
-        )
-    return (
-        f"Treat Park transform details for {target} as a basic structure notice; confirm angle "
-        "source and convention separately."
-    )
+        return f"本方案选择（可改）：{target} 采用 Clarke 变换基础结构；缩放和相序需另行确认。"
+    return f"本方案选择（可改）：{target} 采用 Park 变换基础结构；角度来源和约定需另行确认。"
 
 
 def confirmation_display_text(reason_code: str, target: str, direction_hint: str | None) -> str:
