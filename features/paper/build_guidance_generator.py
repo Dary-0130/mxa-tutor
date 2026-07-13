@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -20,6 +21,7 @@ from core.domain.paper_plan import (
     GuidanceAssessment,
     GuidanceDetail,
     GuidanceGap,
+    GuidanceResolution,
     ModelBuildStep,
     ModelGenerationPlan,
     ParameterMapping,
@@ -85,6 +87,10 @@ from features.paper.build_guidance_semantic_validator import (
     GuidanceSemanticValidationResult,
     guidance_validation_telemetry,
     validate_build_guidance_semantics,
+)
+from features.paper.guidance_resolution_schemas import (
+    GuidanceResolutionModel,
+    resolution_to_domain,
 )
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
@@ -225,7 +231,7 @@ class GuidanceDetailDraftModel(BaseModel):
     target: str | None = Field(default=None, min_length=1)
     confirmation_reason_code: str | None = Field(default=None, min_length=1)
     direction_hint: str | None = Field(default=None, min_length=1)
-    resolution: dict[str, Any] | None = None
+    resolution: GuidanceResolutionModel | None = None
     input_fact_refs: list[str] = Field(default_factory=list)
     punt_reason_code: str | None = Field(default=None, min_length=1)
 
@@ -705,6 +711,10 @@ def parse_and_ground_guidance_draft(
             draft = GuidanceDetailDraftModel.model_validate(raw_item)
         except ValidationError:
             dropped_count += 1
+            code = _draft_validation_resolution_code(raw_item)
+            if code is not None:
+                resolver_error_count += 1
+                resolver_event_codes.append(code)
             continue
         if draft.requirement_ref is None:
             dropped_count += 1
@@ -778,6 +788,7 @@ def parse_and_ground_guidance_draft(
                 draft,
                 requirement=requirement,
                 targets=targets,
+                step=step,
                 ordinal=len(details) + 1,
             )
             if detail is not None:
@@ -791,6 +802,7 @@ def parse_and_ground_guidance_draft(
         detail, code = _non_document_detail_from_draft(
             draft,
             requirement=requirement,
+            step=step,
             ordinal=len(details) + 1,
         )
         if detail is not None:
@@ -828,6 +840,72 @@ def synthesize_guidance_gaps(
     _ = pool, truth_index
     requirements = enumerate_guidance_requirements("legacy", build_steps)
     return reduce_guidance_requirements(requirements=requirements, details=details).gaps
+
+
+def _draft_validation_resolution_code(raw_item: Any) -> str | None:
+    if not isinstance(raw_item, dict):
+        return None
+    resolution = raw_item.get("resolution")
+    if resolution is None:
+        return None
+    if not isinstance(resolution, dict):
+        return "resolution_kind_invalid"
+    kind = resolution.get("kind")
+    if kind == "fixed":
+        return _draft_fixed_resolution_code(resolution)
+    if kind == "enum_selection":
+        return None if _nonempty_string(resolution.get("selected")) else "resolution_missing"
+    if kind == "range":
+        return None
+    if kind == "derivation":
+        return None if isinstance(resolution.get("inputs"), list) else "derivation_input_unresolved"
+    if kind == "conditional":
+        return (
+            None if isinstance(resolution.get("branches"), list) else "conditional_non_exhaustive"
+        )
+    if kind == "guided_user_decision":
+        return (
+            None
+            if _nonempty_string(resolution.get("decision_item"))
+            and _nonempty_string(resolution.get("criteria"))
+            and isinstance(resolution.get("options"), list)
+            else "decision_procedure_incomplete"
+        )
+    if kind == "environment_probe":
+        return (
+            None
+            if _nonempty_string(resolution.get("probe_item"))
+            and _nonempty_string(resolution.get("procedure"))
+            and isinstance(resolution.get("result_actions"), list)
+            else "probe_incomplete"
+        )
+    return "resolution_kind_invalid"
+
+
+def _draft_fixed_resolution_code(resolution: dict[str, Any]) -> str | None:
+    fixed_kind = resolution.get("fixed_kind")
+    if fixed_kind == "numeric":
+        if not _strict_number(resolution.get("value")) or not _nonempty_string(
+            resolution.get("unit")
+        ):
+            return "resolution_missing"
+        return None
+    if fixed_kind == "block_ref":
+        return None if _nonempty_string(resolution.get("selected_id")) else "resolution_missing"
+    if fixed_kind in {"configuration_option", "connection_mode"}:
+        token = resolution.get("value_token")
+        if not isinstance(token, str) or not re.fullmatch(r"^[A-Za-z0-9]{1,40}$", token):
+            return "value_token_invalid"
+        return None if _nonempty_string(resolution.get("display_label")) else "resolution_missing"
+    return "resolution_kind_invalid"
+
+
+def _nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+def _strict_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def compute_guidance_assessment(
@@ -890,12 +968,14 @@ def _document_detail_from_draft(
         resolved.append(card.evidence)
     resolved = _dedupe_evidence(resolved)
     high_risk_tokens = high_risk_claim_tokens(draft.claim_text, step)
+    resolution = _domain_resolution(draft)
     closure, code = closure_from_resolution(
         basis=draft.basis,
         target=requirement.target,
-        resolution=draft.resolution,
+        resolution=resolution,
         input_fact_refs=draft.input_fact_refs,
         punt_reason_code=draft.punt_reason_code,
+        step=step,
     )
     if closure is None:
         return GuidanceDocumentResolution(
@@ -928,14 +1008,14 @@ def _document_detail_from_draft(
             display_text=render_detail_display_text(
                 basis="document_extracted",
                 target=requirement.target,
-                resolution=draft.resolution,
+                resolution=resolution,
             ),
             evidence=resolved,
             convention_code=None,
             confirmation_reason_code=None,
             target=requirement.target,
             obligation_kind=requirement.obligation_kind,
-            resolution=draft.resolution,
+            resolution=resolution,
             execution_closure=closure,
             input_fact_refs=list(draft.input_fact_refs),
             punt_reason_code=None,
@@ -970,12 +1050,14 @@ def _derived_detail_from_draft(
             _claim_unverified_detail(requirement=requirement, ordinal=ordinal),
             "grounding_whitelist_no_match" if resolved else "input_fact_ref_unknown",
         )
+    resolution = _domain_resolution(draft)
     closure, code = closure_from_resolution(
         basis=draft.basis,
         target=requirement.target,
-        resolution=draft.resolution,
+        resolution=resolution,
         input_fact_refs=draft.input_fact_refs,
         punt_reason_code=draft.punt_reason_code,
+        step=step,
     )
     if closure is None:
         return None, code
@@ -989,14 +1071,14 @@ def _derived_detail_from_draft(
             display_text=render_detail_display_text(
                 basis="document_derived",
                 target=requirement.target,
-                resolution=draft.resolution,
+                resolution=resolution,
             ),
             evidence=resolved,
             convention_code=None,
             confirmation_reason_code=None,
             target=requirement.target,
             obligation_kind=requirement.obligation_kind,
-            resolution=draft.resolution,
+            resolution=resolution,
             execution_closure=closure,
             input_fact_refs=list(draft.input_fact_refs),
             punt_reason_code=None,
@@ -1010,6 +1092,7 @@ def _convention_detail_from_draft(
     *,
     requirement: GuidanceRequirement,
     targets: ControlledGuidanceTargets,
+    step: ModelBuildStep,
     ordinal: int,
 ) -> GuidanceDetail | None:
     code = draft.convention_code
@@ -1018,12 +1101,14 @@ def _convention_detail_from_draft(
     detail_kind, _actionability = CONVENTION_TEMPLATES[code]
     if _unsafe_freeform_text(draft.target):
         return None
+    resolution = _domain_resolution(draft)
     closure, machine_code = closure_from_resolution(
         basis="engineering_choice",
         target=requirement.target,
-        resolution=draft.resolution,
+        resolution=resolution,
         input_fact_refs=draft.input_fact_refs,
         punt_reason_code=draft.punt_reason_code,
+        step=step,
     )
     if closure is None:
         _ = machine_code
@@ -1037,11 +1122,11 @@ def _convention_detail_from_draft(
         actionability=actionability_for_closure(closure),
         display_text=(
             convention_display_text(code, target)
-            if draft.resolution is None
+            if resolution is None
             else render_detail_display_text(
                 basis="engineering_choice",
                 target=requirement.target,
-                resolution=draft.resolution,
+                resolution=resolution,
             )
         ),
         evidence=[],
@@ -1049,7 +1134,7 @@ def _convention_detail_from_draft(
         confirmation_reason_code=None,
         target=requirement.target,
         obligation_kind=requirement.obligation_kind,
-        resolution=draft.resolution,
+        resolution=resolution,
         execution_closure=closure,
         input_fact_refs=list(draft.input_fact_refs),
         punt_reason_code=None,
@@ -1060,16 +1145,19 @@ def _non_document_detail_from_draft(
     draft: GuidanceDetailDraftModel,
     *,
     requirement: GuidanceRequirement,
+    step: ModelBuildStep,
     ordinal: int,
 ) -> tuple[GuidanceDetail | None, str | None]:
     if draft.supporting_evidence_refs:
         return None, "non_document_evidence_present"
+    resolution = _domain_resolution(draft)
     closure, code = closure_from_resolution(
         basis=draft.basis,
         target=requirement.target,
-        resolution=draft.resolution,
+        resolution=resolution,
         input_fact_refs=draft.input_fact_refs,
         punt_reason_code=draft.punt_reason_code,
+        step=step,
     )
     if closure is None:
         return None, code
@@ -1083,7 +1171,7 @@ def _non_document_detail_from_draft(
             display_text=render_detail_display_text(
                 basis=draft.basis,
                 target=requirement.target,
-                resolution=draft.resolution,
+                resolution=resolution,
                 punt_reason_code=draft.punt_reason_code,
             ),
             evidence=[],
@@ -1095,13 +1183,17 @@ def _non_document_detail_from_draft(
             ),
             target=requirement.target,
             obligation_kind=requirement.obligation_kind,
-            resolution=draft.resolution,
+            resolution=resolution,
             execution_closure=closure,
             input_fact_refs=list(draft.input_fact_refs),
             punt_reason_code=draft.punt_reason_code,
         ),
         None,
     )
+
+
+def _domain_resolution(draft: GuidanceDetailDraftModel) -> GuidanceResolution | None:
+    return resolution_to_domain(draft.resolution)
 
 
 def _claim_unverified_detail(

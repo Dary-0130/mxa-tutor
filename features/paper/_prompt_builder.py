@@ -669,7 +669,13 @@ def _build_guidance_constraints() -> str:
 - 白名单外不要输出 engineering_convention;电源/逆变器/主功率器件/物理 plant 不走 convention
 
 【resolution payload】:
-- closed 类 basis 必须给 fixed/range/enum_selection/derivation/conditional 之一;parameter fixed 必须含 unit
+- closed 类 basis 必须给 fixed/range/enum_selection/derivation/conditional 之一
+- fixed 必须含 fixed_kind:
+  - parameter 数值:{"kind":"fixed","fixed_kind":"numeric","value":2.43,"unit":"..."};value 必须是 JSON number,不能写字符串
+  - block 选择:{"kind":"fixed","fixed_kind":"block_ref","selected_id":"B1"};selected_id 必须来自该 step 的 block_refs
+  - configuration 选择:{"kind":"fixed","fixed_kind":"configuration_option","value_token":"ode15s","display_label":"ode15s"}
+  - connection 模式:{"kind":"fixed","fixed_kind":"connection_mode","value_token":"direct","display_label":"direct"}
+- value_token 只能用 1-40 位英文字母/数字;不得有空格、中文或标点
 - user_decision 必须给 guided_user_decision:decision_item/criteria/options(option+consequence)
 - user_environment 必须给 environment_probe:probe_item/procedure/result_actions(result+action)
 - user_confirmation_required 必须 resolution=null、supporting_evidence_refs=[]、input_fact_refs=[]
@@ -688,7 +694,7 @@ def _build_guidance_constraints() -> str:
       "target": "STEP-001|B1|paper_param::model_param|plan|..." | null,
       "confirmation_reason_code": "missing_parameter_value|library_variant_unresolved|toolbox_unverified|solver_unverified|sample_time_unverified|connection_detail_missing|initial_condition_unverified|switching_frequency_unverified|simulation_time_unverified|configuration_unverified|document_evidence_unverified|engineering_decision_unverified" | null,
       "direction_hint": "..." | null,
-      "resolution": {"kind": "fixed|range|enum_selection|derivation|conditional|guided_user_decision|environment_probe", "...": "..."} | null,
+      "resolution": {"kind": "fixed|range|enum_selection|derivation|conditional|guided_user_decision|environment_probe", "fixed_kind": "numeric|block_ref|configuration_option|connection_mode", "...": "..."} | null,
       "input_fact_refs": [],
       "punt_reason_code": "source_does_not_specify|upstream_step_underspecified|requires_user_context|outside_guidance_contract" | null
     }

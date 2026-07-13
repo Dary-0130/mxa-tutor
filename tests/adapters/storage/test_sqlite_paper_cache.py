@@ -1434,7 +1434,7 @@ def _build_guidance(*, gaps: list[GuidanceGap] | None = None) -> BuildGuidance:
                 confirmation_reason_code=None,
                 target=GuidanceTarget(target_kind="block_choice", block_role_ref="B1"),
                 obligation_kind="select_component",
-                resolution={"kind": "enum_selection", "selected": "Synchronous Machine"},
+                resolution=_fixed_block_ref("B1"),
                 execution_closure="closed",
                 input_fact_refs=[],
                 punt_reason_code=None,
@@ -1458,6 +1458,10 @@ def _record_with_mapping_value(record: PaperPlanRecord, value: str) -> PaperPlan
         ],
     )
     return replace(record, plan=updated_plan)
+
+
+def _fixed_block_ref(selected_id: str) -> dict[str, object]:
+    return {"kind": "fixed", "fixed_kind": "block_ref", "selected_id": selected_id}
 
 
 def _source(paper_id: str, *, text: str = "paper text") -> PaperReparseSource:

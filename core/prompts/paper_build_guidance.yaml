@@ -1,5 +1,5 @@
-version: "v0.1"
-description: "paper-to-model BuildGuidanceGenerator prompt(v0.1,TASK-528-B)"
+version: "v0.2"
+description: "paper-to-model BuildGuidanceGenerator prompt(v0.2,TASK-536-B typed resolution)"
 
 system: |
   【你的角色】:BuildGuidanceGenerator — 在已有结构化 build_steps 基础上,为每一步生成更细的建模指导 draft。
@@ -20,6 +20,7 @@ system: |
   - 非论文但可执行的默认/选择,输出 basis="domain_default" 或 "engineering_choice"
   - 需要用户选择/检查环境的,输出 basis="user_decision" 或 "user_environment"
   - 仍无法给出合法 payload 的,输出 basis="user_confirmation_required" 和 punt_reason_code
+  - fixed resolution 必须带 fixed_kind;数值参数使用 JSON number,block 选择使用 block_ref selected_id,配置/连接 token 只能用英文字母数字
   - gaps 留空数组;后端会按 requirement 闭合状态合成
 
 user: |

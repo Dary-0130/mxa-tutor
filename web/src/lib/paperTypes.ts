@@ -122,6 +122,96 @@ export type GuidanceViewState =
   | "failed_retryable"
   | "no_basis"
   | "not_generated";
+export type GuidanceResolution =
+  | FixedNumericResolution
+  | FixedBlockRefResolution
+  | FixedConfigurationOptionResolution
+  | FixedConnectionModeResolution
+  | RangeResolution
+  | EnumSelectionResolution
+  | DerivationResolution
+  | ConditionalResolution
+  | GuidedUserDecisionResolution
+  | EnvironmentProbeResolution;
+
+export interface FixedNumericResolution {
+  kind: "fixed";
+  fixed_kind: "numeric";
+  value: number;
+  unit: string;
+}
+
+export interface FixedBlockRefResolution {
+  kind: "fixed";
+  fixed_kind: "block_ref";
+  selected_id: string;
+}
+
+export interface FixedConfigurationOptionResolution {
+  kind: "fixed";
+  fixed_kind: "configuration_option";
+  value_token: string;
+  display_label: string;
+}
+
+export interface FixedConnectionModeResolution {
+  kind: "fixed";
+  fixed_kind: "connection_mode";
+  value_token: string;
+  display_label: string;
+}
+
+export interface RangeResolution {
+  kind: "range";
+  lower?: number | string | null;
+  upper?: number | string | null;
+  values?: Array<number | string> | null;
+  recommended_start?: number | string | null;
+  selection_rule?: string | null;
+}
+
+export interface EnumSelectionResolution {
+  kind: "enum_selection";
+  selected: string;
+}
+
+export interface DerivationResolution {
+  kind: "derivation";
+  formula?: string | null;
+  rule?: string | null;
+  inputs: string[];
+}
+
+export interface ConditionalResolution {
+  kind: "conditional";
+  branches: Array<Record<string, unknown>>;
+  fallback?: string | null;
+  exhaustive?: boolean;
+}
+
+export interface GuidedUserDecisionOption {
+  option: string;
+  consequence: string;
+}
+
+export interface GuidedUserDecisionResolution {
+  kind: "guided_user_decision";
+  decision_item: string;
+  criteria: string;
+  options: GuidedUserDecisionOption[];
+}
+
+export interface EnvironmentProbeAction {
+  result: string;
+  action: string;
+}
+
+export interface EnvironmentProbeResolution {
+  kind: "environment_probe";
+  probe_item: string;
+  procedure: string;
+  result_actions: EnvironmentProbeAction[];
+}
 
 export type PaperCitationTarget =
   | SectionTarget
@@ -309,7 +399,7 @@ export interface GuidanceDetail {
   confirmation_reason_code: string | null;
   target: GuidanceTarget | null;
   obligation_kind: GuidanceObligationKind | null;
-  resolution: Record<string, unknown> | null;
+  resolution: GuidanceResolution | null;
   execution_closure: GuidanceClosure;
   input_fact_refs: string[];
   punt_reason_code: string | null;

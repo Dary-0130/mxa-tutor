@@ -1,7 +1,7 @@
 """Pure Python ModelGenerationPlan domain contract."""
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
@@ -42,6 +42,119 @@ GuidanceObligationKind = Literal[
     "connect_signal",
 ]
 GuidanceTargetKind = Literal["parameter", "configuration", "block_choice", "connection"]
+GuidanceResolutionKind = Literal[
+    "fixed",
+    "range",
+    "enum_selection",
+    "derivation",
+    "conditional",
+    "guided_user_decision",
+    "environment_probe",
+]
+FixedGuidanceResolutionKind = Literal[
+    "numeric",
+    "block_ref",
+    "configuration_option",
+    "connection_mode",
+]
+
+
+class FixedNumericResolution(TypedDict):
+    kind: Literal["fixed"]
+    fixed_kind: Literal["numeric"]
+    value: int | float
+    unit: str
+
+
+class FixedBlockRefResolution(TypedDict):
+    kind: Literal["fixed"]
+    fixed_kind: Literal["block_ref"]
+    selected_id: str
+
+
+class FixedConfigurationOptionResolution(TypedDict):
+    kind: Literal["fixed"]
+    fixed_kind: Literal["configuration_option"]
+    value_token: str
+    display_label: str
+
+
+class FixedConnectionModeResolution(TypedDict):
+    kind: Literal["fixed"]
+    fixed_kind: Literal["connection_mode"]
+    value_token: str
+    display_label: str
+
+
+FixedGuidanceResolution: TypeAlias = (
+    FixedNumericResolution
+    | FixedBlockRefResolution
+    | FixedConfigurationOptionResolution
+    | FixedConnectionModeResolution
+)
+
+
+class RangeResolution(TypedDict):
+    kind: Literal["range"]
+    lower: NotRequired[int | float | str | None]
+    upper: NotRequired[int | float | str | None]
+    values: NotRequired[list[int | float | str] | None]
+    recommended_start: NotRequired[int | float | str | None]
+    selection_rule: NotRequired[str | None]
+
+
+class EnumSelectionResolution(TypedDict):
+    kind: Literal["enum_selection"]
+    selected: str
+
+
+class DerivationResolution(TypedDict):
+    kind: Literal["derivation"]
+    formula: NotRequired[str | None]
+    rule: NotRequired[str | None]
+    inputs: list[str]
+
+
+class ConditionalResolution(TypedDict):
+    kind: Literal["conditional"]
+    branches: list[dict[str, object]]
+    fallback: NotRequired[str | None]
+    exhaustive: NotRequired[bool]
+
+
+class UserDecisionOptionResolution(TypedDict):
+    option: str
+    consequence: str
+
+
+class GuidedUserDecisionResolution(TypedDict):
+    kind: Literal["guided_user_decision"]
+    decision_item: str
+    criteria: str
+    options: list[UserDecisionOptionResolution]
+
+
+class EnvironmentProbeActionResolution(TypedDict):
+    result: str
+    action: str
+
+
+class EnvironmentProbeResolution(TypedDict):
+    kind: Literal["environment_probe"]
+    probe_item: str
+    procedure: str
+    result_actions: list[EnvironmentProbeActionResolution]
+
+
+GuidanceResolution: TypeAlias = (
+    FixedGuidanceResolution
+    | RangeResolution
+    | EnumSelectionResolution
+    | DerivationResolution
+    | ConditionalResolution
+    | GuidedUserDecisionResolution
+    | EnvironmentProbeResolution
+)
 
 
 @dataclass(frozen=True)
@@ -174,7 +287,7 @@ class GuidanceDetail:
     confirmation_reason_code: str | None
     target: GuidanceTarget | None = None
     obligation_kind: GuidanceObligationKind | None = None
-    resolution: dict[str, Any] | None = None
+    resolution: GuidanceResolution | None = None
     execution_closure: GuidanceExecutionClosure = "open"
     input_fact_refs: list[str] | None = None
     punt_reason_code: str | None = None

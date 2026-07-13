@@ -63,6 +63,47 @@
       "title": "BuildGuidanceModel",
       "type": "object"
     },
+    "ConditionalResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "conditional",
+          "title": "Kind",
+          "type": "string"
+        },
+        "branches": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Branches",
+          "type": "array"
+        },
+        "fallback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback"
+        },
+        "exhaustive": {
+          "default": false,
+          "title": "Exhaustive",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "branches"
+      ],
+      "title": "ConditionalResolutionModel",
+      "type": "object"
+    },
     "ConfigurationHintModel": {
       "additionalProperties": false,
       "properties": {
@@ -165,6 +206,130 @@
       "title": "ConnectionHintModel",
       "type": "object"
     },
+    "DerivationResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "derivation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "formula": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Formula"
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rule"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Inputs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "inputs"
+      ],
+      "title": "DerivationResolutionModel",
+      "type": "object"
+    },
+    "EnumSelectionResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "enum_selection",
+          "title": "Kind",
+          "type": "string"
+        },
+        "selected": {
+          "minLength": 1,
+          "title": "Selected",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "selected"
+      ],
+      "title": "EnumSelectionResolutionModel",
+      "type": "object"
+    },
+    "EnvironmentProbeActionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "result": {
+          "minLength": 1,
+          "title": "Result",
+          "type": "string"
+        },
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result",
+        "action"
+      ],
+      "title": "EnvironmentProbeActionModel",
+      "type": "object"
+    },
+    "EnvironmentProbeResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "environment_probe",
+          "title": "Kind",
+          "type": "string"
+        },
+        "probe_item": {
+          "minLength": 1,
+          "title": "Probe Item",
+          "type": "string"
+        },
+        "procedure": {
+          "minLength": 1,
+          "title": "Procedure",
+          "type": "string"
+        },
+        "result_actions": {
+          "items": {
+            "$ref": "#/$defs/EnvironmentProbeActionModel"
+          },
+          "title": "Result Actions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "probe_item",
+        "procedure",
+        "result_actions"
+      ],
+      "title": "EnvironmentProbeResolutionModel",
+      "type": "object"
+    },
     "EvidenceSource": {
       "description": "Source marker for paper-to-model evidence.",
       "enum": [
@@ -173,6 +338,167 @@
       ],
       "title": "EvidenceSource",
       "type": "string"
+    },
+    "FixedBlockRefResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "fixed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "fixed_kind": {
+          "const": "block_ref",
+          "title": "Fixed Kind",
+          "type": "string"
+        },
+        "selected_id": {
+          "minLength": 1,
+          "title": "Selected Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "fixed_kind",
+        "selected_id"
+      ],
+      "title": "FixedBlockRefResolutionModel",
+      "type": "object"
+    },
+    "FixedConfigurationOptionResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "fixed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "fixed_kind": {
+          "const": "configuration_option",
+          "title": "Fixed Kind",
+          "type": "string"
+        },
+        "value_token": {
+          "pattern": "^[A-Za-z0-9]{1,40}$",
+          "title": "Value Token",
+          "type": "string"
+        },
+        "display_label": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Display Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "fixed_kind",
+        "value_token",
+        "display_label"
+      ],
+      "title": "FixedConfigurationOptionResolutionModel",
+      "type": "object"
+    },
+    "FixedConnectionModeResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "fixed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "fixed_kind": {
+          "const": "connection_mode",
+          "title": "Fixed Kind",
+          "type": "string"
+        },
+        "value_token": {
+          "pattern": "^[A-Za-z0-9]{1,40}$",
+          "title": "Value Token",
+          "type": "string"
+        },
+        "display_label": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Display Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "fixed_kind",
+        "value_token",
+        "display_label"
+      ],
+      "title": "FixedConnectionModeResolutionModel",
+      "type": "object"
+    },
+    "FixedNumericResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "fixed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "fixed_kind": {
+          "const": "numeric",
+          "title": "Fixed Kind",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Value"
+        },
+        "unit": {
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "fixed_kind",
+        "value",
+        "unit"
+      ],
+      "title": "FixedNumericResolutionModel",
+      "type": "object"
+    },
+    "FixedResolutionModel": {
+      "description": "OpenAPI-safe fixed wrapper that preserves the flat public JSON shape.",
+      "discriminator": {
+        "mapping": {
+          "block_ref": "#/$defs/FixedBlockRefResolutionModel",
+          "configuration_option": "#/$defs/FixedConfigurationOptionResolutionModel",
+          "connection_mode": "#/$defs/FixedConnectionModeResolutionModel",
+          "numeric": "#/$defs/FixedNumericResolutionModel"
+        },
+        "propertyName": "fixed_kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/FixedNumericResolutionModel"
+        },
+        {
+          "$ref": "#/$defs/FixedBlockRefResolutionModel"
+        },
+        {
+          "$ref": "#/$defs/FixedConfigurationOptionResolutionModel"
+        },
+        {
+          "$ref": "#/$defs/FixedConnectionModeResolutionModel"
+        }
+      ],
+      "title": "FixedResolutionModel"
     },
     "GuidanceAssessmentModel": {
       "additionalProperties": false,
@@ -358,8 +684,41 @@
         "resolution": {
           "anyOf": [
             {
-              "additionalProperties": true,
-              "type": "object"
+              "discriminator": {
+                "mapping": {
+                  "conditional": "#/$defs/ConditionalResolutionModel",
+                  "derivation": "#/$defs/DerivationResolutionModel",
+                  "enum_selection": "#/$defs/EnumSelectionResolutionModel",
+                  "environment_probe": "#/$defs/EnvironmentProbeResolutionModel",
+                  "fixed": "#/$defs/FixedResolutionModel",
+                  "guided_user_decision": "#/$defs/GuidedUserDecisionResolutionModel",
+                  "range": "#/$defs/RangeResolutionModel"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/FixedResolutionModel"
+                },
+                {
+                  "$ref": "#/$defs/RangeResolutionModel"
+                },
+                {
+                  "$ref": "#/$defs/EnumSelectionResolutionModel"
+                },
+                {
+                  "$ref": "#/$defs/DerivationResolutionModel"
+                },
+                {
+                  "$ref": "#/$defs/ConditionalResolutionModel"
+                },
+                {
+                  "$ref": "#/$defs/GuidedUserDecisionResolutionModel"
+                },
+                {
+                  "$ref": "#/$defs/EnvironmentProbeResolutionModel"
+                }
+              ]
             },
             {
               "type": "null"
@@ -688,6 +1047,41 @@
         "target_kind"
       ],
       "title": "GuidanceTargetModel",
+      "type": "object"
+    },
+    "GuidedUserDecisionResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "guided_user_decision",
+          "title": "Kind",
+          "type": "string"
+        },
+        "decision_item": {
+          "minLength": 1,
+          "title": "Decision Item",
+          "type": "string"
+        },
+        "criteria": {
+          "minLength": 1,
+          "title": "Criteria",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/UserDecisionOptionModel"
+          },
+          "title": "Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "decision_item",
+        "criteria",
+        "options"
+      ],
+      "title": "GuidedUserDecisionResolutionModel",
       "type": "object"
     },
     "MissingParameterPromptModel": {
@@ -1148,6 +1542,112 @@
       "title": "ParameterMappingRefModel",
       "type": "object"
     },
+    "RangeResolutionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "range",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lower": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lower"
+        },
+        "upper": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Upper"
+        },
+        "values": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Values"
+        },
+        "recommended_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommended Start"
+        },
+        "selection_rule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selection Rule"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "RangeResolutionModel",
+      "type": "object"
+    },
     "StepBlockRefModel": {
       "additionalProperties": false,
       "properties": {
@@ -1197,6 +1697,27 @@
         "paper_reference"
       ],
       "title": "StepBlockRefModel",
+      "type": "object"
+    },
+    "UserDecisionOptionModel": {
+      "additionalProperties": false,
+      "properties": {
+        "option": {
+          "minLength": 1,
+          "title": "Option",
+          "type": "string"
+        },
+        "consequence": {
+          "minLength": 1,
+          "title": "Consequence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "option",
+        "consequence"
+      ],
+      "title": "UserDecisionOptionModel",
       "type": "object"
     },
     "UserEvidenceAction": {

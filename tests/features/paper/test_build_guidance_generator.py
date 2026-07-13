@@ -12,6 +12,7 @@ from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_plan import (
     BlockRecommendation,
     BuildGuidance,
+    ConfigurationHint,
     ConnectionHint,
     GuidanceAssessment,
     GuidanceDetail,
@@ -139,7 +140,7 @@ async def test_document_claim_requires_resolved_handle_and_grounding_normalizes_
                         "target": "PL::Load.P",
                         "confirmation_reason_code": None,
                         "direction_hint": None,
-                        "resolution": {"kind": "fixed", "value": "5", "unit": "kW"},
+                        "resolution": _fixed_numeric(5, "kW"),
                         "input_fact_refs": [],
                         "punt_reason_code": None,
                     }
@@ -176,6 +177,52 @@ def test_guidance_requirements_prompt_payload_exposes_slim_req_handles() -> None
     assert "model_param" not in serialized
     assert "paper_param" not in serialized
     assert "block_role_ref" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_value_token_chinese_sentence_is_rejected_with_distinct_subcode() -> None:
+    step = replace(
+        _build_step(),
+        configuration_hints=[
+            ConfigurationHint(
+                target="B1",
+                setting_name="mode",
+                instruction="Set a controller mode.",
+                evidence=[],
+            )
+        ],
+    )
+    provider = QueueProvider(
+        [
+            {
+                "details": [
+                    {
+                        "requirement_ref": "REQ-003",
+                        "step_id": "STEP-001",
+                        "detail_kind": "configuration",
+                        "basis": "engineering_choice",
+                        "claim_text": "Use the selected controller mode.",
+                        "supporting_evidence_refs": [],
+                        "convention_code": None,
+                        "target": "B1",
+                        "confirmation_reason_code": None,
+                        "direction_hint": None,
+                        "resolution": _fixed_config_option("请根据实际情况确定", "待确认"),
+                        "input_fact_refs": [],
+                        "punt_reason_code": None,
+                    },
+                    _document_detail_payload("REQ-002"),
+                ],
+                "gaps": [],
+            }
+        ]
+    )
+
+    generator = BuildGuidanceGenerator(provider)
+    updated = await generator.generate(_spec(), _plan(build_steps=[step]))
+
+    assert updated.guidance_status == "generated"
+    assert "value_token_invalid" in generator.last_telemetry.attempts[0].resolver_event_codes
 
 
 @pytest.mark.asyncio
@@ -254,14 +301,25 @@ async def test_requirement_ref_drops_fail_generation_only_when_every_detail_is_l
 
 @pytest.mark.asyncio
 async def test_final_guidance_display_text_strips_source_material_instruction_tail() -> None:
+    step = replace(
+        _build_step(),
+        configuration_hints=[
+            ConfigurationHint(
+                target="B1",
+                setting_name="limiter_mode",
+                instruction="Set the limiter mode.",
+                evidence=[],
+            )
+        ],
+    )
     provider = QueueProvider(
         [
             {
                 "details": [
                     {
-                        "requirement_ref": "REQ-001",
+                        "requirement_ref": "REQ-003",
                         "step_id": "STEP-001",
-                        "detail_kind": "block_selection",
+                        "detail_kind": "configuration",
                         "basis": "engineering_choice",
                         "claim_text": "Use the selected limiter structure.",
                         "supporting_evidence_refs": [],
@@ -269,13 +327,13 @@ async def test_final_guidance_display_text_strips_source_material_instruction_ta
                         "target": "B1",
                         "confirmation_reason_code": None,
                         "direction_hint": None,
-                        "resolution": {
-                            "kind": "enum_selection",
-                            "selected": (
+                        "resolution": _fixed_config_option(
+                            "deadzone",
+                            (
                                 "Dead Zone + Rate Limiter "
                                 "Confirm this step against the source material."
                             ),
-                        },
+                        ),
                         "input_fact_refs": [],
                         "punt_reason_code": None,
                     },
@@ -286,7 +344,7 @@ async def test_final_guidance_display_text_strips_source_material_instruction_ta
         ]
     )
 
-    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan())
+    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan(build_steps=[step]))
 
     assert updated.guidance_status == "generated"
     assert updated.build_guidance is not None
@@ -313,7 +371,7 @@ async def test_unsupported_engineering_decision_downgrades_without_reusing_claim
                         "target": "PL::Load.P",
                         "confirmation_reason_code": None,
                         "direction_hint": None,
-                        "resolution": {"kind": "fixed", "value": "5", "unit": "kW"},
+                        "resolution": _fixed_numeric(5, "kW"),
                         "input_fact_refs": [],
                         "punt_reason_code": None,
                     },
@@ -328,7 +386,7 @@ async def test_unsupported_engineering_decision_downgrades_without_reusing_claim
                         "target": "B1",
                         "confirmation_reason_code": None,
                         "direction_hint": None,
-                        "resolution": {"kind": "enum_selection", "selected": "Load"},
+                        "resolution": _fixed_block_ref("B1"),
                         "input_fact_refs": [],
                         "punt_reason_code": None,
                     },
@@ -369,7 +427,7 @@ async def test_raw_document_claim_with_unresolved_handle_never_becomes_no_basis(
                         "target": "B1",
                         "confirmation_reason_code": None,
                         "direction_hint": None,
-                        "resolution": {"kind": "enum_selection", "selected": "Load"},
+                        "resolution": _fixed_block_ref("B1"),
                         "input_fact_refs": [],
                         "punt_reason_code": None,
                     }
@@ -406,7 +464,7 @@ async def test_raw_document_claim_with_grounding_failure_never_becomes_no_basis(
                         "target": "B1",
                         "confirmation_reason_code": None,
                         "direction_hint": None,
-                        "resolution": {"kind": "enum_selection", "selected": "Load"},
+                        "resolution": _fixed_block_ref("B1"),
                         "input_fact_refs": [],
                         "punt_reason_code": None,
                     }
@@ -576,7 +634,7 @@ async def test_semantic_validator_passes_generated_guidance_without_changes() ->
         pytest.param(
             lambda plan: _with_extra_detail(
                 plan,
-                _punt_detail(resolution={"kind": "fixed", "value": "5", "unit": "kW"}),
+                _punt_detail(resolution=_fixed_numeric(5, "kW")),
             ),
             "punt_from_exception_forbidden",
             id="punt-resolution-forbidden",
@@ -735,7 +793,7 @@ async def test_one_detail_covering_multiple_parameter_requirements_does_not_pass
                         "target": "PL::Load.P",
                         "confirmation_reason_code": None,
                         "direction_hint": None,
-                        "resolution": {"kind": "fixed", "value": "5", "unit": "kW"},
+                        "resolution": _fixed_numeric(5, "kW"),
                         "input_fact_refs": [],
                         "punt_reason_code": None,
                     }
@@ -801,6 +859,217 @@ def test_gap_synthesis_excludes_pure_display_steps_and_keeps_connection_keys_dis
     connection_gaps = [gap for gap in gaps if gap.gap_kind == "missing_connection_detail"]
     assert len(connection_gaps) == 2
     assert connection_gaps[0].display_text != connection_gaps[1].display_text
+
+
+@pytest.mark.asyncio
+async def test_a02_lambda_p_document_fixed_numeric_closes_actionably() -> None:
+    evidence = PaperEvidenceEntry(
+        source=EvidenceSource.DOCUMENT_EXTRACTED,
+        document_id="DOC-001",
+        paper_section_id="A02",
+        equation_id=None,
+        figure_id=None,
+        excerpt="The paper reports lambda_p = 2.43 Wb for the PMSM model.",
+        missing_param_prompt_id=None,
+    )
+    spec = replace(
+        _spec(),
+        parameter_table=[
+            ParameterEntry(
+                name="Permanent magnet flux linkage",
+                symbol="lambda_p",
+                value="2.43",
+                unit="Wb",
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+                document_id="DOC-001",
+            )
+        ],
+        evidence=[evidence],
+    )
+    step = replace(
+        _build_step(evidence=[evidence], block_reference=evidence),
+        parameter_refs=[
+            ParameterMappingRef(
+                paper_param_name="lambda_p",
+                model_param_name="PMSM.FluxLinkage",
+            )
+        ],
+        display_text="Set the PMSM flux linkage.",
+    )
+    plan = replace(
+        _plan(build_steps=[step]),
+        parameter_mapping=[
+            ParameterMapping(
+                paper_param_name="lambda_p",
+                model_param_name="PMSM.FluxLinkage",
+                value="2.43",
+                unit="Wb",
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+            )
+        ],
+        evidence=[evidence],
+    )
+    provider = QueueProvider(
+        [
+            {
+                "details": [
+                    {
+                        **_document_detail_payload("REQ-002"),
+                        "claim_text": "Use lambda_p = 2.43 Wb from the paper.",
+                        "supporting_evidence_refs": ["GEV-001"],
+                        "target": "lambda_p::PMSM.FluxLinkage",
+                        "resolution": _fixed_numeric(2.43, "Wb"),
+                    }
+                ],
+                "gaps": [],
+            }
+        ]
+    )
+
+    updated = await BuildGuidanceGenerator(provider).generate(spec, plan)
+
+    assert updated.guidance_status == "generated"
+    assert updated.build_guidance is not None
+    detail = updated.build_guidance.details[0]
+    assert detail.basis == "document_extracted"
+    assert detail.execution_closure == "closed"
+    assert detail.actionability == "actionable"
+    assert "2.43 Wb" in detail.display_text
+
+
+@pytest.mark.asyncio
+async def test_b23_deadzone_kappa_render_does_not_point_back_to_paper() -> None:
+    step = replace(
+        _build_step(),
+        configuration_hints=[
+            ConfigurationHint(
+                target="B1",
+                setting_name="deadzone_kappa",
+                instruction="Choose the dead-zone kappa mode.",
+                evidence=[],
+            )
+        ],
+    )
+    provider = QueueProvider(
+        [
+            {
+                "details": [
+                    {
+                        "requirement_ref": "REQ-003",
+                        "step_id": "STEP-001",
+                        "detail_kind": "configuration",
+                        "basis": "engineering_choice",
+                        "claim_text": "Use a dead-zone kappa fallback mode.",
+                        "supporting_evidence_refs": [],
+                        "convention_code": None,
+                        "target": "B1",
+                        "confirmation_reason_code": None,
+                        "direction_hint": None,
+                        "resolution": _fixed_config_option("deadzone", "死区 kappa"),
+                        "input_fact_refs": [],
+                        "punt_reason_code": None,
+                    },
+                    _document_detail_payload("REQ-002"),
+                ],
+                "gaps": [],
+            }
+        ]
+    )
+
+    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan(build_steps=[step]))
+
+    assert updated.build_guidance is not None
+    display_text = "\n".join(detail.display_text for detail in updated.build_guidance.details)
+    assert "死区 kappa" in display_text
+    assert "查看论文" not in display_text
+    assert "回到论文" not in display_text
+    assert "原文" not in display_text
+
+
+@pytest.mark.asyncio
+async def test_b31_discount_factor_without_payload_never_promotes_any_basis() -> None:
+    bad_payload = {
+        "requirement_ref": "REQ-002",
+        "step_id": "STEP-001",
+        "detail_kind": "parameter_value",
+        "claim_text": "Use discount factor alpha.",
+        "supporting_evidence_refs": [],
+        "convention_code": None,
+        "target": "alpha::Controller.alpha",
+        "confirmation_reason_code": None,
+        "direction_hint": None,
+        "resolution": None,
+        "input_fact_refs": [],
+        "punt_reason_code": None,
+    }
+    for basis in (
+        "document_extracted",
+        "document_derived",
+        "domain_default",
+        "engineering_choice",
+        "user_decision",
+        "user_environment",
+    ):
+        provider = QueueProvider(
+            [
+                {
+                    "details": [
+                        {**bad_payload, "basis": basis},
+                        _document_detail_payload("REQ-002"),
+                    ],
+                    "gaps": [],
+                }
+            ]
+        )
+        generator = BuildGuidanceGenerator(provider)
+        updated = await generator.generate(_spec(), _plan())
+
+        assert updated.guidance_status == "generated"
+        assert updated.build_guidance is not None
+        assert [detail.detail_id for detail in updated.build_guidance.details] == ["GD-001"]
+        assert set(generator.last_telemetry.attempts[0].resolver_event_codes) & {
+            "resolution_missing",
+            "derivation_input_unresolved",
+            "decision_procedure_incomplete",
+            "probe_incomplete",
+        }
+
+
+@pytest.mark.asyncio
+async def test_2003_gd011_gd012_identity_missing_fails_closed() -> None:
+    confirm_only = {
+        "step_id": "STEP-002",
+        "detail_kind": "block_selection",
+        "basis": "user_confirmation_required",
+        "claim_text": "Confirm step STEP-002.",
+        "supporting_evidence_refs": [],
+        "convention_code": None,
+        "target": None,
+        "confirmation_reason_code": None,
+        "direction_hint": None,
+        "resolution": None,
+        "input_fact_refs": [],
+        "punt_reason_code": "source_does_not_specify",
+    }
+    provider = QueueProvider(
+        [
+            {
+                "details": [
+                    confirm_only,
+                    confirm_only,
+                    _document_detail_payload("REQ-002"),
+                ],
+                "gaps": [],
+            }
+        ]
+    )
+    generator = BuildGuidanceGenerator(provider)
+    updated = await generator.generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generated"
+    assert updated.build_guidance is not None
+    assert len(updated.build_guidance.details) == 1
+    assert "requirement_ref_missing" in generator.last_telemetry.attempts[0].resolver_event_codes
 
 
 def test_none_block_ref_paper_reference_stays_uncovered_and_out_of_document_pool() -> None:
@@ -875,12 +1144,29 @@ def _valid_guidance_payload() -> dict[str, object]:
                 "target": "PL::Load.P",
                 "confirmation_reason_code": None,
                 "direction_hint": None,
-                "resolution": {"kind": "fixed", "value": "5", "unit": "kW"},
+                "resolution": _fixed_numeric(5, "kW"),
                 "input_fact_refs": [],
                 "punt_reason_code": None,
             }
         ],
         "gaps": [],
+    }
+
+
+def _fixed_numeric(value: int | float, unit: str) -> dict[str, object]:
+    return {"kind": "fixed", "fixed_kind": "numeric", "value": value, "unit": unit}
+
+
+def _fixed_block_ref(selected_id: str) -> dict[str, object]:
+    return {"kind": "fixed", "fixed_kind": "block_ref", "selected_id": selected_id}
+
+
+def _fixed_config_option(value_token: str, display_label: str) -> dict[str, object]:
+    return {
+        "kind": "fixed",
+        "fixed_kind": "configuration_option",
+        "value_token": value_token,
+        "display_label": display_label,
     }
 
 
@@ -952,7 +1238,7 @@ def _domain_default_detail(
         confirmation_reason_code=None,
         target=resolved_target,
         obligation_kind="select_component",
-        resolution={"kind": "enum_selection", "selected": "Load"},
+        resolution=_fixed_block_ref("B1"),
         execution_closure="closed",
         input_fact_refs=[] if input_fact_refs is None else input_fact_refs,
         punt_reason_code=None,
@@ -1043,7 +1329,7 @@ def _document_detail_payload(requirement_ref: str) -> dict[str, Any]:
         "target": "PL::Load.P",
         "confirmation_reason_code": None,
         "direction_hint": None,
-        "resolution": {"kind": "fixed", "value": "5", "unit": "kW"},
+        "resolution": _fixed_numeric(5, "kW"),
         "input_fact_refs": [],
         "punt_reason_code": None,
     }
@@ -1191,7 +1477,7 @@ def _build_guidance() -> BuildGuidance:
                 confirmation_reason_code=None,
                 target=_parameter_target(),
                 obligation_kind="determine_parameter_value",
-                resolution={"kind": "fixed", "value": "5", "unit": "kW"},
+                resolution=_fixed_numeric(5, "kW"),
                 execution_closure="closed",
                 input_fact_refs=[],
                 punt_reason_code=None,

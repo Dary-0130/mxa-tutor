@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 
@@ -11,6 +12,7 @@ from core.domain.paper_plan import (
     GuidanceAssessment,
     GuidanceDetail,
     GuidanceGap,
+    GuidanceResolution,
     GuidanceTarget,
     ModelBuildStep,
     ModelGenerationPlan,
@@ -476,6 +478,7 @@ def _validated_v2_detail(
         resolution=detail.resolution,
         input_fact_refs=input_fact_refs,
         punt_reason_code=detail.punt_reason_code,
+        step=step,
     )
     if closure is None:
         record("detail", detail.detail_id, "drop", resolution_code or "resolution_missing")
@@ -576,13 +579,23 @@ def _non_document_evidence_error(evidence: list[PaperEvidenceEntry]) -> str | No
     return "non_document_evidence_present" if evidence else None
 
 
-def _resolution_grounding_surface(resolution: dict[str, Any] | None) -> str:
+def _resolution_grounding_surface(resolution: GuidanceResolution | dict[str, Any] | None) -> str:
     if not isinstance(resolution, dict):
         return ""
     if resolution.get("kind") == "fixed":
+        if resolution.get("fixed_kind") == "numeric":
+            return " ".join(
+                str(part)
+                for part in (resolution.get("value"), resolution.get("unit"))
+                if part is not None
+            )
         return " ".join(
             str(part)
-            for part in (resolution.get("value"), resolution.get("unit"))
+            for part in (
+                resolution.get("selected_id"),
+                resolution.get("value_token"),
+                resolution.get("display_label"),
+            )
             if part is not None
         )
     return " ".join(str(value) for value in resolution.values() if value is not None)
@@ -952,6 +965,8 @@ def _scrub_detail_dict(item: Any, index: int) -> dict[str, Any] | None:
         detail["evidence"] = []
     detail.setdefault("convention_code", None)
     detail.setdefault("confirmation_reason_code", None)
+    if not _raw_resolution_dict_schema_valid(detail.get("resolution")):
+        detail["resolution"] = None
     return detail
 
 
@@ -996,6 +1011,53 @@ def _scrub_assessment_dict(item: Any, gaps: list[dict[str, Any]]) -> dict[str, A
 
 def _nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value)
+
+
+def _raw_resolution_dict_schema_valid(value: Any) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, dict):
+        return False
+    kind = value.get("kind")
+    if kind == "fixed":
+        fixed_kind = value.get("fixed_kind")
+        if fixed_kind == "numeric":
+            return _strict_number(value.get("value")) and _nonempty_string(value.get("unit"))
+        if fixed_kind == "block_ref":
+            return _nonempty_string(value.get("selected_id"))
+        if fixed_kind in {"configuration_option", "connection_mode"}:
+            token = value.get("value_token")
+            return (
+                isinstance(token, str)
+                and bool(re.fullmatch(r"^[A-Za-z0-9]{1,40}$", token))
+                and _nonempty_string(value.get("display_label"))
+            )
+        return False
+    if kind == "range":
+        return True
+    if kind == "enum_selection":
+        return _nonempty_string(value.get("selected"))
+    if kind == "derivation":
+        return isinstance(value.get("inputs"), list)
+    if kind == "conditional":
+        return isinstance(value.get("branches"), list)
+    if kind == "guided_user_decision":
+        return (
+            _nonempty_string(value.get("decision_item"))
+            and _nonempty_string(value.get("criteria"))
+            and isinstance(value.get("options"), list)
+        )
+    if kind == "environment_probe":
+        return (
+            _nonempty_string(value.get("probe_item"))
+            and _nonempty_string(value.get("procedure"))
+            and isinstance(value.get("result_actions"), list)
+        )
+    return False
+
+
+def _strict_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def _result(

@@ -571,7 +571,7 @@ def test_write_guidance_draft_artifacts_outputs_sanitized_drafts(tmp_path: Path)
                     "target": "B1",
                     "confirmation_reason_code": None,
                     "direction_hint": None,
-                    "resolution": {"kind": "enum_selection", "selected": "Gain"},
+                    "resolution": _fixed_block_ref("B1"),
                     "punt_reason_code": None,
                 }
             ],
@@ -590,7 +590,7 @@ def test_write_guidance_draft_artifacts_outputs_sanitized_drafts(tmp_path: Path)
     payload = json.loads(paths[0].read_text(encoding="utf-8"))
     assert payload["details"][0]["claim_text"] == "Use the gain block from the paper."
     assert payload["details"][0]["supporting_evidence_refs"] == ["GEV-001"]
-    assert payload["details"][0]["resolution"] == {"kind": "enum_selection", "selected": "Gain"}
+    assert payload["details"][0]["resolution"] == _fixed_block_ref("B1")
 
 
 def test_guidance_batch_gates_reject_invariants(tmp_path: Path) -> None:
@@ -796,6 +796,10 @@ def _runtime(tmp_path: Path) -> subject.SmokeRuntime:
     )
 
 
+def _fixed_block_ref(selected_id: str) -> dict[str, object]:
+    return {"kind": "fixed", "fixed_kind": "block_ref", "selected_id": selected_id}
+
+
 class _SequenceProvider:
     def __init__(self, payloads: list[dict[str, object]]) -> None:
         self.payloads = list(payloads)
@@ -849,7 +853,7 @@ def _guidance_payload() -> dict[str, object]:
                 "target": "B1",
                 "confirmation_reason_code": None,
                 "direction_hint": None,
-                "resolution": {"kind": "enum_selection", "selected": "Gain"},
+                "resolution": _fixed_block_ref("B1"),
                 "input_fact_refs": [],
                 "punt_reason_code": None,
             }
@@ -896,7 +900,7 @@ def _guidance_with_surviving_unverified() -> BuildGuidance:
                 confirmation_reason_code=None,
                 target=GuidanceTarget(target_kind="block_choice", block_role_ref="B1"),
                 obligation_kind="select_component",
-                resolution={"kind": "enum_selection", "selected": "Gain"},
+                resolution=_fixed_block_ref("B1"),
                 execution_closure="closed",
                 input_fact_refs=[],
                 punt_reason_code=None,

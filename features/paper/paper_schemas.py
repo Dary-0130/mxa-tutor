@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -55,6 +55,15 @@ from core.domain.paper_tuning import (
     TuningSuggestion,
 )
 from features.paper.build_guidance_lifecycle import normalize_guidance_lifecycle
+from features.paper.guidance_resolution_schemas import (
+    FixedBlockRefResolutionModel,
+    FixedConfigurationOptionResolutionModel,
+    FixedConnectionModeResolutionModel,
+    FixedNumericResolutionModel,
+    FixedResolutionModel,
+    GuidanceResolutionModel,
+    resolution_to_domain,
+)
 
 
 class _StrictBaseModel(BaseModel):
@@ -476,10 +485,36 @@ class GuidanceDetailModel(_StrictBaseModel):
         ]
         | None
     ) = None
-    resolution: dict[str, Any] | None = None
+    resolution: GuidanceResolutionModel | None = None
     execution_closure: Literal["closed", "guided_choice", "guided_probe", "open"] = "open"
     input_fact_refs: list[str] = Field(default_factory=list)
     punt_reason_code: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_resolution_target_family(self) -> Self:
+        if self.resolution is None or self.target is None:
+            return self
+        target_kind = self.target.target_kind
+        resolution = (
+            self.resolution.root
+            if isinstance(self.resolution, FixedResolutionModel)
+            else self.resolution
+        )
+        if isinstance(resolution, FixedNumericResolutionModel):
+            if target_kind != "parameter":
+                raise ValueError("fixed.numeric resolution is parameter-only")
+        elif isinstance(resolution, FixedBlockRefResolutionModel):
+            if target_kind != "block_choice":
+                raise ValueError("fixed.block_ref resolution is block_choice-only")
+        elif isinstance(resolution, FixedConfigurationOptionResolutionModel):
+            if target_kind != "configuration":
+                raise ValueError("fixed.configuration_option resolution is configuration-only")
+        elif (
+            isinstance(resolution, FixedConnectionModeResolutionModel)
+            and target_kind != "connection"
+        ):
+            raise ValueError("fixed.connection_mode resolution is connection-only")
+        return self
 
     def to_domain(self) -> GuidanceDetail:
         return GuidanceDetail(
@@ -494,7 +529,7 @@ class GuidanceDetailModel(_StrictBaseModel):
             confirmation_reason_code=self.confirmation_reason_code,
             target=self.target.to_domain() if self.target is not None else None,
             obligation_kind=self.obligation_kind,
-            resolution=self.resolution,
+            resolution=resolution_to_domain(self.resolution),
             execution_closure=self.execution_closure,
             input_fact_refs=list(self.input_fact_refs),
             punt_reason_code=self.punt_reason_code,
@@ -650,6 +685,7 @@ class ModelGenerationPlanModel(_StrictBaseModel):
                 for detail in self.build_guidance.details
             ):
                 raise ValueError("generated guidance requires document detail evidence")
+            self._validate_generated_block_ref_choices()
             return self
         if (
             self.guidance_status
@@ -662,6 +698,24 @@ class ModelGenerationPlanModel(_StrictBaseModel):
         ):
             raise ValueError("guidance_status requires build_guidance null")
         return self
+
+    def _validate_generated_block_ref_choices(self) -> None:
+        if self.build_guidance is None or self.build_steps is None:
+            return
+        step_block_ids = {
+            step.step_id: {block_ref.block_ref_id for block_ref in step.block_refs}
+            for step in self.build_steps
+        }
+        for detail in self.build_guidance.details:
+            resolution = detail.resolution
+            if not isinstance(resolution, FixedBlockRefResolutionModel):
+                continue
+            candidates = step_block_ids.get(detail.step_id, set())
+            target_id = detail.target.block_role_ref if detail.target is not None else None
+            if resolution.selected_id not in candidates or (
+                target_id is not None and resolution.selected_id != target_id
+            ):
+                raise ValueError("fixed.block_ref selected_id is not allowed for target")
 
     def to_domain(self) -> ModelGenerationPlan:
         return normalize_guidance_lifecycle(

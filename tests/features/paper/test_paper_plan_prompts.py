@@ -105,7 +105,7 @@ def test_load_paper_plan_build_steps_regenerate_yaml() -> None:
 def test_load_paper_build_guidance_yaml() -> None:
     template = load_prompt_template("paper_build_guidance.yaml")
 
-    assert template.version == "v0.1"
+    assert template.version == "v0.2"
     assert "BuildGuidanceGenerator" in template.system
     assert "{build_steps_skeleton_json}" in template.user
     assert "{guidance_evidence_cards_json}" in template.user

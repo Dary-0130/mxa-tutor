@@ -384,7 +384,12 @@ def _build_guidance() -> BuildGuidance:
                     paper_param="H",
                 ),
                 obligation_kind="determine_parameter_value",
-                resolution={"kind": "fixed", "value": "3.5", "unit": "s"},
+                resolution={
+                    "kind": "fixed",
+                    "fixed_kind": "numeric",
+                    "value": 3.5,
+                    "unit": "s",
+                },
                 execution_closure="closed",
                 input_fact_refs=[],
                 punt_reason_code=None,

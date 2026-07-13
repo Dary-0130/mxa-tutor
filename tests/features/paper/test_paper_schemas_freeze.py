@@ -611,6 +611,33 @@ def test_build_guidance_literals_required_nullable_fields_and_schema_are_frozen(
         "engineering_choice"
     )
 
+    legacy_fixed_payload = deepcopy(payload)
+    legacy_fixed_payload["details"][0]["resolution"] = {
+        "kind": "fixed",
+        "value": "请根据实际情况确定",
+    }
+    with pytest.raises(ValidationError):
+        BuildGuidanceModel.model_validate(legacy_fixed_payload)
+
+    bad_token_payload = deepcopy(payload)
+    bad_token_payload["details"][0]["detail_kind"] = "configuration"
+    bad_token_payload["details"][0]["target"] = {
+        **bad_token_payload["details"][0]["target"],
+        "target_kind": "configuration",
+        "block_role_ref": None,
+        "owner_ref": "B1",
+        "setting_name": "mode",
+    }
+    bad_token_payload["details"][0]["obligation_kind"] = "configure_setting"
+    bad_token_payload["details"][0]["resolution"] = {
+        "kind": "fixed",
+        "fixed_kind": "configuration_option",
+        "value_token": "请根据实际情况确定",
+        "display_label": "待确认",
+    }
+    with pytest.raises(ValidationError):
+        BuildGuidanceModel.model_validate(bad_token_payload)
+
     schema = BuildGuidanceModel.model_json_schema()
     assert set(schema["properties"]["version"]["enum"]) == {"v1", "v2"}
     assert set(schema["required"]) == {"version", "assessment", "details", "gaps"}
@@ -1194,7 +1221,7 @@ def _build_guidance_payload() -> dict[str, object]:
                     "signal_role": None,
                 },
                 "obligation_kind": "select_component",
-                "resolution": {"kind": "enum_selection", "selected": "Synchronous Machine"},
+                "resolution": _fixed_block_ref("B1"),
                 "execution_closure": "closed",
                 "input_fact_refs": [],
                 "punt_reason_code": None,
@@ -1319,7 +1346,7 @@ def _build_guidance() -> BuildGuidance:
                 confirmation_reason_code=None,
                 target=GuidanceTarget(target_kind="block_choice", block_role_ref="B1"),
                 obligation_kind="select_component",
-                resolution={"kind": "enum_selection", "selected": "Synchronous Machine"},
+                resolution=_fixed_block_ref("B1"),
                 execution_closure="closed",
                 input_fact_refs=[],
                 punt_reason_code=None,
@@ -1345,6 +1372,10 @@ def _build_guidance() -> BuildGuidance:
             )
         ],
     )
+
+
+def _fixed_block_ref(selected_id: str) -> dict[str, object]:
+    return {"kind": "fixed", "fixed_kind": "block_ref", "selected_id": selected_id}
 
 
 def _document_evidence() -> PaperEvidenceEntry:

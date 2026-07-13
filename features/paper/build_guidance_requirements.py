@@ -13,6 +13,7 @@ from core.domain.paper_plan import (
     GuidanceExecutionClosure,
     GuidanceGap,
     GuidanceObligationKind,
+    GuidanceResolution,
     GuidanceTarget,
     GuidanceTargetKind,
     ModelBuildStep,
@@ -52,6 +53,10 @@ _RESOLUTION_KINDS = frozenset(
         "environment_probe",
     }
 )
+_FIXED_RESOLUTION_KINDS = frozenset(
+    {"numeric", "block_ref", "configuration_option", "connection_mode"}
+)
+_VALUE_TOKEN_RE = re.compile(r"^[A-Za-z0-9]{1,40}$")
 _SOURCE_REDIRECT_RE = re.compile(
     r"\b(?:confirm|check|verify)\b[^。；;.!?]*(?:source material|paper)\.?",
     re.IGNORECASE,
@@ -333,7 +338,7 @@ def render_detail_display_text(
     *,
     basis: str,
     target: GuidanceTarget,
-    resolution: dict[str, Any] | None,
+    resolution: GuidanceResolution | dict[str, Any] | None,
     punt_reason_code: str | None = None,
 ) -> str:
     prefix = {
@@ -390,9 +395,10 @@ def closure_from_resolution(
     *,
     basis: str,
     target: GuidanceTarget,
-    resolution: dict[str, Any] | None,
+    resolution: GuidanceResolution | dict[str, Any] | None,
     input_fact_refs: list[str],
     punt_reason_code: str | None,
+    step: ModelBuildStep | None = None,
 ) -> tuple[GuidanceExecutionClosure | None, str | None]:
     """Validate the v2 resolution union and derive execution closure."""
 
@@ -414,21 +420,21 @@ def closure_from_resolution(
     if basis in _CLOSED_BASES:
         if kind in {"guided_user_decision", "environment_probe"}:
             return None, "resolution_kind_invalid"
-        code = _resolution_payload_error(kind, target, resolution, input_fact_refs)
+        code = _resolution_payload_error(kind, target, resolution, input_fact_refs, step)
         if code is not None:
             return None, code
         return "closed", None
     if basis == "user_decision":
         if kind != "guided_user_decision":
             return None, "decision_procedure_incomplete"
-        code = _resolution_payload_error(kind, target, resolution, input_fact_refs)
+        code = _resolution_payload_error(kind, target, resolution, input_fact_refs, step)
         if code is not None:
             return None, code
         return "guided_choice", None
     if basis == "user_environment":
         if kind != "environment_probe":
             return None, "probe_incomplete"
-        code = _resolution_payload_error(kind, target, resolution, input_fact_refs)
+        code = _resolution_payload_error(kind, target, resolution, input_fact_refs, step)
         if code is not None:
             return None, code
         return "guided_probe", None
@@ -442,15 +448,12 @@ def critical_steps(build_steps: list[ModelBuildStep]) -> list[ModelBuildStep]:
 def _resolution_payload_error(
     kind: str,
     target: GuidanceTarget,
-    resolution: dict[str, Any],
+    resolution: GuidanceResolution | dict[str, Any],
     input_fact_refs: list[str],
+    step: ModelBuildStep | None,
 ) -> str | None:
     if kind == "fixed":
-        if not _present(resolution.get("value")):
-            return "resolution_missing"
-        if target.target_kind == "parameter" and not _present(resolution.get("unit")):
-            return "resolution_missing"
-        return None
+        return _fixed_resolution_payload_error(target, resolution, step)
     if kind == "range":
         has_bounds = _present(resolution.get("lower")) and _present(resolution.get("upper"))
         has_values = isinstance(resolution.get("values"), list) and bool(resolution.get("values"))
@@ -501,6 +504,58 @@ def _resolution_payload_error(
                 return "probe_incomplete"
         return None
     return "resolution_kind_invalid"
+
+
+def _fixed_resolution_payload_error(
+    target: GuidanceTarget,
+    resolution: GuidanceResolution | dict[str, Any],
+    step: ModelBuildStep | None,
+) -> str | None:
+    fixed_kind = resolution.get("fixed_kind")
+    if fixed_kind not in _FIXED_RESOLUTION_KINDS:
+        return "resolution_kind_invalid"
+    if fixed_kind == "numeric":
+        if target.target_kind != "parameter":
+            return "resolution_kind_invalid"
+        value = resolution.get("value")
+        if not _strict_number(value):
+            return "resolution_missing"
+        if not _present(resolution.get("unit")):
+            return "resolution_missing"
+        return None
+    if fixed_kind == "block_ref":
+        if target.target_kind != "block_choice":
+            return "resolution_kind_invalid"
+        selected_id = resolution.get("selected_id")
+        if not isinstance(selected_id, str) or not selected_id.strip():
+            return "resolution_missing"
+        candidate_ids = {block_ref.block_ref_id for block_ref in step.block_refs} if step else set()
+        target_id = target.block_role_ref
+        if selected_id not in candidate_ids or (target_id is not None and selected_id != target_id):
+            return "choice_not_allowed"
+        return None
+    if fixed_kind == "configuration_option":
+        if target.target_kind != "configuration":
+            return "resolution_kind_invalid"
+        return _choice_token_error(resolution)
+    if fixed_kind == "connection_mode":
+        if target.target_kind != "connection":
+            return "resolution_kind_invalid"
+        return _choice_token_error(resolution)
+    return "resolution_kind_invalid"
+
+
+def _choice_token_error(resolution: GuidanceResolution | dict[str, Any]) -> str | None:
+    token = resolution.get("value_token")
+    if not isinstance(token, str) or not _VALUE_TOKEN_RE.fullmatch(token):
+        return "value_token_invalid"
+    if not _present(resolution.get("display_label")):
+        return "resolution_missing"
+    return None
+
+
+def _strict_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def _present(value: Any) -> bool:
@@ -652,14 +707,23 @@ def _target_markers(target: GuidanceTarget) -> list[str]:
     ]
 
 
-def _resolution_text(resolution: dict[str, Any] | None) -> str:
+def _resolution_text(resolution: GuidanceResolution | dict[str, Any] | None) -> str:
     if not isinstance(resolution, dict):
         return ""
     kind = str(resolution.get("kind") or "")
     if kind == "fixed":
-        value = _resolution_fragment(resolution.get("value"), fallback="待确认")
-        unit = _resolution_fragment(resolution.get("unit"), fallback="")
-        return f"取值 {value}{(' ' + unit) if unit else ''}".strip()
+        fixed_kind = str(resolution.get("fixed_kind") or "")
+        if fixed_kind == "numeric":
+            value = _resolution_fragment(resolution.get("value"), fallback="待确认")
+            unit = _resolution_fragment(resolution.get("unit"), fallback="")
+            return f"取值 {value}{(' ' + unit) if unit else ''}".strip()
+        if fixed_kind == "block_ref":
+            selected_id = _resolution_fragment(resolution.get("selected_id"), fallback="待确认")
+            return f"选择模块 {selected_id}"
+        if fixed_kind in {"configuration_option", "connection_mode"}:
+            label = _resolution_fragment(resolution.get("display_label"), fallback="待确认")
+            return f"设为 {label}"
+        return ""
     if kind == "range":
         lower = _resolution_fragment(resolution.get("lower"), fallback="待确认")
         upper = _resolution_fragment(resolution.get("upper"), fallback="待确认")

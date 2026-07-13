@@ -529,13 +529,20 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - `GuidanceDetail.detail_kind` 取值:`block_selection` / `subsystem_internal_structure` / `connection` / `parameter_value` / `configuration` / `verification` / `gap_notice`。
 - `GuidanceDetail.basis` 取值:`document_extracted` / `document_derived` / `domain_default` / `engineering_choice` / `user_environment` / `user_decision` / `user_confirmation_required` / `document_claim_unverified`;`GuidanceGap.basis` 只允许 `user_confirmation_required`。
 - `GuidanceDetail.execution_closure` 取值:`closed` / `guided_choice` / `guided_probe` / `open`;`actionability` 由 closure 派生,模型不产该字段。
-- `GuidanceDetail.resolution.kind` 取值:`fixed` / `range` / `enum_selection` / `derivation` / `conditional` / `guided_user_decision` / `environment_probe`;不满足各型不变量时 fail-closed。
+- `GuidanceDetail.resolution` 为 typed union,顶层 `kind` 取值:`fixed` / `range` / `enum_selection` / `derivation` / `conditional` / `guided_user_decision` / `environment_probe`;不满足各型不变量时 fail-closed。
+- `kind="fixed"` 必须再带 `fixed_kind` 二级判别:
+  - `numeric`:仅用于 `target_kind="parameter"`,字段为严格 JSON number `value` + 必填 `unit`;旧形状 `{"kind":"fixed","value":"..."}` schema 层拒绝。
+  - `block_ref`:仅用于 `target_kind="block_choice"`,字段为 `selected_id`;`selected_id` 必须属于当前 `build_steps.step.block_refs` 且匹配目标 block role,否则子码 `choice_not_allowed`。
+  - `configuration_option`:仅用于 `target_kind="configuration"`,字段为 `value_token` + `display_label`;`value_token` 只允许 1-40 位 ASCII 字母/数字,不得含空格、中文或标点。
+  - `connection_mode`:仅用于 `target_kind="connection"`,字段与 `configuration_option` 相同。
+- `GuidanceDetail.resolution` 其余六型保持 TASK-536-B R-13 约束:`range` 需上下界或集合 + 起点/选点规则;`enum_selection.selected` 必填;`derivation` 需公式/规则 + 输入;`conditional` 需完备分支或 fallback;`guided_user_decision` 需待决项/判据/选项后果;`environment_probe` 需检查项/步骤/结果动作。
+- resolution fail-closed 子码包括:`resolution_missing` / `resolution_kind_invalid` / `range_incomplete` / `derivation_input_unresolved` / `conditional_non_exhaustive` / `decision_procedure_incomplete` / `probe_incomplete` / `relabel_without_resolution` / `choice_not_allowed` / `value_token_invalid`。
 - `document_claim_unverified` 表示模型声称论文依据但 grounding 核不上,恒为 `open`,证据清空,前端须与可执行项分区展示。
 - `GuidanceGap.gap_kind` 取值:`missing_support_component` / `missing_parameter_value` / `toolbox_unverified` / `library_variant_unresolved` / `missing_connection_detail` / `missing_configuration_detail` / `insufficient_document_evidence`;v2 新生成不再合成 step 级 meta gap。
 - `GuidanceGap.scope` 取值:`plan` / `step` / `subsystem`;`GuidanceGap.severity` 取值:`blocking` / `warning`。
 - `GuidanceDetail.evidence` 复用 `PaperEvidenceEntry`,不使用讲解体系 `SourceRef`;来源前缀与 gap/detail 文案由后端中文模板渲染,前端只消费后端渲染串与类型字段,不得自行拼接出处。
 
-**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)→ v0.8(2026-07-01;TASK-521-C 对外 PaperAskCitation 追加可空 document_id/document_label,LLM ask prompt payload 仍不含 document 维度)→ v0.9(2026-07-08;TASK-528-A 追加 `build_guidance` 契约 substrate,端到端恒为 null)→ v0.10(2026-07-08;TASK-528-B 追加 `guidance_status`,接入 guidance 生成 / grounding gate / lifecycle,仍不渲染)→ v0.11(2026-07-13;TASK-536-B 升级 guidance v2 requirement 契约 / 来源分层 / reducer)
+**修订历史**:v0.1(2026-06-15 起稿期)→ v0.3.2(2026-06-16 微补丁;TASK-501 Stage 2 sample roundtrip 实测驱动)→ v0.4(2026-06-28;TASK-507-A 追加 `build_steps` 契约 substrate,生成仍未接入)→ v0.5(2026-06-30;TASK-521-A 追加多文档身份 substrate,对外 PaperAskCitation 暂不变)→ v0.6(2026-06-30;TASK-521-B1 接入多篇上传、逐篇解析、融合与 plan 私有引用桥)→ v0.7(2026-07-01;TASK-521-B2 追加参数值冲突 materialized view 与防静默裁决守门,PaperAskCitation 仍零变更)→ v0.8(2026-07-01;TASK-521-C 对外 PaperAskCitation 追加可空 document_id/document_label,LLM ask prompt payload 仍不含 document 维度)→ v0.9(2026-07-08;TASK-528-A 追加 `build_guidance` 契约 substrate,端到端恒为 null)→ v0.10(2026-07-08;TASK-528-B 追加 `guidance_status`,接入 guidance 生成 / grounding gate / lifecycle,仍不渲染)→ v0.11(2026-07-13;TASK-536-B 升级 guidance v2 requirement 契约 / 来源分层 / reducer)→ v0.12(2026-07-14;TASK-536-B R-13 收口 typed resolution/fixed_kind)
 
 ### 12.5.1 Regenerate build steps endpoint
 
