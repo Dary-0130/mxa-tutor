@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Literal, cast
@@ -50,6 +51,13 @@ _RESOLUTION_KINDS = frozenset(
         "guided_user_decision",
         "environment_probe",
     }
+)
+_SOURCE_REDIRECT_RE = re.compile(
+    r"\b(?:confirm|check|verify)\b[^。；;.!?]*(?:source material|paper)\.?",
+    re.IGNORECASE,
+)
+_CHINESE_SOURCE_REDIRECT_RE = re.compile(
+    r"(?:请)?(?:查看|核对|对照|回到|参照)[^。；;]{0,18}(?:论文|原文|文献|资料)"
 )
 
 
@@ -114,8 +122,7 @@ def guidance_requirements_prompt_payload(
         {
             "requirement_ref": requirement.requirement_ref,
             "step_id": requirement.step_id,
-            "obligation_kind": requirement.obligation_kind,
-            "target": target_to_dict(requirement.target),
+            "target_kind": requirement.target.target_kind,
             "target_label": target_label(requirement.target),
         }
         for requirement in requirements
@@ -650,25 +657,43 @@ def _resolution_text(resolution: dict[str, Any] | None) -> str:
         return ""
     kind = str(resolution.get("kind") or "")
     if kind == "fixed":
-        value = clean_display_text(str(resolution.get("value") or ""))
-        unit = clean_display_text(str(resolution.get("unit") or ""))
+        value = _resolution_fragment(resolution.get("value"), fallback="待确认")
+        unit = _resolution_fragment(resolution.get("unit"), fallback="")
         return f"取值 {value}{(' ' + unit) if unit else ''}".strip()
     if kind == "range":
-        lower = resolution.get("lower")
-        upper = resolution.get("upper")
-        start = resolution.get("recommended_start") or resolution.get("selection_rule")
-        return clean_display_text(f"范围 {lower} 到 {upper}；起点/规则 {start}")
+        lower = _resolution_fragment(resolution.get("lower"), fallback="待确认")
+        upper = _resolution_fragment(resolution.get("upper"), fallback="待确认")
+        start = _resolution_fragment(
+            resolution.get("recommended_start") or resolution.get("selection_rule"),
+            fallback="待确认",
+        )
+        return f"范围 {lower} 到 {upper}；起点/规则 {start}"
     if kind == "enum_selection":
-        return f"选择 {clean_display_text(str(resolution.get('selected') or ''))}"
+        return f"选择 {_resolution_fragment(resolution.get('selected'), fallback='待确认')}"
     if kind == "derivation":
-        return f"按规则推导：{clean_display_text(str(resolution.get('rule') or resolution.get('formula') or ''))}"
+        rule = _resolution_fragment(
+            resolution.get("rule") or resolution.get("formula"),
+            fallback="待确认",
+        )
+        return f"按规则推导：{rule}"
     if kind == "conditional":
         return "按完整条件分支执行"
     if kind == "guided_user_decision":
-        return f"按判据选择：{clean_display_text(str(resolution.get('criteria') or ''))}"
+        return f"按判据选择：{_resolution_fragment(resolution.get('criteria'), fallback='待确认')}"
     if kind == "environment_probe":
-        return f"检查方法：{clean_display_text(str(resolution.get('procedure') or ''))}"
+        return f"检查方法：{_resolution_fragment(resolution.get('procedure'), fallback='待确认')}"
     return ""
+
+
+def _resolution_fragment(value: Any, *, fallback: str) -> str:
+    text = clean_display_text(str(value or ""))
+    text = _SOURCE_REDIRECT_RE.sub("", text)
+    text = _CHINESE_SOURCE_REDIRECT_RE.sub("", text)
+    text = text.replace("Confirm this step against the source material.", "")
+    text = text.replace("confirm this step against the source material.", "")
+    text = " ".join(text.split())
+    text = text.strip(" \t\r\n。；;,.，")
+    return text or fallback
 
 
 def _port_label(block: str | None, port: str | None) -> str:

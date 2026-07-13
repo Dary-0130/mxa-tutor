@@ -340,6 +340,7 @@ reducer:   requirement_mismatch / does_not_close_gap / requirement_ambiguous
 7. **渲染 golden**:后端模板产出;★ `missing_parameter` 类**不含**指回论文字样
 8. **v1 → v2 退化**:读回旧 `plan_json` → `stale_pending_regeneration`,API 正常返回
 9. **私有 handle 不外泄**(决策 27 §6):公开 schema / TS / API / 持久化 / 日志中**不出现 `REQ-###` 或 requirement 私有号** —— 搜索证零命中。★ **公开契约本身的 diff 是本卡的预期产物**(basis / resolution / closure 是公开契约变化),按决策 13 全清单同步(S0-31),**不适用「零 diff」**。
+   ★ eval-only 草稿留档允许携带 REQ 号,边界同 TASK-535 S7(eval-only / 本地公开论文 / gitignored / 生产零落盘)。
 10. **决策 13 全同步**:按 S0-31 清单逐项
 11. **四条固定回归**(真实产物 fixture,★ **测最终渲染,不测 draft**):
     - `A02`(论文直值 λ_p = 2.43)→ `document_extracted` + `closed` + actionable

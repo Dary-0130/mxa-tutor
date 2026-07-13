@@ -37,6 +37,10 @@ from features.paper.build_guidance_lifecycle import (
     normalize_guidance_lifecycle,
 )
 from features.paper.build_guidance_observability import termination_guard_for_retry_reason
+from features.paper.build_guidance_requirements import (
+    enumerate_guidance_requirements,
+    guidance_requirements_prompt_payload,
+)
 from features.paper.build_guidance_semantic_validator import (
     validate_build_guidance_semantics,
 )
@@ -152,6 +156,144 @@ async def test_document_claim_requires_resolved_handle_and_grounding_normalizes_
     assert updated.build_guidance is not None
     assert updated.build_guidance.details[0].basis == "document_extracted"
     assert updated.build_guidance.details[0].evidence == [_evidence()]
+
+
+def test_guidance_requirements_prompt_payload_exposes_slim_req_handles() -> None:
+    requirements = enumerate_guidance_requirements("paper-1", [_build_step()])
+
+    payload = guidance_requirements_prompt_payload(requirements)
+
+    assert payload
+    assert set(payload[0]) == {
+        "requirement_ref",
+        "step_id",
+        "target_kind",
+        "target_label",
+    }
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "obligation_kind" not in serialized
+    assert '"target"' not in serialized
+    assert "model_param" not in serialized
+    assert "paper_param" not in serialized
+    assert "block_role_ref" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_missing_requirement_ref_drops_detail_and_keeps_valid_document_detail() -> None:
+    missing_ref_detail = _document_detail_payload("REQ-001")
+    del missing_ref_detail["requirement_ref"]
+    provider = QueueProvider(
+        [
+            {
+                "details": [
+                    missing_ref_detail,
+                    _document_detail_payload("REQ-002"),
+                ],
+                "gaps": [],
+            }
+        ]
+    )
+
+    generator = BuildGuidanceGenerator(provider)
+    updated = await generator.generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generated"
+    assert updated.build_guidance is not None
+    assert len(updated.build_guidance.details) == 1
+    attempt = generator.last_telemetry.attempts[0]
+    assert attempt.detail_dropped_count == 1
+    assert attempt.resolver_error_count == 1
+    assert "requirement_ref_missing" in attempt.resolver_event_codes
+
+
+@pytest.mark.asyncio
+async def test_unknown_requirement_ref_drops_detail_and_keeps_valid_document_detail() -> None:
+    provider = QueueProvider(
+        [
+            {
+                "details": [
+                    _document_detail_payload("REQ-999"),
+                    _document_detail_payload("REQ-002"),
+                ],
+                "gaps": [],
+            }
+        ]
+    )
+
+    generator = BuildGuidanceGenerator(provider)
+    updated = await generator.generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generated"
+    assert updated.build_guidance is not None
+    assert len(updated.build_guidance.details) == 1
+    attempt = generator.last_telemetry.attempts[0]
+    assert attempt.detail_dropped_count == 1
+    assert attempt.resolver_error_count == 1
+    assert "requirement_ref_unknown" in attempt.resolver_event_codes
+
+
+@pytest.mark.asyncio
+async def test_requirement_ref_drops_fail_generation_only_when_every_detail_is_lost() -> None:
+    missing_ref_detail = _document_detail_payload("REQ-001")
+    del missing_ref_detail["requirement_ref"]
+    provider = QueueProvider(
+        [
+            {"details": [missing_ref_detail], "gaps": []},
+            {"details": [], "gaps": []},
+        ]
+    )
+
+    generator = BuildGuidanceGenerator(provider)
+    updated = await generator.generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generation_failed"
+    assert updated.build_guidance is None
+    assert generator.last_telemetry.terminal_reason == "evidence_resolution_failed"
+    assert "requirement_ref_missing" in generator.last_telemetry.attempts[0].resolver_event_codes
+
+
+@pytest.mark.asyncio
+async def test_final_guidance_display_text_strips_source_material_instruction_tail() -> None:
+    provider = QueueProvider(
+        [
+            {
+                "details": [
+                    {
+                        "requirement_ref": "REQ-001",
+                        "step_id": "STEP-001",
+                        "detail_kind": "block_selection",
+                        "basis": "engineering_choice",
+                        "claim_text": "Use the selected limiter structure.",
+                        "supporting_evidence_refs": [],
+                        "convention_code": None,
+                        "target": "B1",
+                        "confirmation_reason_code": None,
+                        "direction_hint": None,
+                        "resolution": {
+                            "kind": "enum_selection",
+                            "selected": (
+                                "Dead Zone + Rate Limiter "
+                                "Confirm this step against the source material."
+                            ),
+                        },
+                        "input_fact_refs": [],
+                        "punt_reason_code": None,
+                    },
+                    _document_detail_payload("REQ-002"),
+                ],
+                "gaps": [],
+            }
+        ]
+    )
+
+    updated = await BuildGuidanceGenerator(provider).generate(_spec(), _plan())
+
+    assert updated.guidance_status == "generated"
+    assert updated.build_guidance is not None
+    display_text = "\n".join(detail.display_text for detail in updated.build_guidance.details)
+    assert "Dead Zone + Rate Limiter" in display_text
+    assert "Confirm this step against the source material" not in display_text
+    assert "source material" not in display_text
 
 
 @pytest.mark.asyncio
@@ -887,6 +1029,24 @@ def _spec() -> PaperSpec:
         pseudocode_blocks=[],
         evidence=[_evidence()],
     )
+
+
+def _document_detail_payload(requirement_ref: str) -> dict[str, Any]:
+    return {
+        "requirement_ref": requirement_ref,
+        "step_id": "STEP-001",
+        "detail_kind": "parameter_value",
+        "basis": "document_extracted",
+        "claim_text": "Use the 5 kW load from the paper.",
+        "supporting_evidence_refs": ["GEV-001"],
+        "convention_code": None,
+        "target": "PL::Load.P",
+        "confirmation_reason_code": None,
+        "direction_hint": None,
+        "resolution": {"kind": "fixed", "value": "5", "unit": "kW"},
+        "input_fact_refs": [],
+        "punt_reason_code": None,
+    }
 
 
 def _plan(*, build_steps: list[ModelBuildStep] | None = None) -> ModelGenerationPlan:

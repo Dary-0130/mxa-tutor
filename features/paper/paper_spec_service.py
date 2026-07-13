@@ -205,11 +205,10 @@ class PaperSpecService:
     ) -> PaperSpec:
         try:
             payload = json.loads(response.text)
-        except json.JSONDecodeError as exc:
+        except json.JSONDecodeError:
             logger.error(
-                "PaperSpec JSON parse failed: reason_code={} error_type={} finish_reason={}",
+                "PaperSpec JSON parse failed: reason_code={} finish_reason={}",
                 "invalid_json",
-                type(exc).__name__,
                 response.finish_reason,
             )
             raise PaperSpecGenerationError(
@@ -221,7 +220,7 @@ class PaperSpecService:
 
         if not isinstance(payload, dict):
             logger.error(
-                "PaperSpec schema validation failed: reason_code={} error_type={} "
+                "PaperSpec schema validation failed: reason_code={} schema_subtype={} "
                 "finish_reason={}",
                 "schema_validation",
                 "payload_not_mapping",
@@ -244,11 +243,12 @@ class PaperSpecService:
             spec = PaperSpecModel.model_validate(payload).to_domain()
         except ValidationError as exc:
             validation_errors = _validation_error_details(exc)
+            validation_loc = _validation_loc(exc)
             logger.error(
-                "PaperSpec schema validation failed: reason_code={} error_type={} "
+                "PaperSpec schema validation failed: reason_code={} schema_subtype={} "
                 "finish_reason={} spec_validation_errors={}",
                 "schema_validation",
-                type(exc).__name__,
+                _schema_subtype("schema_validation", validation_loc),
                 response.finish_reason,
                 _format_validation_errors_for_log(validation_errors),
             )
@@ -257,7 +257,7 @@ class PaperSpecService:
                 reason_code="schema_validation",
                 finish_reason=response.finish_reason,
                 leaf=SPEC_LEAF_NAME,
-                loc=_validation_loc(exc),
+                loc=validation_loc,
                 validation_errors=validation_errors,
             ) from None
 
@@ -268,7 +268,7 @@ class PaperSpecService:
         except PaperSpecGenerationError as exc:
             reason_code = exc.reason_code or "post_validation"
             logger.error(
-                "PaperSpec post validation failed: reason_code={} error_type={} "
+                "PaperSpec post validation failed: reason_code={} validation_subtype={} "
                 "finish_reason={}",
                 reason_code,
                 "post_validation",

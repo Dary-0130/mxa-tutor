@@ -345,7 +345,7 @@ def convention_display_text(code: str, target: str) -> str:
 def confirmation_display_text(reason_code: str, target: str, direction_hint: str | None) -> str:
     text = CONFIRMATION_REASON_TEMPLATES[reason_code].format(target=target)
     if direction_hint:
-        text = f"{text} Check: {clean_display_text(direction_hint)}."
+        text = f"{text} 检查项：{clean_display_text(direction_hint)}。"
     return text
 
 
@@ -400,7 +400,7 @@ def clean_display_text(value: str) -> str:
     if len(cleaned) > 500:
         cleaned = cleaned[:497].rstrip() + "..."
     if not cleaned:
-        return "Confirm this step against the source material."
+        return "待确认"
     return cleaned
 
 

@@ -646,10 +646,10 @@ def _build_guidance_constraints() -> str:
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
 
 【guidance requirement handle 契约】:
-- guidance_requirements_json 只给私有 requirement_ref + 结构化 target;每条 detail 必须引用恰好一个 requirement_ref
+- guidance_requirements_json 只给私有 requirement_ref + target_kind + target_label + step_id;每条 detail 必须引用恰好一个 requirement_ref
 - requirement_ref 必须逐字来自 guidance_requirements_json;不得自创、不得留空、不得输出 null
 - 一条 detail 只回答一个 requirement;若一句话涉及多个 parameter / connection / block / configuration,必须拆成多条 detail
-- 后端会按 requirement_ref 解析 target / obligation_kind / step_id;REQ 号不会进入最终公开契约
+- 后端会按 requirement_ref 解析完整 target / obligation_kind / step_id;REQ 号不会进入最终公开契约
 
 【guidance evidence handle 契约】:
 - guidance_evidence_cards_json 只给私有 handle + 摘要;你只能引用 handle,不得输出 document_id / locator / 文件路径

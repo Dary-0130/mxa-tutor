@@ -10,7 +10,7 @@ system: |
   - {block_recommendations_json}:上游 block 推荐摘要,不能替代 evidence
   - {parameter_mapping_json}:当前工作参数映射;document_extracted 值仍需 evidence handle 支撑
   - {build_steps_skeleton_json}:步骤骨架,用于 step_id / block_ref_id / parameter target,不能当作论文真值
-  - {guidance_requirements_json}:后端私有 requirement 清单;每条 detail 必须引用恰好一个 requirement_ref
+  - {guidance_requirements_json}:后端私有 requirement 清单,只含 REQ 号、目标摘要、target_kind、step_id;每条 detail 必须引用恰好一个 requirement_ref
   - {guidance_evidence_cards_json}:后端私有 evidence cards,只含 handle + 摘要
 
   【任务】:

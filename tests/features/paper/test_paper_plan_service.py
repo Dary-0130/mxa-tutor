@@ -1081,7 +1081,7 @@ async def test_structured_fallback_log_is_reason_coded_metadata_only(
     await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 
     logged = repr(warning_calls)
-    assert "paper_plan_build_steps_fallback reason_code=%s exc_type=%s" in logged
+    assert "paper_plan_build_steps_fallback reason_code=%s" in logged
     assert "parameter_value_leak" in logged
     assert "0.05" not in logged
     assert "Ω" not in logged
@@ -1408,7 +1408,7 @@ async def test_llm_provider_error_propagates_without_wrapping() -> None:
 
 
 @pytest.mark.asyncio
-async def test_logger_uses_error_with_type_name_not_exception(
+async def test_logger_uses_error_with_reason_code_not_exception_class(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     error_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
@@ -1430,7 +1430,9 @@ async def test_logger_uses_error_with_type_name_not_exception(
         )
 
     assert error_calls
-    assert "JSONDecodeError" in " ".join(repr(arg) for arg in error_calls[0][0])
+    logged = " ".join(repr(arg) for arg in error_calls[0][0])
+    assert "invalid_json" in logged
+    assert "JSONDecodeError" not in logged
 
 
 @pytest.mark.asyncio
