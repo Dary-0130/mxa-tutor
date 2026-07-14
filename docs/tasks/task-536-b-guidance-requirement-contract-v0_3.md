@@ -401,6 +401,7 @@ reducer:   requirement_mismatch / does_not_close_gap / requirement_ambiguous
 5. ★ **归因墙目前只覆盖 guidance 层**。S0-27 实测:另有多条模型自由文本直达 UI(build_steps 正文 / 参数表 / 参数冲突 / 调参面板 / paper-ask 等)。**这是边界,不是漏洞** —— 但必须成文(决策 29),否则半年后会有人拿它当「归因墙失效」的证据。
 6. **CI 断言**:焊死「评测侧 guidance 有效配置必须与生产同源」(TASK-535 挂账;三处不同构全部让评测比生产更苛刻 —— 不加这道,会有第四处)
 7. **528-D 前端上屏**:三视觉区 + 禁自拼出处(§7)
+8. ★ **chore 挂账**:本地 `make check` 用 Python 3.13、CI 用 Python 3.11,两条跑道各跑各的,迟早再出事;要么把本地开发环境锁到 3.11(与 CI 同源),要么 CI 加 3.13 矩阵。此病与 TASK-535「评测跑道与生产不同构」同源,PM 定优先级。
 
 ---
 

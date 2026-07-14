@@ -1,7 +1,9 @@
 """Pure Python ModelGenerationPlan domain contract."""
 
 from dataclasses import dataclass
-from typing import Literal, NotRequired, TypeAlias, TypedDict
+from typing import Literal, TypeAlias
+
+from typing_extensions import NotRequired, TypedDict  # noqa: UP035
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
