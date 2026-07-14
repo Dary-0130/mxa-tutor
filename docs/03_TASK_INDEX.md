@@ -350,9 +350,9 @@ Week 1:  [✅✅✅✅✅✅✅✅]           8/8  (含 TASK-107 / TASK-108)
 Week 2:  [✅✅✅✅✅✅✅✅✅]      9/9  (含 TASK-207 / TASK-208 / TASK-209)
 Week 3:  [✅✅✅✅✅⏸✅✅✅✅]  9/10
 Week 4:  [✅✅✅⏸↪↪]           3/6
-Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍🔍🔍✅✅✅✅✅⬜✅✅✅✅✅✅✅✅✅✅] 34/38 (paper-to-model TASK-500~508 + TASK-523/524/525/526/528/529 + TASK-530(PDF 活动内容闸) + TASK-531/532/533(长度上限放宽 + spec 校验诊断) + TASK-534(build_steps 契约/依赖量具/配对评测/depends_on 措辞转正) + TASK-535(建模指导层失败可观测量具 + 评测跑道口径对齐 + S7 eval-only 正文落盘) + TASK-527(⬜ 历史多版本 + 存储上限挂账) + TASK-520/521/522(🔍 追问/多文件/解析纠错子线未完全收口);MATLAB bridge/engine TASK-510~519)
+Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍🔍🔍✅✅✅✅✅⬜✅✅✅✅✅✅✅✅✅✅✅] 35/39 (paper-to-model TASK-500~508 + TASK-523/524/525/526/528/529 + TASK-530(PDF 活动内容闸) + TASK-531/532/533(长度上限放宽 + spec 校验诊断) + TASK-534(build_steps 契约/依赖量具/配对评测/depends_on 措辞转正) + TASK-535(建模指导层失败可观测量具 + 评测跑道口径对齐 + S7 eval-only 正文落盘) + TASK-536-B(建模指导 requirement 契约 + typed resolution 收口) + TASK-527(⬜ 历史多版本 + 存储上限挂账) + TASK-520/521/522(🔍 追问/多文件/解析纠错子线未完全收口);MATLAB bridge/engine TASK-510~519)
 
-总计: 66/75
+总计: 67/76
 ```
 
 ---
@@ -360,7 +360,7 @@ Week 5+: [✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅✅🔍🔍🔍�
 ## 下一步
 
 当前状态:paper-to-model v0.1 单篇主路已在真论文上端到端跑热——8 篇真 arXiv PDF 全部从 upload 一路跑到 guidance(试车道 ready 8/8),项目首次实现真论文全批跑通。此前三道瓶颈已依次闭合:TASK-530 修好 PDF 活动内容闸(7 篇误拦全部越闸)、TASK-531 放宽两处内部长度上限(raw_text 80k→150k、spec 预算 8000→16000,ready 2/8→6/8)、TASK-532 放宽 abstract 对外约束(1000→1500,ready 6/8→8/8);中途插入 TASK-533 补齐 spec 校验字段级诊断,凭此坐实剩余失败均为 abstract 超长、排除「第四道未知约束」。主路实模型经核为 deepseek-v4-flash(1M 窗口 / 384K 输出上限),现有各处上限均系自设保守值,远未触及模型能力。
-已完成主体:paper-to-model 主线 TASK-500~508 ✅、修复卡 523/524 ✅、上传作业化 525-A/B ✅、结构化输出稳定性 526 ✅、建模指导三层 528-A/B/C ✅、draft DTO 容忍 529 ✅、PDF 闸 530 ✅、建模指导量具/跑道对齐 534/535 ✅;MATLAB bridge/engine 线 510~519 ✅(517/518/519 各 A/B 子块均合并)。TASK-527 历史多版本 + 存储上限仍为🔲挂账。追问子线 520(剩 520-E)、多文件子线 521(剩解析纠错相关)、解析纠错子线 522(剩 522-A 诚实提示 / 522-D2 消解冲突)仍🔍未完全收口。
+已完成主体:paper-to-model 主线 TASK-500~508 ✅、修复卡 523/524 ✅、上传作业化 525-A/B ✅、结构化输出稳定性 526 ✅、建模指导三层 528-A/B/C ✅、draft DTO 容忍 529 ✅、PDF 闸 530 ✅、建模指导量具/跑道对齐 534/535 ✅、requirement 契约/typed resolution 收口 536-B ✅;MATLAB bridge/engine 线 510~519 ✅(517/518/519 各 A/B 子块均合并)。TASK-527 历史多版本 + 存储上限仍为🔲挂账。追问子线 520(剩 520-E)、多文件子线 521(剩解析纠错相关)、解析纠错子线 522(剩 522-A 诚实提示 / 522-D2 消解冲突)仍🔍未完全收口。
 下一步:主路已跑热,重心转向质量与工作台。①质量回验:8/8 跑通只证「出得来」,不证「出得对」——2110 触发的 no_document_basis(528-B 混合型护栏)现可在全批跑通的样本上回判是否规则过紧;TASK-533 新增的 spec_validation_errors 也已照出 2605 一次 unit/string_too_short 被 structured retry 救回,作线索收着、样本足够再判是否成规律。②abstract 放宽的后续代价:TASK-532 只用 prompt 降低照抄概率、未建硬防线,需另起卡(先诊断现有样本 abstract 与 raw_text 重叠度、量清照抄严重度,再定是否建窄的整段复制检测 + 有界重写)。③样本扩容:现 8 篇域集中于微电网/电力 + MPC/RL,决策 24 准入要 ≥20 真实 case,后续几批须掺别方向/结构形态(更长论文亦将检验 150k 门槛与 telemetry)。④轻工作台(决策 26:最小「家」+ 本地课题包读写/找回)→ 拉 8-12 真研究生试水。528-D 上屏可解除后置(主路已跑热)。
 
 ## Week 5+:paper-to-model 主线占位
@@ -407,23 +407,24 @@ TASK-501 系列用于 paper-to-model 主线。派发任何 TASK-501 前,必须�
 | TASK-533 | spec 校验失败记录字段级诊断(loc/type/count) | ✅ | Codex | 已合并 main;补主路观测盲区——此前 spec pydantic 校验失败只记 schema_validation 大类,无法归因到字段,导致「长度闸打通后露出的失败是不是第四道闸」无法从记录判断;现只提取 loc/type/count(长度类另记纯数字 max_length/actual_length),严格剔除 msg/input/字段值/raw/stack(决策 11);试车道 summary/actual 带 spec_validation_errors;凭此当场坐实 2410/2409 失败均为 abstract/string_too_long/max_length=1000、排除第四道约束,直接支撑 TASK-532 放行;纯观测、不改行为、schema export 零 diff |
 | TASK-534 | build_steps 草稿契约分离 + 依赖量具 + 同场配对评测台 + depends_on 措辞转正 | ✅ | Codex | 决策 27 |
 | TASK-535 | 建模指导层失败可观测量具 + 评测跑道口径对齐 | ✅ | Codex | 已合并 main(PR #203 / commit 5f0908c);评测跑道 guidance 从 6000/90 对齐到生产同源 8000/120,provider 边界实收自证;生产判定 / 控制流 / prompt / retry / 阈值 / 对外契约零改动;S7:eval-only 指导正文落盘(eval/out/,生产路径仍不落模型正文) |
+| TASK-536-B | 建模指导 requirement 契约 + typed resolution 收口 | ✅ | Codex | 已合并 main(PR #206 / commit 43fdbe9);requirement payload 降载 + resolution typed 契约收口;本卡索引 closeout 单独 PR |
 | 评测 PDF 试车道 | 本地固定论文集真机主路 smoke lane(非 TASK 编号,评测基建) | ✅ | Codex | 已合并 main(PR #193);eval/run_paper_pdf_smoke.py 对本地论文集逐篇跑完整真机主路(upload→parse→spec→plan→guidance)输出标准口径 summary,产物落 eval/out/(gitignore);与 stripped-md CI golden 并存不替换,默认不进 CI、跑真机;决策 12 §7.1 豁免 R 轮 |
 └─ R6 后置修复(evaluator true run)PR #102(2026-06-19)
 
-**决策 09 反例库**:108 → **173**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段;本任索引 closeout +2):
+**决策 09 反例库**:108 → **183**(TASK-310 累积 +54;TASK-503 v0.2.4 第 49 任起草线 +9;含 38 任 PR 准备阶段 + 39 任 PR #1 / PR #2 / chore PR 阶段;本任索引 closeout +2;TASK-536-B 索引 closeout +10):
 
-- K_28a 36 → **57**(+21):38 任 +13(R0 / R1 / Round 1 / Round 2 / D-E-F 五段)/ 39 任 +4(派单凭印象 migrations 目录 + projects 表名 + overview_schemas 期望窄 + 索引数字 32/34 凭印象)/ 49 任 +3(TASK-503 v0.2.4 起草线:凭交接包转述写"12 项参数"(实测 15)+ 凭印象写 decision 编号 23(实测应 25)+ 推 A 重做未核 v0.2.3→v0.2.4 改动范围)/ 本任 +1(索引进度条与总计旧值未按表格实测,本次脚本核为改前 65/73、改后 66/75)
-- K_28b 4 → **10**(+6):38 任 +5(起稿粒度反复)/ 39 任 +1(治标 vs 治本决策点漏明示)
+- K_28a 36 → **60**(+24):38 任 +13(R0 / R1 / Round 1 / Round 2 / D-E-F 五段)/ 39 任 +4(派单凭印象 migrations 目录 + projects 表名 + overview_schemas 期望窄 + 索引数字 32/34 凭印象)/ 49 任 +3(TASK-503 v0.2.4 起草线:凭交接包转述写"12 项参数"(实测 15)+ 凭印象写 decision 编号 23(实测应 25)+ 推 A 重做未核 v0.2.3→v0.2.4 改动范围)/ 本任 +1(索引进度条与总计旧值未按表格实测,本次脚本核为改前 65/73、改后 66/75)/ TASK-536-B +3(验收写"公共 schema export 零 diff"与本卡目的直接打架,且项目第二次犯同款;把渲染 fallback 的"待确认"误判为模型 relabel 刷分,读了渲染串没读 raw draft;CI 红病因猜测行尾/schema 漂移全错,实际是 Python 3.11/3.13 TypedDict 兼容问题)
+- K_28b 4 → **12**(+8):38 任 +5(起稿粒度反复)/ 39 任 +1(治标 vs 治本决策点漏明示)/ TASK-536-B +2(用"必填字段会拉长输出、把 2605 推下悬崖"砍掉 R1 安全五字段,却没拿同一把尺子量自己的结构化字段,结果 requirement payload 把 prompt 撑爆 70-113%;卡面 §11.1 写了 B31/A02/B23 固定回归,测试树里根本不存在,起稿写了、施工没落、验收前也没核)
 - K_30 23 → **31**(+8):38 任 +7(R0 / R1 / Round 1 / 派单 / freeze 跨段)/ 39 任 +1(派单验收 ruff format --check 漏列,PR #1 K_30 同款未消化)
 - K_31 2 → 2(沿用)
 - K_34 9 → 9(沿用)
 - K_36 13 → **22**(+9):38 任 +6(env 项目级归档 / 验收清单粒度)/ 39 任 +2(派单验收清单只补 mypy 漏 ruff format / 同类 CI step 拆条)/ 49 任 +1(推 A 重做未核范围红线,与 K_28a 双重记账)
-- **K 总(剔除救场)= 87 → 131**(+44)
-- Codex 守门救场 13 → **23**(+10):38 任 +5(Round 1 命令本体错 / Round 2 派单 git 真值错 / Round 2 #7+#13 freeze 守门 / E 段找回 mxa env / F 段项目级归档补齐)/ 39 任 +4(PR #2 Stage 0 Round 3 #14 migrations 目录 + #3 overview_schemas 期望 + PR #1 CI mypy 自动化救场 + PR #2 CI ruff format 自动化救场)/ 49 任 +1(取证 16 第一行实测拦下"main 无 task-503 任务卡",派单 base 假设错)
-- PM 救场架构师 6 → **19**(+13):38 任 +5(D1-B / R0 / 修订工艺 / 单文件整合 / env 归档不全)/ 39 任 +3(PR #1 治标 vs 治本 / PR #2 "一次跑绿 CI" / chore PR 数字 "一来就错")/ 49 任 +4(四次一句话点破:框架性授权后过度请示 / 推 A 重做 / "怎么还要拍"等)/ 本任 +1(PM 点出 TASK-527 缺行挂账,要求 closeout 单独补行)
-- **反例库总计 = 131 + 23 + 19 = 173**
+- **K 总(剔除救场)= 87 → 136**(+49)
+- Codex 守门救场 13 → **27**(+14):38 任 +5(Round 1 命令本体错 / Round 2 派单 git 真值错 / Round 2 #7+#13 freeze 守门 / E 段找回 mxa env / F 段项目级归档补齐)/ 39 任 +4(PR #2 Stage 0 Round 3 #14 migrations 目录 + #3 overview_schemas 期望 + PR #1 CI mypy 自动化救场 + PR #2 CI ruff format 自动化救场)/ 49 任 +1(取证 16 第一行实测拦下"main 无 task-503 任务卡",派单 base 假设错)/ TASK-536-B +4(打回"公共 schema export 零 diff"这条不可能验收;R-10 判死线触发时主动停手,报 resolution 是自由字典,应先改契约;R-13 方案中主动提出候选集会把 domain_default 逼回白条并自我修正;CI 诊断一次定位本地 3.13 / CI 3.11 差异)
+- PM 救场架构师 6 → **20**(+14):38 任 +5(D1-B / R0 / 修订工艺 / 单文件整合 / env 归档不全)/ 39 任 +3(PR #1 治标 vs 治本 / PR #2 "一次跑绿 CI" / chore PR 数字 "一来就错")/ 49 任 +4(四次一句话点破:框架性授权后过度请示 / 推 A 重做 / "怎么还要拍"等)/ 本任 +1(PM 点出 TASK-527 缺行挂账,要求 closeout 单独补行)/ TASK-536-B +1(PM 连问"打回解决根本问题吗 / 第一关都进不了怎么做第二关 / 和 GPT 有什么区别",点破火力与价值排序脱节:第一关被挂账挂到失明,架构师一个月未做尸检诊断)
+- **反例库总计 = 136 + 27 + 20 = 183**
 
-> **自 41 任(决策 22)起,反例库改趋势记账(不再逐位累加)**:第 49 任 TASK-503 v0.2.4 起草线新增趋势集中在 K_28a(+3:12 项参数 / decision 23 / 推 A 重做范围)、K_36(+1:范围红线)、Codex 守门救场(+1:取证 16 拦 base 假设错)、PM 救场架构师(+4:四次一句话点破)。本任索引 closeout 新增趋势集中在 K_28a(+1:进度数字须由表格实测)与 PM 救场架构师(+1:TASK-527 缺行挂账)。三层审查(GPT 决策质量 / Codex 实测 / PM 兜底)继续正常工作,无漏入仓。详决策 22 § 9。
+> **自 41 任(决策 22)起,反例库改趋势记账(不再逐位累加)**:第 49 任 TASK-503 v0.2.4 起草线新增趋势集中在 K_28a(+3:12 项参数 / decision 23 / 推 A 重做范围)、K_36(+1:范围红线)、Codex 守门救场(+1:取证 16 拦 base 假设错)、PM 救场架构师(+4:四次一句话点破)。本任索引 closeout 新增趋势集中在 K_28a(+1:进度数字须由表格实测)与 PM 救场架构师(+1:TASK-527 缺行挂账)。TASK-536-B 索引 closeout 新增趋势集中在 K_28a(+3:无 repo 凭推理)、K_28b(+2:起稿粒度不足)、Codex 守门救场(+4:打回不可能验收/契约死线/方案自纠/CI 诊断)、PM 救场架构师(+1:点破火力与价值排序脱节)。三层审查(GPT 决策质量 / Codex 实测 / PM 兜底)继续正常工作,无漏入仓。详决策 22 § 9。
 
 **触发独立阈值**:K_28a ≥ 10 / K_28b ≥ 5 / K_30 ≥ 5 / K_31 ≥ 2 / K_34 ≥ 5 / K_36 ≥ 2 / Codex 守门救场 ≥ 5 / PM 救场架构师 ≥ 5 全部稳定触发。
 
