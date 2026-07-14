@@ -12,6 +12,7 @@ from core.domain.paper_plan import (
     BuildGuidance,
     GuidanceAssessment,
     GuidanceDetail,
+    GuidanceTarget,
     ModelGenerationPlan,
     ParameterMapping,
 )
@@ -359,7 +360,7 @@ def _response(
 
 def _build_guidance() -> BuildGuidance:
     return BuildGuidance(
-        version="v1",
+        version="v2",
         assessment=GuidanceAssessment(
             content_status="outline_only",
             environment_status="not_checked",
@@ -377,6 +378,21 @@ def _build_guidance() -> BuildGuidance:
                 evidence=[_document_evidence()],
                 convention_code=None,
                 confirmation_reason_code=None,
+                target=GuidanceTarget(
+                    target_kind="parameter",
+                    model_param="Synchronous Machine.H",
+                    paper_param="H",
+                ),
+                obligation_kind="determine_parameter_value",
+                resolution={
+                    "kind": "fixed",
+                    "fixed_kind": "numeric",
+                    "value": 3.5,
+                    "unit": "s",
+                },
+                execution_closure="closed",
+                input_fact_refs=[],
+                punt_reason_code=None,
             )
         ],
         gaps=[],

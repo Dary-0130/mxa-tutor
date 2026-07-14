@@ -468,6 +468,7 @@ def build_messages_for_tuning_suggest(
 def build_messages_for_build_guidance(
     plan: ModelGenerationPlan,
     evidence_cards: Sequence[_GuidanceEvidenceCardLike],
+    guidance_requirements: Sequence[object] = (),
 ) -> list[LLMMessage]:
     """Build BuildGuidanceGenerator messages with guidance-only evidence cards."""
 
@@ -493,6 +494,7 @@ def build_messages_for_build_guidance(
             ),
             "build_steps_skeleton_json": _build_guidance_steps_json(plan),
             "guidance_evidence_cards_json": _guidance_evidence_cards_json(evidence_cards),
+            "guidance_requirements_json": _json_dumps(list(guidance_requirements)),
         },
     )
     return _role_messages(template.system, user, shared_constraints=_build_guidance_constraints())
@@ -643,10 +645,16 @@ def _build_guidance_constraints() -> str:
     return """你是中国电气 / 自动化 / 控制专业的 MATLAB/Simulink 助教。
 只返回有效 JSON 对象;不要 markdown,不要解释文字。
 
+【guidance requirement handle 契约】:
+- guidance_requirements_json 只给私有 requirement_ref + target_kind + target_label + step_id;每条 detail 必须引用恰好一个 requirement_ref
+- requirement_ref 必须逐字来自 guidance_requirements_json;不得自创、不得留空、不得输出 null
+- 一条 detail 只回答一个 requirement;若一句话涉及多个 parameter / connection / block / configuration,必须拆成多条 detail
+- 后端会按 requirement_ref 解析完整 target / obligation_kind / step_id;REQ 号不会进入最终公开契约
+
 【guidance evidence handle 契约】:
 - guidance_evidence_cards_json 只给私有 handle + 摘要;你只能引用 handle,不得输出 document_id / locator / 文件路径
 - document_extracted detail 必须至少引用一个 supporting_evidence_refs handle
-- 没有 handle 或不确定时,只能输出 user_confirmation_required 或白名单 engineering_convention
+- 没有 handle 或不确定时,只能输出非论文 basis 或 user_confirmation_required
 - 不得把 library_choice、build_steps_skeleton_json、display_text 或自己的总结当作论文真值
 
 【防编造红线】:
@@ -660,19 +668,35 @@ def _build_guidance_constraints() -> str:
 - clarke_transform_structure / park_transform_structure:只允许基础结构提示;缩放/相序/角度来源必须确认
 - 白名单外不要输出 engineering_convention;电源/逆变器/主功率器件/物理 plant 不走 convention
 
+【resolution payload】:
+- closed 类 basis 必须给 fixed/range/enum_selection/derivation/conditional 之一
+- fixed 必须含 fixed_kind:
+  - parameter 数值:{"kind":"fixed","fixed_kind":"numeric","value":2.43,"unit":"..."};value 必须是 JSON number,不能写字符串
+  - block 选择:{"kind":"fixed","fixed_kind":"block_ref","selected_id":"B1"};selected_id 必须来自该 step 的 block_refs
+  - configuration 选择:{"kind":"fixed","fixed_kind":"configuration_option","value_token":"ode15s","display_label":"ode15s"}
+  - connection 模式:{"kind":"fixed","fixed_kind":"connection_mode","value_token":"direct","display_label":"direct"}
+- value_token 只能用 1-40 位英文字母/数字;不得有空格、中文或标点
+- user_decision 必须给 guided_user_decision:decision_item/criteria/options(option+consequence)
+- user_environment 必须给 environment_probe:probe_item/procedure/result_actions(result+action)
+- user_confirmation_required 必须 resolution=null、supporting_evidence_refs=[]、input_fact_refs=[]
+
 【输出顶层 JSON】:
 {
   "details": [
     {
+      "requirement_ref": "REQ-001",
       "step_id": "STEP-001",
       "detail_kind": "block_selection|subsystem_internal_structure|connection|parameter_value|configuration|verification|gap_notice",
-      "basis": "document_extracted|engineering_convention|user_confirmation_required",
+      "basis": "document_extracted|document_derived|domain_default|engineering_choice|user_environment|user_decision|user_confirmation_required|document_claim_unverified",
       "claim_text": "...",
       "supporting_evidence_refs": ["GEV-001"],
       "convention_code": "..." | null,
       "target": "STEP-001|B1|paper_param::model_param|plan|..." | null,
       "confirmation_reason_code": "missing_parameter_value|library_variant_unresolved|toolbox_unverified|solver_unverified|sample_time_unverified|connection_detail_missing|initial_condition_unverified|switching_frequency_unverified|simulation_time_unverified|configuration_unverified|document_evidence_unverified|engineering_decision_unverified" | null,
-      "direction_hint": "..." | null
+      "direction_hint": "..." | null,
+      "resolution": {"kind": "fixed|range|enum_selection|derivation|conditional|guided_user_decision|environment_probe", "fixed_kind": "numeric|block_ref|configuration_option|connection_mode", "...": "..."} | null,
+      "input_fact_refs": [],
+      "punt_reason_code": "source_does_not_specify|upstream_step_underspecified|requires_user_context|outside_guidance_contract" | null
     }
   ],
   "gaps": []

@@ -165,6 +165,31 @@ def test_invalid_json_raises_generation_error() -> None:
     assert exc_info.value.reason_code == "invalid_json"
 
 
+def test_parse_logger_uses_reason_code_not_exception_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_error(*args: object, **kwargs: object) -> None:
+        error_calls.append((args, kwargs))
+
+    monkeypatch.setattr(service_module.logger, "error", fake_error)
+
+    with pytest.raises(PaperSpecGenerationError):
+        _service(FakeTextProvider())._parse_and_validate(_response_text("{"), _parsed_document())
+
+    payload = _valid_payload()
+    payload["domain"] = "general"
+    with pytest.raises(PaperSpecGenerationError):
+        _service(FakeTextProvider())._parse_and_validate(_response(payload), _parsed_document())
+
+    logged = " ".join(repr(arg) for call in error_calls for arg in call[0])
+    assert "invalid_json" in logged
+    assert "schema_validation" in logged
+    assert "JSONDecodeError" not in logged
+    assert "ValidationError" not in logged
+
+
 def test_schema_error_raises_generation_error() -> None:
     payload = _valid_payload()
     payload["domain"] = "general"

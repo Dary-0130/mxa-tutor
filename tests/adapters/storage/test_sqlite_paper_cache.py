@@ -27,6 +27,7 @@ from core.domain.paper_plan import (
     GuidanceAssessment,
     GuidanceDetail,
     GuidanceGap,
+    GuidanceTarget,
     ModelBuildStep,
     ModelGenerationPlan,
     PaperPlanRecord,
@@ -747,7 +748,11 @@ async def test_readback_downgrades_hand_edited_document_display_text(
     store = SqlitePaperBundleStore(initialized_db_path)
     await store.save_ready_bundle(record)
     payload = await _stored_plan_payload(initialized_db_path, record.paper_id)
-    payload["build_guidance"]["details"][0]["display_text"] = "Use the 7 kW machine inertia."
+    payload["build_guidance"]["details"][0]["resolution"] = {
+        "kind": "fixed",
+        "value": "7",
+        "unit": "kW",
+    }
     await _replace_plan_payload(initialized_db_path, record.paper_id, payload)
 
     loaded = await store.get_plan_record(record.paper_id)
@@ -1408,24 +1413,31 @@ def _stored_gap(
 def _build_guidance(*, gaps: list[GuidanceGap] | None = None) -> BuildGuidance:
     resolved_gaps = [] if gaps is None else gaps
     return BuildGuidance(
-        version="v1",
+        version="v2",
         assessment=GuidanceAssessment(
             content_status="outline_with_gaps" if resolved_gaps else "outline_only",
             environment_status="not_checked",
             overall_status="outline_with_gaps" if resolved_gaps else "outline_only",
             blocking_gap_ids=[gap.gap_id for gap in resolved_gaps if gap.severity == "blocking"],
+            open_requirement_count=len(resolved_gaps),
         ),
         details=[
             GuidanceDetail(
                 detail_id="GD-001",
                 step_id="STEP-001",
-                detail_kind="parameter_value",
+                detail_kind="block_selection",
                 basis="document_extracted",
                 actionability="actionable",
                 display_text="Use the documented machine inertia.",
                 evidence=[_document_evidence()],
                 convention_code=None,
                 confirmation_reason_code=None,
+                target=GuidanceTarget(target_kind="block_choice", block_role_ref="B1"),
+                obligation_kind="select_component",
+                resolution=_fixed_block_ref("B1"),
+                execution_closure="closed",
+                input_fact_refs=[],
+                punt_reason_code=None,
             )
         ],
         gaps=resolved_gaps,
@@ -1446,6 +1458,10 @@ def _record_with_mapping_value(record: PaperPlanRecord, value: str) -> PaperPlan
         ],
     )
     return replace(record, plan=updated_plan)
+
+
+def _fixed_block_ref(selected_id: str) -> dict[str, object]:
+    return {"kind": "fixed", "fixed_kind": "block_ref", "selected_id": selected_id}
 
 
 def _source(paper_id: str, *, text: str = "paper text") -> PaperReparseSource:

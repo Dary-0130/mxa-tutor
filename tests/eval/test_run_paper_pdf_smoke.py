@@ -16,6 +16,7 @@ from core.domain.paper_plan import (
     GuidanceAssessment,
     GuidanceDetail,
     GuidanceGap,
+    GuidanceTarget,
     ModelBuildStep,
     ParameterMapping,
     ParameterMappingRef,
@@ -74,7 +75,7 @@ def test_spec_validation_errors_merge_counts_without_values() -> None:
 def test_classify_build_steps_result_preserves_bridge_resolution_subcodes() -> None:
     telemetry = subject.BuildStepsTelemetry(
         fallback_reason_code="source_ref_no_match",
-        fallback_exception_type="BuildStepsDtoValidationError",
+        fallback_exception_code="build_steps_dto",
     )
 
     assert subject.classify_build_steps_result(None, telemetry) == "source_ref_no_match"
@@ -112,6 +113,10 @@ def test_write_summary_artifacts_uses_fixed_schema(tmp_path: Path) -> None:
     )
     assert json.loads(csv_row["guidance_attempts"]) == row.guidance_attempts
     assert json.loads(csv_row["guidance_effective_config"]) == row.guidance_effective_config
+    assert json.loads(csv_row["final_detail_basis_counts"]) == row.final_detail_basis_counts
+    assert (
+        json.loads(csv_row["final_execution_closure_counts"]) == row.final_execution_closure_counts
+    )
     assert json.loads(csv_row["violations_by_code"]) == row.violations_by_code
     assert json.loads(csv_row["violation_edges"]) == row.violation_edges
     assert json.loads(csv_row["same_number_probes"]) == row.same_number_probes
@@ -121,9 +126,18 @@ def test_write_summary_artifacts_uses_fixed_schema(tmp_path: Path) -> None:
         == row.per_step_cross_step_connection_counts
     )
     assert json.loads(csv_row["per_step_inbound_dep_counts"]) == row.per_step_inbound_dep_counts
+    serialized = "\n".join(
+        [
+            (tmp_path / "paper_pdf_smoke.summary.json").read_text("utf-8"),
+            (tmp_path / "paper_pdf_smoke.summary.csv").read_text("utf-8"),
+        ]
+    )
+    assert "deepseek-v4-flash" not in serialized
 
 
 def test_llm_model_summary_marks_missing_version_fingerprint() -> None:
+    model_fingerprint = subject._model_fingerprint("deepseek-v4-flash")
+    assert model_fingerprint is not None
     calls = [
         subject.LLMCallRecord(
             role="paper_spec_extractor",
@@ -146,8 +160,8 @@ def test_llm_model_summary_marks_missing_version_fingerprint() -> None:
 
     summary = subject._llm_model_summary(calls, no_calls_note="no calls")
 
-    assert summary["model_identifiers"] == ["deepseek-v4-flash"]
-    assert summary["model_identifier_counts"] == {"deepseek-v4-flash": 1}
+    assert summary["model_identifiers"] == [model_fingerprint]
+    assert summary["model_identifier_counts"] == {model_fingerprint: 1}
     assert summary["system_fingerprints"] == []
     assert summary["system_fingerprint_counts"] == {}
     assert summary["version_fingerprint_note"] == "供应商未提供版本标识"
@@ -194,7 +208,7 @@ async def test_paired_build_steps_runs_two_arms_on_same_upstream() -> None:
     assert arms[0]["dependency_audit"]["violations_by_code"]["self"] == 1
     assert arms[1]["dependency_audit"]["dependency_audit_status"] == "clean"
     assert arms[1]["downstream_used"] is True
-    assert arms[1]["response_model"] == "deepseek-v4-flash"
+    assert arms[1]["response_model"] == subject._model_fingerprint("deepseek-v4-flash")
 
 
 @pytest.mark.asyncio
@@ -345,7 +359,9 @@ async def test_run_smoke_wires_temp_db_upload_dir_and_mock_runner(tmp_path: Path
     assert (output_dir / "_runtime" / "paper_pdf_smoke.sqlite").is_file()
 
 
-def test_summary_keeps_guidance_denominators_null_when_guidance_is_absent(tmp_path: Path) -> None:
+def test_summary_keeps_final_guidance_counts_null_when_guidance_is_absent(
+    tmp_path: Path,
+) -> None:
     plan = replace(
         _plan_with_build_steps(), build_guidance=None, guidance_status="generation_failed"
     )
@@ -372,12 +388,49 @@ def test_summary_keeps_guidance_denominators_null_when_guidance_is_absent(tmp_pa
         unexpected_error=None,
     )
 
+    assert row.guidance_requirement_enumerated_count == 2
     assert row.final_detail_total_count is None
     assert row.final_document_detail_count is None
     assert row.final_unverified_detail_count is None
     assert row.generator_downgraded_unverified_count is None
     assert row.validator_dropped_unverified_count is None
     assert row.final_surviving_unverified_count is None
+
+
+def test_summary_keeps_requirement_denominator_null_before_build_steps_are_reached(
+    tmp_path: Path,
+) -> None:
+    plan = replace(
+        _plan_with_build_steps(),
+        build_steps=None,
+        build_guidance=None,
+        guidance_status="not_generated",
+    )
+    row = subject.build_summary_row(
+        paper=subject.SmokePaper(
+            path=tmp_path / "arxiv-2410.04316-test.pdf",
+            arxiv_id="2410.04316",
+            hybrid_candidate=True,
+        ),
+        round_index=1,
+        runtime=_runtime(tmp_path),
+        telemetry=subject.BuildStepsTelemetry(guidance_failure_reason="build_steps_unavailable"),
+        build_steps_call=None,
+        llm_calls=[],
+        job_record=None,
+        plan_record=subject.PaperPlanRecord(
+            paper_id="paper",
+            spec=_paper_spec(),
+            plan=plan,
+            missing_prompts=[],
+            missing_bindings=[],
+        ),
+        response_payload={},
+        unexpected_error=None,
+    )
+
+    assert row.build_steps_structured is False
+    assert row.guidance_requirement_enumerated_count is None
 
 
 def test_summary_reports_three_unverified_layers_separately(tmp_path: Path) -> None:
@@ -416,6 +469,25 @@ def test_summary_reports_three_unverified_layers_separately(tmp_path: Path) -> N
     assert row.validator_dropped_unverified_count == 1
     assert row.final_surviving_unverified_count == 1
     assert row.guidance_evidence_clean is False
+    assert row.final_detail_basis_counts == {
+        "document_extracted": 1,
+        "document_derived": 0,
+        "domain_default": 0,
+        "engineering_choice": 0,
+        "user_environment": 0,
+        "user_decision": 0,
+        "user_confirmation_required": 0,
+        "document_claim_unverified": 1,
+    }
+    assert row.final_execution_closure_counts == {
+        "closed": 1,
+        "guided_choice": 0,
+        "guided_probe": 0,
+        "open": 1,
+    }
+    assert row.pending_user_choice_count == 0
+    assert row.pending_environment_probe_count == 0
+    assert row.open_requirement_count == 1
 
 
 def test_write_guidance_artifacts_outputs_raw_json_and_readable_text(tmp_path: Path) -> None:
@@ -475,8 +547,50 @@ def test_write_guidance_artifacts_outputs_raw_json_and_readable_text(tmp_path: P
     assert "[步骤 1] Place gain" in text
     assert "出处:论文 DOC-001 第 S1 处" in text
     assert f"出处:{marker}" in text
-    assert "缺口:[阻塞] STEP-001 lacks verified configuration evidence." in text
+    assert "缺口:[阻塞] 需要确定参数 K -> Gain.K。" in text
     assert text.count(marker) == row.final_surviving_unverified_count
+
+
+def test_write_guidance_draft_artifacts_outputs_sanitized_drafts(tmp_path: Path) -> None:
+    paper = subject.SmokePaper(
+        path=tmp_path / "arxiv-2605.27553-test.pdf",
+        arxiv_id="2605.27553",
+        hybrid_candidate=False,
+    )
+    drafts = [
+        {
+            "attempt_index": 1,
+            "arm_label": "main",
+            "details": [
+                {
+                    "step_id": "STEP-001",
+                    "requirement_ref": "REQ-001",
+                    "basis": "document_extracted",
+                    "claim_text": "Use the gain block from the paper.",
+                    "supporting_evidence_refs": ["GEV-001"],
+                    "target": "B1",
+                    "confirmation_reason_code": None,
+                    "direction_hint": None,
+                    "resolution": _fixed_block_ref("B1"),
+                    "punt_reason_code": None,
+                }
+            ],
+        }
+    ]
+
+    paths = subject.write_guidance_draft_artifacts(
+        tmp_path,
+        paper=paper,
+        round_index=1,
+        drafts=drafts,
+    )
+
+    assert len(paths) == 1
+    assert paths[0].parent.name == "guidance_drafts"
+    payload = json.loads(paths[0].read_text(encoding="utf-8"))
+    assert payload["details"][0]["claim_text"] == "Use the gain block from the paper."
+    assert payload["details"][0]["supporting_evidence_refs"] == ["GEV-001"]
+    assert payload["details"][0]["resolution"] == _fixed_block_ref("B1")
 
 
 def test_guidance_batch_gates_reject_invariants(tmp_path: Path) -> None:
@@ -521,6 +635,8 @@ def _summary_row(
     paper: subject.SmokePaper | None = None,
     round_index: int = 1,
 ) -> subject.SmokeSummaryRow:
+    model_fingerprint = subject._model_fingerprint("deepseek-v4-flash")
+    assert model_fingerprint is not None
     paper = paper or subject.SmokePaper(
         path=tmp_path / "arxiv-2003.10496-test.pdf",
         arxiv_id="2003.10496",
@@ -548,15 +664,15 @@ def _summary_row(
         build_steps_completion_tokens=20,
         build_steps_total_tokens=30,
         build_steps_max_tokens=8000,
-        build_steps_response_model="deepseek-v4-flash",
+        build_steps_response_model=model_fingerprint,
         build_steps_system_fingerprint="fp-test",
-        llm_model_identifiers=["deepseek-v4-flash"],
-        llm_model_identifier_counts={"deepseek-v4-flash": 1},
+        llm_model_identifiers=[model_fingerprint],
+        llm_model_identifier_counts={model_fingerprint: 1},
         llm_system_fingerprints=["fp-test"],
         llm_system_fingerprint_counts={"fp-test": 1},
         llm_version_fingerprint_note=None,
-        run_llm_model_identifiers=["deepseek-v4-flash"],
-        run_llm_model_identifier_counts={"deepseek-v4-flash": 1},
+        run_llm_model_identifiers=[model_fingerprint],
+        run_llm_model_identifier_counts={model_fingerprint: 1},
         run_llm_system_fingerprints=["fp-test"],
         run_llm_system_fingerprint_counts={"fp-test": 1},
         run_llm_version_fingerprint_note=None,
@@ -573,6 +689,9 @@ def _summary_row(
         guidance_retry_count=None,
         guidance_generator_exception=None,
         guidance_validator_machine_codes=[],
+        guidance_requirement_ref_missing_count=None,
+        guidance_requirement_ref_unknown_count=None,
+        guidance_requirement_enumerated_count=None,
         guidance_attempt_record_count=0,
         guidance_attempts=[],
         guidance_terminal_termination_guard=None,
@@ -591,11 +710,16 @@ def _summary_row(
         final_detail_total_count=None,
         final_document_detail_count=None,
         final_unverified_detail_count=None,
+        final_detail_basis_counts=None,
+        final_execution_closure_counts=None,
+        pending_user_choice_count=None,
+        pending_environment_probe_count=None,
+        open_requirement_count=None,
         generator_downgraded_unverified_count=None,
         validator_dropped_unverified_count=None,
         final_surviving_unverified_count=None,
         guidance_effective_config={
-            "model": None,
+            "model_fingerprint": None,
             "max_tokens": None,
             "timeout": None,
             "json_mode": None,
@@ -672,6 +796,10 @@ def _runtime(tmp_path: Path) -> subject.SmokeRuntime:
     )
 
 
+def _fixed_block_ref(selected_id: str) -> dict[str, object]:
+    return {"kind": "fixed", "fixed_kind": "block_ref", "selected_id": selected_id}
+
+
 class _SequenceProvider:
     def __init__(self, payloads: list[dict[str, object]]) -> None:
         self.payloads = list(payloads)
@@ -715,6 +843,7 @@ def _guidance_payload() -> dict[str, object]:
     return {
         "details": [
             {
+                "requirement_ref": "REQ-001",
                 "step_id": "STEP-001",
                 "detail_kind": "block_selection",
                 "basis": "document_extracted",
@@ -724,6 +853,9 @@ def _guidance_payload() -> dict[str, object]:
                 "target": "B1",
                 "confirmation_reason_code": None,
                 "direction_hint": None,
+                "resolution": _fixed_block_ref("B1"),
+                "input_fact_refs": [],
+                "punt_reason_code": None,
             }
         ],
         "gaps": [],
@@ -747,12 +879,13 @@ def _plan_with_build_steps() -> subject.ModelGenerationPlan:
 
 def _guidance_with_surviving_unverified() -> BuildGuidance:
     return BuildGuidance(
-        version="v1",
+        version="v2",
         assessment=GuidanceAssessment(
             content_status="outline_with_gaps",
             environment_status="not_checked",
             overall_status="outline_with_gaps",
             blocking_gap_ids=["GAP-001"],
+            open_requirement_count=1,
         ),
         details=[
             GuidanceDetail(
@@ -765,28 +898,52 @@ def _guidance_with_surviving_unverified() -> BuildGuidance:
                 evidence=[_document_evidence()],
                 convention_code=None,
                 confirmation_reason_code=None,
+                target=GuidanceTarget(target_kind="block_choice", block_role_ref="B1"),
+                obligation_kind="select_component",
+                resolution=_fixed_block_ref("B1"),
+                execution_closure="closed",
+                input_fact_refs=[],
+                punt_reason_code=None,
             ),
             GuidanceDetail(
                 detail_id="GD-002",
                 step_id="STEP-001",
-                detail_kind="configuration",
-                basis="user_confirmation_required",
+                detail_kind="parameter_value",
+                basis="document_claim_unverified",
                 actionability="blocked_pending_confirmation",
-                display_text="Confirm STEP-001; the cited paper evidence could not be verified.",
+                display_text="论文依据未核实（未采用）：参数 K -> Gain.K。",
                 evidence=[],
                 convention_code=None,
                 confirmation_reason_code="document_evidence_unverified",
+                target=GuidanceTarget(
+                    target_kind="parameter",
+                    model_param="Gain.K",
+                    paper_param="K",
+                ),
+                obligation_kind="determine_parameter_value",
+                resolution=None,
+                execution_closure="open",
+                input_fact_refs=[],
+                punt_reason_code=None,
             ),
         ],
         gaps=[
             GuidanceGap(
                 gap_id="GAP-001",
-                gap_kind="insufficient_document_evidence",
+                gap_kind="missing_parameter_value",
                 scope="step",
                 step_id="STEP-001",
                 basis="user_confirmation_required",
                 severity="blocking",
-                display_text="STEP-001 lacks verified configuration evidence.",
+                display_text="需要确定参数 K -> Gain.K。",
+                target=GuidanceTarget(
+                    target_kind="parameter",
+                    model_param="Gain.K",
+                    paper_param="K",
+                ),
+                obligation_kind="determine_parameter_value",
+                execution_closure="open",
+                failure_code="does_not_close_gap",
             )
         ],
     )

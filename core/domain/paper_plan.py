@@ -1,7 +1,9 @@
 """Pure Python ModelGenerationPlan domain contract."""
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypeAlias
+
+from typing_extensions import NotRequired, TypedDict  # noqa: UP035
 
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterBinding, MissingParameterPrompt
@@ -14,6 +16,164 @@ GuidanceStatus = Literal[
     "generation_failed",
     "no_document_basis",
 ]
+
+GuidanceBasis = Literal[
+    "document_extracted",
+    "document_derived",
+    "domain_default",
+    "engineering_choice",
+    "user_environment",
+    "user_decision",
+    "user_confirmation_required",
+    "document_claim_unverified",
+]
+GuidanceDetailKind = Literal[
+    "block_selection",
+    "subsystem_internal_structure",
+    "connection",
+    "parameter_value",
+    "configuration",
+    "verification",
+    "gap_notice",
+]
+GuidanceExecutionClosure = Literal["closed", "guided_choice", "guided_probe", "open"]
+GuidanceObligationKind = Literal[
+    "determine_parameter_value",
+    "select_component",
+    "configure_setting",
+    "connect_signal",
+]
+GuidanceTargetKind = Literal["parameter", "configuration", "block_choice", "connection"]
+GuidanceResolutionKind = Literal[
+    "fixed",
+    "range",
+    "enum_selection",
+    "derivation",
+    "conditional",
+    "guided_user_decision",
+    "environment_probe",
+]
+FixedGuidanceResolutionKind = Literal[
+    "numeric",
+    "block_ref",
+    "configuration_option",
+    "connection_mode",
+]
+
+
+class FixedNumericResolution(TypedDict):
+    kind: Literal["fixed"]
+    fixed_kind: Literal["numeric"]
+    value: int | float
+    unit: str
+
+
+class FixedBlockRefResolution(TypedDict):
+    kind: Literal["fixed"]
+    fixed_kind: Literal["block_ref"]
+    selected_id: str
+
+
+class FixedConfigurationOptionResolution(TypedDict):
+    kind: Literal["fixed"]
+    fixed_kind: Literal["configuration_option"]
+    value_token: str
+    display_label: str
+
+
+class FixedConnectionModeResolution(TypedDict):
+    kind: Literal["fixed"]
+    fixed_kind: Literal["connection_mode"]
+    value_token: str
+    display_label: str
+
+
+FixedGuidanceResolution: TypeAlias = (
+    FixedNumericResolution
+    | FixedBlockRefResolution
+    | FixedConfigurationOptionResolution
+    | FixedConnectionModeResolution
+)
+
+
+class RangeResolution(TypedDict):
+    kind: Literal["range"]
+    lower: NotRequired[int | float | str | None]
+    upper: NotRequired[int | float | str | None]
+    values: NotRequired[list[int | float | str] | None]
+    recommended_start: NotRequired[int | float | str | None]
+    selection_rule: NotRequired[str | None]
+
+
+class EnumSelectionResolution(TypedDict):
+    kind: Literal["enum_selection"]
+    selected: str
+
+
+class DerivationResolution(TypedDict):
+    kind: Literal["derivation"]
+    formula: NotRequired[str | None]
+    rule: NotRequired[str | None]
+    inputs: list[str]
+
+
+class ConditionalResolution(TypedDict):
+    kind: Literal["conditional"]
+    branches: list[dict[str, object]]
+    fallback: NotRequired[str | None]
+    exhaustive: NotRequired[bool]
+
+
+class UserDecisionOptionResolution(TypedDict):
+    option: str
+    consequence: str
+
+
+class GuidedUserDecisionResolution(TypedDict):
+    kind: Literal["guided_user_decision"]
+    decision_item: str
+    criteria: str
+    options: list[UserDecisionOptionResolution]
+
+
+class EnvironmentProbeActionResolution(TypedDict):
+    result: str
+    action: str
+
+
+class EnvironmentProbeResolution(TypedDict):
+    kind: Literal["environment_probe"]
+    probe_item: str
+    procedure: str
+    result_actions: list[EnvironmentProbeActionResolution]
+
+
+GuidanceResolution: TypeAlias = (
+    FixedGuidanceResolution
+    | RangeResolution
+    | EnumSelectionResolution
+    | DerivationResolution
+    | ConditionalResolution
+    | GuidedUserDecisionResolution
+    | EnvironmentProbeResolution
+)
+
+
+@dataclass(frozen=True)
+class GuidanceTarget:
+    """Public target identity for one guidance requirement."""
+
+    target_kind: GuidanceTargetKind
+    model_param: str | None = None
+    paper_param: str | None = None
+    owner_ref: str | None = None
+    setting_name: str | None = None
+    block_role_ref: str | None = None
+    from_block: str | None = None
+    from_port: str | None = None
+    to_block: str | None = None
+    to_port: str | None = None
+    signal_role: str | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +265,9 @@ class GuidanceAssessment:
         "outline_only",
     ]
     blocking_gap_ids: list[str]
+    pending_user_choice_count: int = 0
+    pending_environment_probe_count: int = 0
+    open_requirement_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -113,20 +276,8 @@ class GuidanceDetail:
 
     detail_id: str
     step_id: str
-    detail_kind: Literal[
-        "block_selection",
-        "subsystem_internal_structure",
-        "connection",
-        "parameter_value",
-        "configuration",
-        "verification",
-        "gap_notice",
-    ]
-    basis: Literal[
-        "document_extracted",
-        "engineering_convention",
-        "user_confirmation_required",
-    ]
+    detail_kind: GuidanceDetailKind
+    basis: GuidanceBasis
     actionability: Literal[
         "actionable",
         "notice_only",
@@ -136,6 +287,12 @@ class GuidanceDetail:
     evidence: list[PaperEvidenceEntry]
     convention_code: str | None
     confirmation_reason_code: str | None
+    target: GuidanceTarget | None = None
+    obligation_kind: GuidanceObligationKind | None = None
+    resolution: GuidanceResolution | None = None
+    execution_closure: GuidanceExecutionClosure = "open"
+    input_fact_refs: list[str] | None = None
+    punt_reason_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -154,16 +311,20 @@ class GuidanceGap:
     ]
     scope: Literal["plan", "step", "subsystem"]
     step_id: str | None
-    basis: Literal["engineering_convention", "user_confirmation_required"]
+    basis: Literal["user_confirmation_required"]
     severity: Literal["blocking", "warning"]
     display_text: str
+    target: GuidanceTarget | None = None
+    obligation_kind: GuidanceObligationKind | None = None
+    execution_closure: GuidanceExecutionClosure = "open"
+    failure_code: str | None = None
 
 
 @dataclass(frozen=True)
 class BuildGuidance:
     """Structured build guidance contract for later generation phases."""
 
-    version: Literal["v1"]
+    version: Literal["v1", "v2"]
     assessment: GuidanceAssessment
     details: list[GuidanceDetail]
     gaps: list[GuidanceGap]

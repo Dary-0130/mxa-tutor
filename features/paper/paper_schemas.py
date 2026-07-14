@@ -29,6 +29,7 @@ from core.domain.paper_plan import (
     GuidanceDetail,
     GuidanceGap,
     GuidanceStatus,
+    GuidanceTarget,
     ModelBuildStep,
     ModelGenerationPlan,
     ParameterMapping,
@@ -54,6 +55,15 @@ from core.domain.paper_tuning import (
     TuningSuggestion,
 )
 from features.paper.build_guidance_lifecycle import normalize_guidance_lifecycle
+from features.paper.guidance_resolution_schemas import (
+    FixedBlockRefResolutionModel,
+    FixedConfigurationOptionResolutionModel,
+    FixedConnectionModeResolutionModel,
+    FixedNumericResolutionModel,
+    FixedResolutionModel,
+    GuidanceResolutionModel,
+    resolution_to_domain,
+)
 
 
 class _StrictBaseModel(BaseModel):
@@ -389,6 +399,9 @@ class GuidanceAssessmentModel(_StrictBaseModel):
         "outline_only",
     ]
     blocking_gap_ids: list[str]
+    pending_user_choice_count: int = Field(default=0, ge=0)
+    pending_environment_probe_count: int = Field(default=0, ge=0)
+    open_requirement_count: int = Field(default=0, ge=0)
 
     def to_domain(self) -> GuidanceAssessment:
         return GuidanceAssessment(
@@ -396,6 +409,38 @@ class GuidanceAssessmentModel(_StrictBaseModel):
             environment_status=self.environment_status,
             overall_status=self.overall_status,
             blocking_gap_ids=self.blocking_gap_ids,
+            pending_user_choice_count=self.pending_user_choice_count,
+            pending_environment_probe_count=self.pending_environment_probe_count,
+            open_requirement_count=self.open_requirement_count,
+        )
+
+
+class GuidanceTargetModel(_StrictBaseModel):
+    target_kind: Literal["parameter", "configuration", "block_choice", "connection"]
+    model_param: str | None = Field(default=None, min_length=1)
+    paper_param: str | None = Field(default=None, min_length=1)
+    owner_ref: str | None = Field(default=None, min_length=1)
+    setting_name: str | None = Field(default=None, min_length=1)
+    block_role_ref: str | None = Field(default=None, min_length=1)
+    from_block: str | None = Field(default=None, min_length=1)
+    from_port: str | None = Field(default=None, min_length=1)
+    to_block: str | None = Field(default=None, min_length=1)
+    to_port: str | None = Field(default=None, min_length=1)
+    signal_role: str | None = Field(default=None, min_length=1)
+
+    def to_domain(self) -> GuidanceTarget:
+        return GuidanceTarget(
+            target_kind=self.target_kind,
+            model_param=self.model_param,
+            paper_param=self.paper_param,
+            owner_ref=self.owner_ref,
+            setting_name=self.setting_name,
+            block_role_ref=self.block_role_ref,
+            from_block=self.from_block,
+            from_port=self.from_port,
+            to_block=self.to_block,
+            to_port=self.to_port,
+            signal_role=self.signal_role,
         )
 
 
@@ -413,8 +458,13 @@ class GuidanceDetailModel(_StrictBaseModel):
     ]
     basis: Literal[
         "document_extracted",
-        "engineering_convention",
+        "document_derived",
+        "domain_default",
+        "engineering_choice",
+        "user_environment",
+        "user_decision",
         "user_confirmation_required",
+        "document_claim_unverified",
     ]
     actionability: Literal[
         "actionable",
@@ -425,6 +475,46 @@ class GuidanceDetailModel(_StrictBaseModel):
     evidence: list[PaperEvidenceEntryModel]
     convention_code: str | None = Field(min_length=1)
     confirmation_reason_code: str | None = Field(min_length=1)
+    target: GuidanceTargetModel | None = None
+    obligation_kind: (
+        Literal[
+            "determine_parameter_value",
+            "select_component",
+            "configure_setting",
+            "connect_signal",
+        ]
+        | None
+    ) = None
+    resolution: GuidanceResolutionModel | None = None
+    execution_closure: Literal["closed", "guided_choice", "guided_probe", "open"] = "open"
+    input_fact_refs: list[str] = Field(default_factory=list)
+    punt_reason_code: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_resolution_target_family(self) -> Self:
+        if self.resolution is None or self.target is None:
+            return self
+        target_kind = self.target.target_kind
+        resolution = (
+            self.resolution.root
+            if isinstance(self.resolution, FixedResolutionModel)
+            else self.resolution
+        )
+        if isinstance(resolution, FixedNumericResolutionModel):
+            if target_kind != "parameter":
+                raise ValueError("fixed.numeric resolution is parameter-only")
+        elif isinstance(resolution, FixedBlockRefResolutionModel):
+            if target_kind != "block_choice":
+                raise ValueError("fixed.block_ref resolution is block_choice-only")
+        elif isinstance(resolution, FixedConfigurationOptionResolutionModel):
+            if target_kind != "configuration":
+                raise ValueError("fixed.configuration_option resolution is configuration-only")
+        elif (
+            isinstance(resolution, FixedConnectionModeResolutionModel)
+            and target_kind != "connection"
+        ):
+            raise ValueError("fixed.connection_mode resolution is connection-only")
+        return self
 
     def to_domain(self) -> GuidanceDetail:
         return GuidanceDetail(
@@ -437,6 +527,12 @@ class GuidanceDetailModel(_StrictBaseModel):
             evidence=[entry.to_domain() for entry in self.evidence],
             convention_code=self.convention_code,
             confirmation_reason_code=self.confirmation_reason_code,
+            target=self.target.to_domain() if self.target is not None else None,
+            obligation_kind=self.obligation_kind,
+            resolution=resolution_to_domain(self.resolution),
+            execution_closure=self.execution_closure,
+            input_fact_refs=list(self.input_fact_refs),
+            punt_reason_code=self.punt_reason_code,
         )
 
 
@@ -453,9 +549,21 @@ class GuidanceGapModel(_StrictBaseModel):
     ]
     scope: Literal["plan", "step", "subsystem"]
     step_id: str | None = Field(min_length=1)
-    basis: Literal["engineering_convention", "user_confirmation_required"]
+    basis: Literal["user_confirmation_required"]
     severity: Literal["blocking", "warning"]
     display_text: str = Field(min_length=1)
+    target: GuidanceTargetModel | None = None
+    obligation_kind: (
+        Literal[
+            "determine_parameter_value",
+            "select_component",
+            "configure_setting",
+            "connect_signal",
+        ]
+        | None
+    ) = None
+    execution_closure: Literal["closed", "guided_choice", "guided_probe", "open"] = "open"
+    failure_code: str | None = Field(default=None, min_length=1)
 
     def to_domain(self) -> GuidanceGap:
         return GuidanceGap(
@@ -466,11 +574,15 @@ class GuidanceGapModel(_StrictBaseModel):
             basis=self.basis,
             severity=self.severity,
             display_text=self.display_text,
+            target=self.target.to_domain() if self.target is not None else None,
+            obligation_kind=self.obligation_kind,
+            execution_closure=self.execution_closure,
+            failure_code=self.failure_code,
         )
 
 
 class BuildGuidanceModel(_StrictBaseModel):
-    version: Literal["v1"]
+    version: Literal["v1", "v2"]
     assessment: GuidanceAssessmentModel
     details: list[GuidanceDetailModel]
     gaps: list[GuidanceGapModel]
@@ -564,13 +676,16 @@ class ModelGenerationPlanModel(_StrictBaseModel):
         if self.guidance_status == "generated":
             if self.build_guidance is None:
                 raise ValueError("generated guidance requires build_guidance")
+            if self.build_guidance.version != "v2":
+                raise ValueError("generated guidance requires v2 build_guidance")
             if not self.build_guidance.details:
                 raise ValueError("generated guidance requires details")
             if not any(
-                detail.basis == "document_extracted" and detail.evidence
+                detail.basis in {"document_extracted", "document_derived"} and detail.evidence
                 for detail in self.build_guidance.details
             ):
                 raise ValueError("generated guidance requires document detail evidence")
+            self._validate_generated_block_ref_choices()
             return self
         if (
             self.guidance_status
@@ -583,6 +698,24 @@ class ModelGenerationPlanModel(_StrictBaseModel):
         ):
             raise ValueError("guidance_status requires build_guidance null")
         return self
+
+    def _validate_generated_block_ref_choices(self) -> None:
+        if self.build_guidance is None or self.build_steps is None:
+            return
+        step_block_ids = {
+            step.step_id: {block_ref.block_ref_id for block_ref in step.block_refs}
+            for step in self.build_steps
+        }
+        for detail in self.build_guidance.details:
+            resolution = detail.resolution
+            if not isinstance(resolution, FixedBlockRefResolutionModel):
+                continue
+            candidates = step_block_ids.get(detail.step_id, set())
+            target_id = detail.target.block_role_ref if detail.target is not None else None
+            if resolution.selected_id not in candidates or (
+                target_id is not None and resolution.selected_id != target_id
+            ):
+                raise ValueError("fixed.block_ref selected_id is not allowed for target")
 
     def to_domain(self) -> ModelGenerationPlan:
         return normalize_guidance_lifecycle(

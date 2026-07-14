@@ -54,10 +54,13 @@ def validate_generated_guidance(guidance: BuildGuidance | None) -> None:
 
     if guidance is None:
         raise ValueError("generated_guidance_required")
+    if guidance.version != "v2":
+        raise ValueError("generated_guidance_version_required")
     if not guidance.details:
         raise ValueError("generated_guidance_details_required")
     if not any(
-        detail.basis == "document_extracted" and detail.evidence for detail in guidance.details
+        detail.basis in {"document_extracted", "document_derived"} and detail.evidence
+        for detail in guidance.details
     ):
         raise ValueError("generated_guidance_document_detail_required")
 

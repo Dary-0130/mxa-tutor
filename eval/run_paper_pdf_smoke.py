@@ -18,6 +18,7 @@ import subprocess
 import sys
 import uuid
 from collections import Counter
+from collections.abc import Iterable
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
 from datetime import UTC, datetime
@@ -64,13 +65,16 @@ from features.paper.build_guidance_observability import (
     guidance_failure_owner_bucket,
     validate_guidance_status_reason,
 )
+from features.paper.build_guidance_requirements import enumerate_guidance_requirements
 from features.paper.build_steps_dependency_audit import (
     DependencyAudit,
     audit_step_dependencies_from_payload,
     prompt_token_bucket,
 )
 from features.paper.paper_plan_helpers import (
+    BuildStepsDtoValidationError,
     BuildStepsEvidenceError,
+    BuildStepsJsonParseError,
     BuildStepsRedLineError,
     BuildStepsStructuredError,
     MissingBindingModel,
@@ -171,6 +175,9 @@ SUMMARY_COLUMNS = [
     "guidance_retry_count",
     "guidance_generator_exception",
     "guidance_validator_machine_codes",
+    "guidance_requirement_ref_missing_count",
+    "guidance_requirement_ref_unknown_count",
+    "guidance_requirement_enumerated_count",
     "guidance_attempt_record_count",
     "guidance_attempts",
     "guidance_terminal_termination_guard",
@@ -189,6 +196,11 @@ SUMMARY_COLUMNS = [
     "final_detail_total_count",
     "final_document_detail_count",
     "final_unverified_detail_count",
+    "final_detail_basis_counts",
+    "final_execution_closure_counts",
+    "pending_user_choice_count",
+    "pending_environment_probe_count",
+    "open_requirement_count",
     "generator_downgraded_unverified_count",
     "validator_dropped_unverified_count",
     "final_surviving_unverified_count",
@@ -226,6 +238,17 @@ SUMMARY_COLUMNS = [
 ]
 VERSION_FINGERPRINT_UNAVAILABLE_NOTE = "供应商未提供版本标识"
 NO_LLM_CALLS_NOTE = "本轮未发生 LLM 调用"
+GUIDANCE_BASIS_KEYS = (
+    "document_extracted",
+    "document_derived",
+    "domain_default",
+    "engineering_choice",
+    "user_environment",
+    "user_decision",
+    "user_confirmation_required",
+    "document_claim_unverified",
+)
+GUIDANCE_CLOSURE_KEYS = ("closed", "guided_choice", "guided_probe", "open")
 
 _CURRENT_LLM_ROLE: ContextVar[str | None] = ContextVar("paper_pdf_smoke_llm_role", default=None)
 _CURRENT_LLM_ARM: ContextVar[str | None] = ContextVar("paper_pdf_smoke_llm_arm", default=None)
@@ -287,7 +310,7 @@ class LLMCallRecord:
 class BuildStepsTelemetry:
     spec_validation_errors: list[dict[str, object]] = field(default_factory=list)
     fallback_reason_code: str | None = None
-    fallback_exception_type: str | None = None
+    fallback_exception_code: str | None = None
     dto_invalid_errors: list[dict[str, str]] = field(default_factory=list)
     dependency_audit: DependencyAudit = field(
         default_factory=lambda: DependencyAudit.unavailable("draft_parse")
@@ -306,6 +329,7 @@ class BuildStepsTelemetry:
     validator_dropped_unverified_count: int | None = None
     all_document_details_lost: bool | None = None
     guidance_artifact_snapshots: list[GuidanceArtifactSnapshot] = field(default_factory=list)
+    guidance_drafts: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -370,6 +394,9 @@ class SmokeSummaryRow:
     guidance_retry_count: int | None
     guidance_generator_exception: str | None
     guidance_validator_machine_codes: list[str]
+    guidance_requirement_ref_missing_count: int | None
+    guidance_requirement_ref_unknown_count: int | None
+    guidance_requirement_enumerated_count: int | None
     guidance_attempt_record_count: int
     guidance_attempts: list[dict[str, object]]
     guidance_terminal_termination_guard: str | None
@@ -388,6 +415,11 @@ class SmokeSummaryRow:
     final_detail_total_count: int | None
     final_document_detail_count: int | None
     final_unverified_detail_count: int | None
+    final_detail_basis_counts: dict[str, int] | None
+    final_execution_closure_counts: dict[str, int] | None
+    pending_user_choice_count: int | None
+    pending_environment_probe_count: int | None
+    open_requirement_count: int | None
     generator_downgraded_unverified_count: int | None
     validator_dropped_unverified_count: int | None
     final_surviving_unverified_count: int | None
@@ -585,6 +617,7 @@ class RecordingBuildGuidanceGenerator(BuildGuidanceGenerator):
         self._smoke_telemetry.generator_downgraded_unverified_count = None
         self._smoke_telemetry.validator_dropped_unverified_count = None
         self._smoke_telemetry.all_document_details_lost = None
+        self._smoke_telemetry.guidance_drafts = []
         result = await super().generate(spec, plan)
         self._sync_guidance_telemetry()
         if (
@@ -634,7 +667,15 @@ class RecordingBuildGuidanceGenerator(BuildGuidanceGenerator):
     ) -> Any:
         token = _CURRENT_LLM_ROLE.set(GUIDANCE_ROLE_NAME)
         try:
-            return await super()._call_llm_json(messages, retry_context)
+            result = await super()._call_llm_json(messages, retry_context)
+            self._smoke_telemetry.guidance_drafts.append(
+                _guidance_draft_capture_payload(
+                    result.payload,
+                    attempt_index=len(self._smoke_telemetry.guidance_drafts) + 1,
+                    arm_label=_CURRENT_LLM_ARM.get(),
+                )
+            )
+            return result
         finally:
             _CURRENT_LLM_ROLE.reset(token)
 
@@ -857,7 +898,7 @@ class RecordingPaperPlanService(PaperPlanService):
         payload = self._paired_arm_payload(arm_label)
         build_steps: list[ModelBuildStep] | None
         raw_reason_code: str | None = None
-        exception_type: str | None = None
+        exception_code: str | None = None
         try:
             if isinstance(arm_result, BuildStepsStructuredError):
                 raise arm_result
@@ -875,10 +916,10 @@ class RecordingPaperPlanService(PaperPlanService):
             full_result_code: BuildStepsResultCode = "结构化成功"
         except BuildStepsStructuredError as exc:
             raw_reason_code = exc.reason_code
-            exception_type = type(exc).__name__
+            exception_code = _build_steps_exception_code(exc)
             full_result_code = _classify_build_steps_failure(
                 raw_reason_code,
-                exception_type,
+                exception_code,
             )
             if is_downstream_arm:
                 self._log_build_steps_fallback(exc)
@@ -917,7 +958,7 @@ class RecordingPaperPlanService(PaperPlanService):
                 "full_build_steps_success": build_steps is not None,
                 "full_build_steps_result_code": full_result_code,
                 "full_build_steps_raw_reason_code": raw_reason_code,
-                "full_build_steps_exception_type": exception_type,
+                "full_build_steps_exception_code": exception_code,
                 "full_guidance_reached": bool(guided_plan.build_steps),
                 "full_guidance_status": guided_plan.guidance_status,
                 "full_guidance_failure_reason": self._smoke_telemetry.guidance_failure_reason,
@@ -1103,7 +1144,7 @@ class RecordingPaperPlanService(PaperPlanService):
 
     def _log_build_steps_fallback(self, exc: BuildStepsStructuredError) -> None:
         self._smoke_telemetry.fallback_reason_code = exc.reason_code
-        self._smoke_telemetry.fallback_exception_type = type(exc).__name__
+        self._smoke_telemetry.fallback_exception_code = _build_steps_exception_code(exc)
         self._smoke_telemetry.dependency_audit = self.build_steps_dependency_audit()
         super()._log_build_steps_fallback(exc)
 
@@ -1269,6 +1310,12 @@ async def _run_one_pdf_round(
         row=row,
         snapshots=snapshots,
     )
+    write_guidance_draft_artifacts(
+        runtime.output_dir,
+        paper=paper,
+        round_index=round_index,
+        drafts=telemetry.guidance_drafts,
+    )
     return row
 
 
@@ -1355,7 +1402,9 @@ def build_summary_row(
         ),
         build_steps_total_tokens=build_steps_call.total_tokens if build_steps_call else None,
         build_steps_max_tokens=build_steps_call.max_tokens if build_steps_call else None,
-        build_steps_response_model=build_steps_call.response_model if build_steps_call else None,
+        build_steps_response_model=(
+            _model_fingerprint(build_steps_call.response_model) if build_steps_call else None
+        ),
         build_steps_system_fingerprint=(
             build_steps_call.system_fingerprint if build_steps_call else None
         ),
@@ -1382,6 +1431,19 @@ def build_summary_row(
         guidance_retry_count=telemetry.guidance_retry_count,
         guidance_generator_exception=telemetry.guidance_generator_exception,
         guidance_validator_machine_codes=list(telemetry.guidance_validator_machine_codes),
+        guidance_requirement_ref_missing_count=_guidance_resolver_code_count(
+            telemetry.guidance_attempts,
+            "requirement_ref_missing",
+            guidance_invoked=guidance_invoked,
+        ),
+        guidance_requirement_ref_unknown_count=_guidance_resolver_code_count(
+            telemetry.guidance_attempts,
+            "requirement_ref_unknown",
+            guidance_invoked=guidance_invoked,
+        ),
+        guidance_requirement_enumerated_count=output_counts[
+            "guidance_requirement_enumerated_count"
+        ],
         guidance_attempt_record_count=len(telemetry.guidance_attempts),
         guidance_attempts=list(telemetry.guidance_attempts),
         guidance_terminal_termination_guard=telemetry.guidance_terminal_termination_guard,
@@ -1406,6 +1468,11 @@ def build_summary_row(
         final_detail_total_count=output_counts["final_detail_total_count"],
         final_document_detail_count=output_counts["final_document_detail_count"],
         final_unverified_detail_count=final_unverified_detail_count,
+        final_detail_basis_counts=output_counts["final_detail_basis_counts"],
+        final_execution_closure_counts=output_counts["final_execution_closure_counts"],
+        pending_user_choice_count=output_counts["pending_user_choice_count"],
+        pending_environment_probe_count=output_counts["pending_environment_probe_count"],
+        open_requirement_count=output_counts["open_requirement_count"],
         generator_downgraded_unverified_count=(
             telemetry.generator_downgraded_unverified_count if guidance_delivered else None
         ),
@@ -1484,6 +1551,64 @@ def write_guidance_artifacts(
         )
         written.extend([json_path, text_path])
     return written
+
+
+def write_guidance_draft_artifacts(
+    output_dir: Path,
+    *,
+    paper: SmokePaper,
+    round_index: int,
+    drafts: list[dict[str, Any]],
+) -> list[Path]:
+    """Write eval-only sanitized guidance draft payloads for direct inspection."""
+
+    if not drafts:
+        return []
+    draft_dir = output_dir / "guidance_drafts"
+    draft_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for index, draft in enumerate(drafts, start=1):
+        stem = f"{paper.slug}__round_{round_index:02d}__attempt_{index:02d}"
+        path = draft_dir / f"{stem}.guidance_draft.json"
+        path.write_text(
+            json.dumps(draft, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        written.append(path)
+    return written
+
+
+def _guidance_draft_capture_payload(
+    payload: dict[str, Any],
+    *,
+    attempt_index: int,
+    arm_label: str | None,
+) -> dict[str, Any]:
+    details: list[dict[str, Any]] = []
+    raw_details = payload.get("details")
+    if isinstance(raw_details, list):
+        for item in raw_details:
+            if not isinstance(item, dict):
+                continue
+            details.append(
+                {
+                    "step_id": item.get("step_id"),
+                    "requirement_ref": item.get("requirement_ref"),
+                    "basis": item.get("basis"),
+                    "claim_text": item.get("claim_text"),
+                    "supporting_evidence_refs": item.get("supporting_evidence_refs"),
+                    "target": item.get("target"),
+                    "confirmation_reason_code": item.get("confirmation_reason_code"),
+                    "direction_hint": item.get("direction_hint"),
+                    "resolution": item.get("resolution"),
+                    "punt_reason_code": item.get("punt_reason_code"),
+                }
+            )
+    return {
+        "attempt_index": attempt_index,
+        "arm_label": arm_label,
+        "details": details,
+    }
 
 
 def _guidance_artifact_payload(
@@ -1622,6 +1747,22 @@ def _artifact_count(
     return None
 
 
+def _guidance_resolver_code_count(
+    attempts: list[dict[str, object]],
+    code: str,
+    *,
+    guidance_invoked: bool,
+) -> int | None:
+    if not guidance_invoked:
+        return None
+    count = 0
+    for attempt in attempts:
+        codes = attempt.get("resolver_event_codes")
+        if isinstance(codes, list):
+            count += sum(1 for item in codes if item == code)
+    return count
+
+
 def _render_step_parameters(step: ModelBuildStep) -> str:
     if not step.parameter_refs:
         return "无"
@@ -1631,7 +1772,7 @@ def _render_step_parameters(step: ModelBuildStep) -> str:
 
 
 def _render_detail_source(detail: Any) -> str:
-    if (
+    if detail.basis == "document_claim_unverified" or (
         detail.basis == "user_confirmation_required"
         and detail.confirmation_reason_code == "document_evidence_unverified"
     ):
@@ -1684,34 +1825,62 @@ def classify_build_steps_result(
         return "结构化成功"
     return _classify_build_steps_failure(
         telemetry.fallback_reason_code,
-        telemetry.fallback_exception_type,
+        telemetry.fallback_exception_code,
     )
 
 
 def _guidance_output_counts(plan: ModelGenerationPlan | None) -> dict[str, Any]:
     build_steps = plan.build_steps if plan is not None else None
     critical_step_count = len(_critical_steps(build_steps)) if build_steps is not None else None
+    requirement_count = (
+        len(enumerate_guidance_requirements(plan.paper_spec_id, build_steps))
+        if plan is not None and build_steps
+        else None
+    )
     guidance = plan.build_guidance if plan is not None else None
     if guidance is None:
         return {
             "has_guidance": False,
             "critical_step_count": critical_step_count,
+            "guidance_requirement_enumerated_count": requirement_count,
             "blocking_gap_count": None,
             "final_detail_total_count": None,
             "final_document_detail_count": None,
             "final_unverified_detail_count": None,
+            "final_detail_basis_counts": None,
+            "final_execution_closure_counts": None,
+            "pending_user_choice_count": None,
+            "pending_environment_probe_count": None,
+            "open_requirement_count": None,
         }
     final_unverified = _final_unverified_detail_count(plan)
     return {
         "has_guidance": True,
         "critical_step_count": critical_step_count,
+        "guidance_requirement_enumerated_count": requirement_count,
         "blocking_gap_count": len(guidance.assessment.blocking_gap_ids),
         "final_detail_total_count": len(guidance.details),
         "final_document_detail_count": sum(
             1 for detail in guidance.details if detail.basis == "document_extracted"
         ),
         "final_unverified_detail_count": final_unverified,
+        "final_detail_basis_counts": _count_values(
+            (detail.basis for detail in guidance.details),
+            GUIDANCE_BASIS_KEYS,
+        ),
+        "final_execution_closure_counts": _count_values(
+            (detail.execution_closure for detail in guidance.details),
+            GUIDANCE_CLOSURE_KEYS,
+        ),
+        "pending_user_choice_count": guidance.assessment.pending_user_choice_count,
+        "pending_environment_probe_count": guidance.assessment.pending_environment_probe_count,
+        "open_requirement_count": guidance.assessment.open_requirement_count,
     }
+
+
+def _count_values(values: Iterable[object], keys: tuple[str, ...]) -> dict[str, int]:
+    counts = Counter(value for value in values if isinstance(value, str))
+    return {key: counts.get(key, 0) for key in keys}
 
 
 def _final_unverified_detail_count(plan: ModelGenerationPlan) -> int:
@@ -1720,8 +1889,11 @@ def _final_unverified_detail_count(plan: ModelGenerationPlan) -> int:
     return sum(
         1
         for detail in plan.build_guidance.details
-        if detail.basis == "user_confirmation_required"
-        and detail.confirmation_reason_code == "document_evidence_unverified"
+        if detail.basis == "document_claim_unverified"
+        or (
+            detail.basis == "user_confirmation_required"
+            and detail.confirmation_reason_code == "document_evidence_unverified"
+        )
     )
 
 
@@ -1750,7 +1922,7 @@ def _terminal_observed_stage(
 
 def _guidance_effective_config(call: LLMCallRecord | None) -> dict[str, object]:
     return {
-        "model": call.request_model if call else None,
+        "model_fingerprint": _model_fingerprint(call.request_model) if call else None,
         "max_tokens": call.max_tokens if call else None,
         "timeout": call.timeout if call else None,
         "json_mode": call.json_mode if call else None,
@@ -1766,6 +1938,13 @@ def _guidance_effective_config(call: LLMCallRecord | None) -> dict[str, object]:
         "summary_schema_version": SUMMARY_SCHEMA_VERSION,
         "git_revision": _git_revision(),
     }
+
+
+def _model_fingerprint(model: str | None) -> str | None:
+    if not model:
+        return None
+    digest = hashlib.sha256(f"llm-model:{model}".encode()).hexdigest()[:12]
+    return f"model_fp_{digest}"
 
 
 def _guidance_prompt_template_version() -> str:
@@ -1821,7 +2000,7 @@ def validate_guidance_batch_observability(
 
 def _classify_build_steps_failure(
     reason: str | None,
-    exc_type: str | None,
+    exception_code: str | None,
 ) -> BuildStepsResultCode:
     if reason in BUILD_STEPS_BRIDGE_REASON_CODES:
         return cast(BuildStepsResultCode, reason)
@@ -1833,23 +2012,37 @@ def _classify_build_steps_failure(
         return "br_no_match"
     if reason == "coverage_missing":
         return "coverage_missing"
-    if exc_type == BuildStepsRedLineError.__name__ or reason in {
+    if exception_code == "build_steps_redline" or reason in {
         "parameter_value_leak",
         "tuning_value_leak",
     }:
         return "redline"
-    if exc_type == BuildStepsEvidenceError.__name__ or (
-        reason is not None and "evidence" in reason
-    ):
+    if exception_code == "build_steps_evidence" or (reason is not None and "evidence" in reason):
         return "evidence_invalid"
     return "其它"
+
+
+def _build_steps_exception_code(exc: BaseException) -> str:
+    if isinstance(exc, BuildStepsRedLineError):
+        return "build_steps_redline"
+    if isinstance(exc, BuildStepsEvidenceError):
+        return "build_steps_evidence"
+    if isinstance(exc, BuildStepsDtoValidationError):
+        return "build_steps_dto"
+    if isinstance(exc, BuildStepsJsonParseError):
+        return "build_steps_json_parse"
+    if isinstance(exc, BuildStepsStructuredError):
+        return "build_steps_structured"
+    return "unexpected_internal_error"
 
 
 def _paired_arm_result_code(exc: BaseException) -> str:
     reason_code = getattr(exc, "reason_code", None)
     if isinstance(reason_code, str) and reason_code:
         return reason_code
-    return type(exc).__name__
+    if isinstance(exc, BuildStepsStructuredError):
+        return _build_steps_exception_code(exc)
+    return guidance_exception_code(exc)
 
 
 def _dependency_audit_for_summary(
@@ -1911,6 +2104,8 @@ def write_summary_artifacts(output_dir: Path, rows: list[SmokeSummaryRow]) -> No
                 "guidance_validator_machine_codes",
                 "guidance_attempts",
                 "guidance_effective_config",
+                "final_detail_basis_counts",
+                "final_execution_closure_counts",
                 "violations_by_code",
                 "violation_edges",
                 "same_number_probes",
@@ -1971,7 +2166,7 @@ def _paired_build_steps_arms_for_summary(
                 "completion_tokens": call.completion_tokens if call else None,
                 "total_tokens": call.total_tokens if call else None,
                 "max_tokens": call.max_tokens if call else None,
-                "response_model": call.response_model if call else None,
+                "response_model": _model_fingerprint(call.response_model) if call else None,
                 "system_fingerprint": call.system_fingerprint if call else None,
             }
         )
@@ -2003,7 +2198,9 @@ def _llm_model_summary(
     no_calls_note: str,
 ) -> dict[str, Any]:
     model_counts: Counter[str] = Counter(
-        call.response_model for call in calls if call.response_model
+        fingerprint
+        for call in calls
+        if (fingerprint := _model_fingerprint(call.response_model)) is not None
     )
     fingerprint_counts: Counter[str] = Counter(
         call.system_fingerprint for call in calls if call.system_fingerprint
@@ -2089,8 +2286,8 @@ async def async_main(argv: list[str] | None = None) -> int:
         paired_build_steps=args.paired_build_steps,
         paired_build_steps_full=args.paired_build_steps_full,
     )
-    print(f"summary_json={runtime.output_dir / 'paper_pdf_smoke.summary.json'}")
-    print(f"summary_csv={runtime.output_dir / 'paper_pdf_smoke.summary.csv'}")
+    print(f"summary_json={_display_path(runtime.output_dir / 'paper_pdf_smoke.summary.json')}")
+    print(f"summary_csv={_display_path(runtime.output_dir / 'paper_pdf_smoke.summary.csv')}")
     print(f"rows={len(rows)}")
     return 0
 
@@ -2129,6 +2326,15 @@ def _prepare_runtime(output_dir: Path | None) -> SmokeRuntime:
         upload_dir=runtime_dir / "uploads",
         actual_dir=actual_dir,
     )
+
+
+def _display_path(path: Path) -> str:
+    resolved = path.resolve()
+    repo_root = Path(__file__).resolve().parents[1]
+    try:
+        return str(resolved.relative_to(repo_root)).replace("\\", "/")
+    except ValueError:
+        return resolved.name
 
 
 async def _init_temp_db(db_path: Path) -> None:

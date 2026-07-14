@@ -361,20 +361,18 @@ class PaperPlanService:
                 last_json_error = exc
                 logger.error(
                     "paper_plan_json_decode_failed role=%s attempt=%s reason_code=%s "
-                    "exc_type=%s finish_reason=%s",
+                    "finish_reason=%s",
                     role_name,
                     attempt,
                     "invalid_json",
-                    type(exc).__name__,
                     response.finish_reason,
                 )
         else:
             assert last_json_error is not None
             logger.error(
-                "paper_plan_json_decode_exhausted role=%s reason_code=%s exc_type=%s",
+                "paper_plan_json_decode_exhausted role=%s reason_code=%s",
                 role_name,
                 "invalid_json",
-                type(last_json_error).__name__,
             )
             if role_name in BUILD_STEP_ROLE_NAMES:
                 raise BuildStepsJsonParseError("json_parse_failed") from None
@@ -607,10 +605,9 @@ class PaperPlanService:
             self._record_build_steps_dto_validation_errors(exc, role_name=role_name)
             reason_code = _build_steps_final_validation_reason(exc)
             logger.error(
-                "paper_plan_build_steps_dto_failed role=%s reason_code=%s exc_type=%s",
+                "paper_plan_build_steps_dto_failed role=%s reason_code=%s",
                 role_name,
                 reason_code,
-                type(exc).__name__,
             )
             raise BuildStepsDtoValidationError(reason_code) from None
         return model.to_drafts()
@@ -684,10 +681,9 @@ class PaperPlanService:
     def _raise_validation_error(self, role_name: str, exc: ValidationError) -> NoReturn:
         loc = _validation_loc(exc)
         logger.error(
-            "paper_plan_validation_failed role=%s reason_code=%s exc_type=%s schema_subtype=%s",
+            "paper_plan_validation_failed role=%s reason_code=%s schema_subtype=%s",
             role_name,
             "schema_validation",
-            type(exc).__name__,
             _schema_subtype("schema_validation", loc),
         )
         raise PaperPlanGenerationError(
@@ -931,16 +927,14 @@ class PaperPlanService:
         audit = self.build_steps_dependency_audit()
         if build_steps_dependency_audit_enabled():
             logger.warning(
-                "paper_plan_build_steps_fallback reason_code=%s exc_type=%s " "dependency_audit=%s",
+                "paper_plan_build_steps_fallback reason_code=%s dependency_audit=%s",
                 exc.reason_code,
-                type(exc).__name__,
                 json.dumps(audit.to_dict(), sort_keys=True, separators=(",", ":")),
             )
             return
         logger.warning(
-            "paper_plan_build_steps_fallback reason_code=%s exc_type=%s",
+            "paper_plan_build_steps_fallback reason_code=%s",
             exc.reason_code,
-            type(exc).__name__,
         )
 
     def build_steps_dependency_audit(self) -> DependencyAudit:

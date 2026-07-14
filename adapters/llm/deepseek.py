@@ -131,9 +131,8 @@ class DeepSeekTextProvider(TextProvider):
                 latency_ms = int((time.monotonic() - start) * 1000)
                 response = _to_llm_response(completion, latency_ms)
                 logger.info(
-                    "LLM call: model={} tokens_in={} tokens_out={} latency_ms={} "
+                    "LLM call: tokens_in={} tokens_out={} latency_ms={} "
                     "finish_reason={} system_fingerprint={}",
-                    response.model,
                     response.prompt_tokens,
                     response.completion_tokens,
                     response.latency_ms,
@@ -149,11 +148,11 @@ class DeepSeekTextProvider(TextProvider):
 
                 backoff = DEFAULT_RETRY_BACKOFFS[min(attempt, len(DEFAULT_RETRY_BACKOFFS) - 1)]
                 logger.warning(
-                    "LLM call failed (attempt {}/{}), retrying in {}s: {}",
+                    "LLM call failed (attempt {}/{}), retrying in {}s: exception_code={}",
                     attempt + 1,
                     attempts,
                     backoff,
-                    type(translated).__name__,
+                    _llm_error_code(translated),
                 )
                 time.sleep(backoff)
 
@@ -164,6 +163,16 @@ class DeepSeekTextProvider(TextProvider):
 def _is_retriable(error: LLMError) -> bool:
     """Return whether a translated LLM error should be retried."""
     return isinstance(error, LLMRateLimitError | LLMServerError | LLMTimeoutError)
+
+
+def _llm_error_code(error: LLMError) -> str:
+    if isinstance(error, LLMRateLimitError):
+        return "llm_rate_limited"
+    if isinstance(error, LLMTimeoutError):
+        return "llm_timeout"
+    if isinstance(error, LLMServerError):
+        return "llm_server_error"
+    return "llm_error"
 
 
 def _to_llm_response(completion: Any, latency_ms: int) -> LLMResponse:
