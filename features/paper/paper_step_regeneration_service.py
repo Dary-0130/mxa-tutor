@@ -329,7 +329,6 @@ def _has_regeneration_work(
     return bool(
         corrections
         or record.plan.build_steps is None
-        or record.plan.m_script_skeleton is None
         or guidance_status_requires_regeneration(record.plan.guidance_status)
     )
 

@@ -7,12 +7,18 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Awaitable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Annotated, Any, Literal, NoReturn, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
-from core.domain.exceptions import PaperPlanGenerationError
+from core.domain.exceptions import (
+    LLMError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMTimeoutError,
+    PaperPlanGenerationError,
+)
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_parameter_conflicts import (
@@ -104,8 +110,27 @@ PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS = 2
 RETRYABLE_PLAN_LEAF_NAMES = frozenset({PLAN_COMPOSER_ROLE_NAME, MISSING_DETECTOR_ROLE_NAME})
 EQUATION_REASON_CODES = frozenset({"equation_locator_invalid", "equation_id_outside_whitelist"})
 CONTRACT_MISMATCH_REPEAT_COUNT = 3
+MSCRIPT_DRAFT_MAX_ATTEMPTS = 2
 _UNSET = object()
 _MISSING = object()
+
+MScriptDraftOutcomeKind = Literal["generated", "returned_null", "degraded"]
+MScriptDegradationCode = Literal[
+    "timeout",
+    "transient",
+    "truncated",
+    "unparseable",
+    "schema-invalid",
+    "conflict-guard",
+    "internal-error",
+]
+
+
+@dataclass(frozen=True)
+class MScriptDraftOutcome:
+    value: str | None
+    outcome: MScriptDraftOutcomeKind
+    degradation_code: MScriptDegradationCode | None = None
 
 
 class PaperPlanService:
@@ -132,6 +157,7 @@ class PaperPlanService:
         self._max_tokens = max_tokens
         self._last_llm_prompt_tokens_by_role: dict[str, int] = {}
         self._last_build_steps_dependency_audit: DependencyAudit | None = None
+        self._last_mscript_draft_outcome: MScriptDraftOutcome | None = None
 
     async def generate(
         self,
@@ -164,7 +190,7 @@ class PaperPlanService:
         remaining_structured_retries = PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS
         retried_leaves: set[str] = set()
         plan_composer_output: ModelGenerationPlan | None = None
-        mscript: str | None = None
+        mscript_outcome: MScriptDraftOutcome | None = None
         mscript_ready = False
 
         while plan_composer_output is None:
@@ -173,22 +199,28 @@ class PaperPlanService:
                     self._llm_plan_compose(spec, plan_id, paper_spec_id),
                     PLAN_COMPOSER_ROLE_NAME,
                 )
-                mscript_result: str | BaseException | None = mscript
+                mscript_result: MScriptDraftOutcome | BaseException | None = mscript_outcome
             else:
                 plan_result, mscript_result = await asyncio.gather(
                     self._capture_plan_leaf(
                         self._llm_plan_compose(spec, plan_id, paper_spec_id),
                         PLAN_COMPOSER_ROLE_NAME,
                     ),
-                    self._llm_mscript_draft(spec),
+                    self._llm_mscript_draft_outcome(spec),
                     return_exceptions=True,
                 )
-                if not isinstance(mscript_result, BaseException):
-                    mscript = mscript_result
-                    mscript_ready = True
 
             if isinstance(mscript_result, BaseException):
                 raise mscript_result
+            if mscript_result is None:
+                raise PaperPlanGenerationError(
+                    "role=mscript_drafter: missing_outcome",
+                    reason_code="mscript_outcome_missing",
+                    leaf="mscript_drafter",
+                )
+            mscript_outcome = cast(MScriptDraftOutcome, mscript_result)
+            self._last_mscript_draft_outcome = mscript_outcome
+            mscript_ready = True
             if isinstance(plan_result, BaseException):
                 if self._should_retry_plan_leaf(
                     plan_result,
@@ -207,6 +239,8 @@ class PaperPlanService:
                 raise plan_result
             plan_composer_output = cast(ModelGenerationPlan, plan_result)
             self._record_plan_rescue_if_needed(PLAN_COMPOSER_ROLE_NAME, retried_leaves)
+
+        assert mscript_outcome is not None
 
         sentinel_mappings = self._sentinel_mappings(plan_composer_output.parameter_mapping)
         build_steps_result: object = _UNSET
@@ -279,7 +313,7 @@ class PaperPlanService:
         assembled_plan, missing_bindings = self._plan_assembler.merge(
             plan_composer_output=plan_composer_output,
             subsystem_steps=subsystem_steps,
-            mscript=mscript,
+            mscript=mscript_outcome.value,
             missing_prompts=missing_prompts,
             paper_id=paper_id,
             build_steps=build_steps,
@@ -311,6 +345,77 @@ class PaperPlanService:
         """Regenerate only build guidance for an already assembled plan."""
 
         return await self._generate_build_guidance(spec, plan)
+
+    def last_mscript_draft_outcome(self) -> MScriptDraftOutcome | None:
+        return self._last_mscript_draft_outcome
+
+    async def _llm_mscript_draft_outcome(self, spec: PaperSpec) -> MScriptDraftOutcome:
+        for attempt in range(1, MSCRIPT_DRAFT_MAX_ATTEMPTS + 1):
+            try:
+                mscript = await self._llm_mscript_draft(spec)
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                raise
+            except (LLMTimeoutError, LLMRateLimitError, LLMServerError) as exc:
+                code = _mscript_degradation_code(exc)
+                if attempt < MSCRIPT_DRAFT_MAX_ATTEMPTS:
+                    self._safe_log_mscript_retry(code, attempt)
+                    continue
+                outcome = MScriptDraftOutcome(None, "degraded", code)
+                self._safe_log_mscript_outcome(outcome, attempt)
+                return outcome
+            except (LLMError, PaperPlanGenerationError) as exc:
+                code = _mscript_degradation_code(exc)
+                outcome = MScriptDraftOutcome(None, "degraded", code)
+                self._safe_log_mscript_outcome(outcome, attempt)
+                return outcome
+            except Exception as exc:
+                code = _mscript_degradation_code(exc)
+                outcome = MScriptDraftOutcome(None, "degraded", code)
+                self._safe_log_mscript_outcome(outcome, attempt)
+                return outcome
+
+            outcome = MScriptDraftOutcome(
+                mscript,
+                "generated" if mscript is not None else "returned_null",
+            )
+            self._safe_log_mscript_outcome(outcome, attempt)
+            return outcome
+
+        outcome = MScriptDraftOutcome(None, "degraded", "internal-error")
+        self._safe_log_mscript_outcome(outcome, MSCRIPT_DRAFT_MAX_ATTEMPTS)
+        return outcome
+
+    def _safe_log_mscript_retry(
+        self,
+        code: MScriptDegradationCode,
+        attempt: int,
+    ) -> None:
+        try:
+            logger.info(
+                "paper_plan_mscript_retry role=%s degradation_code=%s attempt=%s",
+                "mscript_drafter",
+                code,
+                attempt,
+            )
+        except Exception:
+            return
+
+    def _safe_log_mscript_outcome(
+        self,
+        outcome: MScriptDraftOutcome,
+        attempt_count: int,
+    ) -> None:
+        try:
+            logger.info(
+                "paper_plan_mscript_outcome role=%s outcome=%s degradation_code=%s "
+                "attempt_count=%s",
+                "mscript_drafter",
+                outcome.outcome,
+                outcome.degradation_code,
+                attempt_count,
+            )
+        except Exception:
+            return
 
     async def _call_llm_json(
         self,
@@ -1120,6 +1225,25 @@ class _BuildStepsOutputModel(BaseModel):
 
     def to_drafts(self) -> list[ModelBuildStepDraft]:
         return [step.to_draft() for step in self.build_steps]
+
+
+def _mscript_degradation_code(exc: Exception) -> MScriptDegradationCode:
+    if isinstance(exc, LLMTimeoutError):
+        return "timeout"
+    if isinstance(exc, LLMError):
+        return "transient"
+    if isinstance(exc, PaperPlanGenerationError):
+        if exc.reason_code == "parameter_conflict_mscript":
+            return "conflict-guard"
+        if exc.reason_code == "invalid_json":
+            return "truncated" if exc.finish_reason == "length" else "unparseable"
+        if exc.reason_code in {
+            "schema_validation",
+            "m_script_skeleton_missing",
+            "m_script_skeleton_invalid",
+        }:
+            return "schema-invalid"
+    return "internal-error"
 
 
 def _resolve_build_steps_draft_evidence_payload(

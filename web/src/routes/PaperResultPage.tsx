@@ -84,11 +84,10 @@ export function PaperResultPage() {
   );
   const includeEquations = renderableEquations.length > 0;
   const structuredSteps =
-    Array.isArray(data.plan.build_steps) && data.plan.build_steps.length > 0;
-  const hasRegenerationWork =
-    !structuredSteps ||
-    data.plan.m_script_skeleton === null ||
-    data.plan.m_script_skeleton === undefined;
+    Array.isArray(data.plan.build_steps) && data.plan.build_steps.length > 0
+      ? data.plan.build_steps
+      : null;
+  const hasRegenerationWork = structuredSteps == null;
 
   return (
     <main className="paper-page">
