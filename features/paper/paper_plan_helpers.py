@@ -119,6 +119,18 @@ class BuildStepUserEvidenceSourceRef:
     selection_basis: str
 
 
+@dataclass(frozen=True)
+class BuildStepsGateEvent:
+    """Sanitized build_steps gate event for structured logging and tests."""
+
+    stage: str
+    reason_code: str
+    item_path: str
+    data_kind: str
+    action: str
+    claimed_source_kind: str | None = None
+
+
 class EvidenceTagger:
     """Validate and create evidence entries without inventing locators."""
 
@@ -485,6 +497,13 @@ def _user_evidence_selection_basis(ref: UserEvidenceRef) -> str:
 class PlanAssembler:
     """Merge LLM role outputs and produce private missing bindings."""
 
+    def __init__(self) -> None:
+        self._last_gate_events: list[BuildStepsGateEvent] = []
+
+    @property
+    def last_gate_events(self) -> list[BuildStepsGateEvent]:
+        return list(self._last_gate_events)
+
     def merge(
         self,
         plan_composer_output: ModelGenerationPlan,
@@ -516,25 +535,33 @@ class PlanAssembler:
     ) -> list[ModelBuildStep]:
         """Validate draft build steps and derive display_text from safe fields."""
 
+        self._last_gate_events = []
         if not draft_steps:
             _raise_semantic("empty_steps")
         if len(draft_steps) < 3 or len(draft_steps) > 10:
-            _raise_semantic("build_steps_length_invalid")
+            self._record_gate_event(
+                "semantic_validation",
+                "build_steps_length_invalid",
+                "build_steps",
+                "build_steps",
+                "passed_through",
+            )
 
-        ordered_steps = self._topologically_order_steps(draft_steps)
+        ordered_steps = self._degrade_step_graph(draft_steps)
         self._validate_parameter_mapping_unique(parameter_mapping)
         mapping_key_counts = Counter(
             (mapping.paper_param_name, mapping.model_param_name) for mapping in parameter_mapping
         )
-        recommendation_index = self._build_recommendation_index(block_recommendations)
+        recommendation_index = self._build_recommendation_index_lenient(block_recommendations)
 
-        self._validate_operable_steps(ordered_steps)
-        self._validate_parameter_refs(ordered_steps, mapping_key_counts)
-        self._validate_block_refs(ordered_steps, recommendation_index)
-        self._validate_block_ref_ids(ordered_steps)
-        self._validate_connection_visibility(ordered_steps)
-        self._validate_recommendation_coverage(ordered_steps, recommendation_index)
-        self._validate_redlines(ordered_steps, parameter_mapping)
+        ordered_steps = self._degrade_parameter_refs(ordered_steps, mapping_key_counts)
+        ordered_steps = self._degrade_block_refs(ordered_steps, recommendation_index)
+        ordered_steps = self._degrade_block_ref_ids(ordered_steps)
+        ordered_steps = self._degrade_connection_visibility(ordered_steps)
+        self._record_recommendation_coverage(ordered_steps, recommendation_index)
+        self._record_redlines(ordered_steps, parameter_mapping)
+        if not ordered_steps:
+            _raise_semantic("empty_steps")
 
         build_steps: list[ModelBuildStep] = []
         for step in ordered_steps:
@@ -553,6 +580,341 @@ class PlanAssembler:
             )
             build_steps.append(derived)
         return build_steps
+
+    def _record_gate_event(
+        self,
+        stage: str,
+        reason_code: str,
+        item_path: str,
+        data_kind: str,
+        action: str,
+        *,
+        claimed_source_kind: str | None = None,
+    ) -> None:
+        self._last_gate_events.append(
+            BuildStepsGateEvent(
+                stage=stage,
+                reason_code=reason_code,
+                item_path=item_path,
+                data_kind=data_kind,
+                action=action,
+                claimed_source_kind=claimed_source_kind,
+            )
+        )
+
+    def _degrade_step_graph(
+        self,
+        draft_steps: list[ModelBuildStepDraft],
+    ) -> list[ModelBuildStepDraft]:
+        filtered: list[ModelBuildStepDraft] = []
+        seen_step_ids: set[str] = set()
+        for index, step in enumerate(draft_steps):
+            item_path = f"steps[{index}]"
+            if _STEP_ID_RE.fullmatch(step.step_id) is None:
+                self._record_gate_event(
+                    "semantic_validation",
+                    "step_id_invalid",
+                    item_path,
+                    "build_steps",
+                    "item_degraded",
+                )
+                continue
+            if step.step_id in seen_step_ids:
+                self._record_gate_event(
+                    "semantic_validation",
+                    "step_id_duplicate",
+                    item_path,
+                    "build_steps",
+                    "item_degraded",
+                )
+                continue
+            seen_step_ids.add(step.step_id)
+            filtered.append(step)
+        if not filtered:
+            _raise_semantic("empty_steps")
+
+        known_step_ids = {step.step_id for step in filtered}
+        sanitized: list[ModelBuildStepDraft] = []
+        for index, step in enumerate(filtered):
+            dependencies: list[str] = []
+            for dependency_index, dependency in enumerate(step.depends_on):
+                item_path = f"steps[{index}].depends_on[{dependency_index}]"
+                if dependency == step.step_id:
+                    self._record_gate_event(
+                        "semantic_validation",
+                        "depends_on_self",
+                        item_path,
+                        "build_steps",
+                        "field_degraded",
+                    )
+                    continue
+                if dependency not in known_step_ids:
+                    self._record_gate_event(
+                        "semantic_validation",
+                        "depends_on_unknown",
+                        item_path,
+                        "build_steps",
+                        "field_degraded",
+                    )
+                    continue
+                dependencies.append(dependency)
+            sanitized.append(replace(step, depends_on=dependencies))
+
+        try:
+            return self._topologically_order_steps(sanitized)
+        except BuildStepsSemanticValidationError as exc:
+            if exc.reason_code != "depends_on_cycle":
+                raise
+            self._record_gate_event(
+                "semantic_validation",
+                "depends_on_cycle",
+                "steps.depends_on",
+                "build_steps",
+                "field_degraded",
+            )
+            return self._topologically_order_steps(
+                [replace(step, depends_on=[]) for step in sanitized]
+            )
+
+    def _build_recommendation_index_lenient(
+        self,
+        block_recommendations: list[BlockRecommendation],
+    ) -> dict[tuple[str, str], str]:
+        result: dict[tuple[str, str], str] = {}
+        key_counts = Counter(_block_recommendation_key(block) for block in block_recommendations)
+        for index, block in enumerate(block_recommendations, start=1):
+            key = _block_recommendation_key(block)
+            if key in result:
+                self._record_gate_event(
+                    "semantic_validation",
+                    "br_ambiguous",
+                    f"block_recommendations[{index - 1}]",
+                    "block",
+                    "item_degraded",
+                )
+                continue
+            result[key] = f"BR-{index:03d}"
+            if key_counts[key] > 1:
+                self._record_gate_event(
+                    "semantic_validation",
+                    "br_ambiguous",
+                    f"block_recommendations[{index - 1}]",
+                    "block",
+                    "passed_through",
+                )
+        return result
+
+    def _degrade_parameter_refs(
+        self,
+        steps: list[ModelBuildStepDraft],
+        mapping_key_counts: Counter[tuple[str, str]],
+    ) -> list[ModelBuildStepDraft]:
+        result: list[ModelBuildStepDraft] = []
+        for step_index, step in enumerate(steps):
+            refs: list[ParameterMappingRef] = []
+            for ref_index, parameter_ref in enumerate(step.parameter_refs):
+                key = (parameter_ref.paper_param_name, parameter_ref.model_param_name)
+                if mapping_key_counts.get(key, 0) != 1:
+                    self._record_gate_event(
+                        "semantic_validation",
+                        "parameter_ref_no_match",
+                        f"steps[{step_index}].parameter_refs[{ref_index}]",
+                        "parameter",
+                        "field_degraded",
+                    )
+                    continue
+                refs.append(parameter_ref)
+            result.append(replace(step, parameter_refs=refs))
+        return result
+
+    def _degrade_block_refs(
+        self,
+        steps: list[ModelBuildStepDraft],
+        recommendation_index: dict[tuple[str, str], str],
+    ) -> list[ModelBuildStepDraft]:
+        result: list[ModelBuildStepDraft] = []
+        for step_index, step in enumerate(steps):
+            refs: list[StepBlockRef] = []
+            for ref_index, block_ref in enumerate(step.block_refs):
+                key = _block_ref_key(block_ref)
+                if key not in recommendation_index:
+                    self._record_gate_event(
+                        "semantic_validation",
+                        "br_no_match",
+                        f"steps[{step_index}].block_refs[{ref_index}]",
+                        "block",
+                        "field_degraded",
+                    )
+                    continue
+                refs.append(block_ref)
+            result.append(replace(step, block_refs=refs))
+        return result
+
+    def _degrade_block_ref_ids(
+        self,
+        steps: list[ModelBuildStepDraft],
+    ) -> list[ModelBuildStepDraft]:
+        seen: set[str] = set()
+        result: list[ModelBuildStepDraft] = []
+        for step_index, step in enumerate(steps):
+            refs: list[StepBlockRef] = []
+            for ref_index, block_ref in enumerate(step.block_refs):
+                if block_ref.block_ref_id in seen:
+                    self._record_gate_event(
+                        "semantic_validation",
+                        "block_ref_id_duplicate",
+                        f"steps[{step_index}].block_refs[{ref_index}]",
+                        "block",
+                        "field_degraded",
+                    )
+                    continue
+                seen.add(block_ref.block_ref_id)
+                refs.append(block_ref)
+            result.append(replace(step, block_refs=refs))
+        return result
+
+    def _degrade_connection_visibility(
+        self,
+        steps: list[ModelBuildStepDraft],
+    ) -> list[ModelBuildStepDraft]:
+        by_id = {step.step_id: step for step in steps}
+        block_refs_by_step = {
+            step.step_id: [block_ref.block_ref_id for block_ref in step.block_refs]
+            for step in steps
+        }
+
+        result: list[ModelBuildStepDraft] = []
+        for step_index, step in enumerate(steps):
+            visible_steps = {step.step_id, *self._dependency_closure(step.step_id, by_id)}
+            visible_refs = [
+                block_ref_id
+                for visible_step_id in visible_steps
+                for block_ref_id in block_refs_by_step[visible_step_id]
+            ]
+            visible_counts = Counter(visible_refs)
+            hints: list[ConnectionHint] = []
+            for hint_index, connection_hint in enumerate(step.connection_hints):
+                if all(
+                    visible_counts.get(block_ref_id, 0) == 1
+                    for block_ref_id in (
+                        connection_hint.from_block_ref,
+                        connection_hint.to_block_ref,
+                    )
+                ):
+                    hints.append(connection_hint)
+                    continue
+                self._record_gate_event(
+                    "semantic_validation",
+                    "connection_ref_not_visible",
+                    f"steps[{step_index}].connection_hints[{hint_index}]",
+                    "connection",
+                    "field_degraded",
+                )
+            result.append(replace(step, connection_hints=hints))
+        return result
+
+    def _record_recommendation_coverage(
+        self,
+        steps: list[ModelBuildStepDraft],
+        recommendation_index: dict[tuple[str, str], str],
+    ) -> None:
+        coverage_set = set(recommendation_index)
+        if not coverage_set:
+            return
+        covered = {_block_ref_key(block_ref) for step in steps for block_ref in step.block_refs}
+        missing_count = len(coverage_set - covered)
+        if missing_count:
+            self._record_gate_event(
+                "semantic_validation",
+                "coverage_missing",
+                "build_steps.block_refs",
+                "block",
+                "passed_through",
+            )
+
+    def _record_redlines(
+        self,
+        steps: list[ModelBuildStepDraft],
+        parameter_mapping: list[ParameterMapping],
+    ) -> None:
+        for step_index, step in enumerate(steps):
+            self._record_text_redline(step.title, parameter_mapping, f"steps[{step_index}].title")
+            self._record_text_redline(step.intent, parameter_mapping, f"steps[{step_index}].intent")
+            for ref_index, block_ref in enumerate(step.block_refs):
+                self._record_text_redline(
+                    block_ref.purpose,
+                    parameter_mapping,
+                    f"steps[{step_index}].block_refs[{ref_index}].purpose",
+                )
+            for hint_index, connection_hint in enumerate(step.connection_hints):
+                if connection_hint.signal_meaning is not None:
+                    self._record_text_redline(
+                        connection_hint.signal_meaning,
+                        parameter_mapping,
+                        f"steps[{step_index}].connection_hints[{hint_index}].signal_meaning",
+                    )
+            for hint_index, configuration_hint in enumerate(step.configuration_hints):
+                self._record_config_redline(
+                    configuration_hint.target,
+                    parameter_mapping,
+                    f"steps[{step_index}].configuration_hints[{hint_index}].target",
+                )
+                if configuration_hint.setting_name is not None:
+                    self._record_config_redline(
+                        configuration_hint.setting_name,
+                        parameter_mapping,
+                        f"steps[{step_index}].configuration_hints[{hint_index}].setting_name",
+                    )
+                allow_config_values = _is_allowed_config_hint(
+                    configuration_hint,
+                    parameter_mapping,
+                )
+                self._record_text_redline(
+                    configuration_hint.instruction,
+                    parameter_mapping,
+                    f"steps[{step_index}].configuration_hints[{hint_index}].instruction",
+                    allow_config_values=allow_config_values,
+                )
+
+    def _record_text_redline(
+        self,
+        text: str,
+        parameter_mapping: list[ParameterMapping],
+        item_path: str,
+        *,
+        allow_config_values: bool = False,
+    ) -> None:
+        try:
+            self._validate_text_for_redline(
+                text,
+                parameter_mapping,
+                allow_config_values=allow_config_values,
+            )
+        except BuildStepsRedLineError as exc:
+            self._record_gate_event(
+                "redline",
+                exc.reason_code,
+                item_path,
+                "parameter",
+                "passed_through",
+            )
+
+    def _record_config_redline(
+        self,
+        text: str,
+        parameter_mapping: list[ParameterMapping],
+        item_path: str,
+    ) -> None:
+        try:
+            self._validate_config_text_for_redline(text, parameter_mapping)
+        except BuildStepsRedLineError as exc:
+            self._record_gate_event(
+                "redline",
+                exc.reason_code,
+                item_path,
+                "configuration",
+                "passed_through",
+            )
 
     def _topologically_order_steps(
         self,

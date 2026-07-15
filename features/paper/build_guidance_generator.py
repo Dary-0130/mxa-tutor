@@ -14,6 +14,14 @@ from typing import Any, Literal, cast
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from core.domain.exceptions import (
+    LLMAuthError,
+    LLMQuotaError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMTimeoutError,
+    PaperPlanGenerationError,
+)
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_plan import (
     BuildGuidance,
@@ -49,7 +57,6 @@ from features.paper.build_guidance_requirements import (
     claim_mentions_other_requirement,
     closure_from_resolution,
     critical_steps,
-    detail_has_document_basis,
     detail_kind_for_target,
     enumerate_guidance_requirements,
     guidance_requirements_prompt_payload,
@@ -175,6 +182,10 @@ class GuidanceLLMCallError(Exception):
         self.generator_exception = cast(Any, generator_exception)
         self.termination_guard = termination_guard
         super().__init__()
+
+
+class GuidanceProviderConfigurationError(Exception):
+    """Provider configuration failures that must propagate out of content fallback."""
 
 
 @dataclass(frozen=True)
@@ -401,10 +412,7 @@ class BuildGuidanceGenerator:
                 elapsed_ms=call_result.elapsed_ms,
                 termination_guard="none",
             )
-            document_details = [
-                detail for detail in result.details if detail_has_document_basis(detail)
-            ]
-            if not document_details:
+            if not result.details:
                 attempt_records.append(attempt_record)
                 continue
 
@@ -509,7 +517,11 @@ class BuildGuidanceGenerator:
                 timeout=self._timeout,
                 max_tokens=self._max_tokens,
             )
-        except Exception as exc:
+        except (LLMAuthError, LLMQuotaError):
+            raise
+        except (ValueError, RuntimeError) as exc:
+            raise GuidanceProviderConfigurationError(guidance_exception_code(exc)) from exc
+        except (LLMTimeoutError, LLMRateLimitError, LLMServerError) as exc:
             elapsed_ms = int((time.monotonic() - start) * 1000)
             raise GuidanceLLMCallError(
                 parse_outcome="provider_exception",
@@ -625,7 +637,7 @@ def build_guidance_evidence_pool(
             return
         try:
             tagger.validate_for_spec([entry], spec)
-        except Exception:
+        except PaperPlanGenerationError:
             construction_error_count += 1
             return
         entries.append((entry, linked, entry.excerpt or ""))
@@ -1320,9 +1332,9 @@ def _terminal_status_and_reason(
         stats.raw_document_claim_count == 0 for stats in attempts
     ):
         if not pool.cards:
-            return "no_document_basis", "zero_document_claims_empty_evidence_pool"
+            return "generation_failed", "zero_document_claims_empty_evidence_pool"
         if not pool.has_build_step_linked_evidence:
-            return "no_document_basis", "zero_document_claims_unlinked_evidence_pool"
+            return "generation_failed", "zero_document_claims_unlinked_evidence_pool"
     if call_count >= GUIDANCE_HARD_CALL_CAP:
         return "generation_failed", "retry_cap_exhausted"
     return "generation_failed", "evidence_resolution_failed"
@@ -1373,7 +1385,7 @@ def _resolved_parameter_mapping_evidence(
                 continue
             try:
                 tagger.validate_for_spec([entry], spec)
-            except Exception:
+            except PaperPlanGenerationError:
                 continue
             return entry
     return None

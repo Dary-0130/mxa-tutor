@@ -29,7 +29,6 @@ from core.domain.paper_spec import (
 from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     BuildStepsEvidenceError,
-    BuildStepsRedLineError,
     BuildStepsSemanticValidationError,
     EvidenceTagger,
     MissingBindingModel,
@@ -438,16 +437,18 @@ def test_build_steps_can_be_topologically_sorted_before_validation() -> None:
 
 
 @pytest.mark.parametrize(
-    ("drafts_factory", "reason"),
+    ("drafts_factory", "reason", "terminal_reason"),
     [
-        (lambda: [], "empty_steps"),
+        (lambda: [], "empty_steps", "empty_steps"),
         (
             lambda: [replace(step, step_id="BAD-1") for step in _build_step_drafts()],
             "step_id_invalid",
+            "empty_steps",
         ),
         (
             lambda: [replace(step, step_id="STEP-001") for step in _build_step_drafts()],
             "step_id_duplicate",
+            None,
         ),
         (
             lambda: [
@@ -455,39 +456,55 @@ def test_build_steps_can_be_topologically_sorted_before_validation() -> None:
                 *_build_step_drafts()[1:],
             ],
             "depends_on_cycle",
+            None,
         ),
     ],
 )
-def test_build_steps_reject_step_id_and_dependency_errors(
+def test_build_steps_degrades_step_id_and_dependency_errors(
     drafts_factory: object,
     reason: str,
+    terminal_reason: str | None,
 ) -> None:
     drafts = drafts_factory()
-    with pytest.raises(BuildStepsSemanticValidationError, match=reason):
-        PlanAssembler().validate_and_derive_build_steps(
+    assembler = PlanAssembler()
+    if terminal_reason is not None:
+        with pytest.raises(BuildStepsSemanticValidationError, match=terminal_reason):
+            assembler.validate_and_derive_build_steps(
+                drafts,
+                [_mapping("H", MISSING_VALUE_SENTINEL)],
+                [_block_recommendation()],
+            )
+    else:
+        steps = assembler.validate_and_derive_build_steps(
             drafts,
             [_mapping("H", MISSING_VALUE_SENTINEL)],
             [_block_recommendation()],
         )
+        assert steps
+    if reason != "empty_steps":
+        assert reason in [event.reason_code for event in assembler.last_gate_events]
 
 
 def test_parameter_mapping_refs_require_exact_composite_match() -> None:
     drafts = _build_step_drafts()
 
-    with pytest.raises(BuildStepsSemanticValidationError, match="parameter_ref_no_match"):
-        PlanAssembler().validate_and_derive_build_steps(
-            drafts,
-            [
-                ParameterMapping(
-                    paper_param_name="H",
-                    model_param_name="Different.H",
-                    value=MISSING_VALUE_SENTINEL,
-                    unit="s",
-                    source=EvidenceSource.DOCUMENT_EXTRACTED,
-                )
-            ],
-            [_block_recommendation()],
-        )
+    assembler = PlanAssembler()
+    steps = assembler.validate_and_derive_build_steps(
+        drafts,
+        [
+            ParameterMapping(
+                paper_param_name="H",
+                model_param_name="Different.H",
+                value=MISSING_VALUE_SENTINEL,
+                unit="s",
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+            )
+        ],
+        [_block_recommendation()],
+    )
+
+    assert steps[0].parameter_refs == []
+    assert "parameter_ref_no_match" in [event.reason_code for event in assembler.last_gate_events]
 
     with pytest.raises(BuildStepsSemanticValidationError, match="parameter_mapping_duplicate"):
         PlanAssembler().validate_and_derive_build_steps(
@@ -533,25 +550,31 @@ def test_block_recommendation_internal_keys_are_deterministic_by_array_order() -
 def test_block_refs_reject_no_match_and_duplicate_recommendation_pair() -> None:
     drafts = _build_step_drafts()
 
-    with pytest.raises(BuildStepsSemanticValidationError, match="br_no_match"):
-        PlanAssembler().validate_and_derive_build_steps(
-            drafts,
-            [_mapping("H", MISSING_VALUE_SENTINEL)],
-            [
-                BlockRecommendation(
-                    block_type="Scope",
-                    purpose="Display current.",
-                    paper_reference=_document_evidence(),
-                )
-            ],
-        )
+    assembler = PlanAssembler()
+    steps = assembler.validate_and_derive_build_steps(
+        drafts,
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [
+            BlockRecommendation(
+                block_type="Scope",
+                purpose="Display current.",
+                paper_reference=_document_evidence(),
+            )
+        ],
+    )
 
-    with pytest.raises(BuildStepsSemanticValidationError, match="br_ambiguous"):
-        PlanAssembler().validate_and_derive_build_steps(
-            drafts,
-            [_mapping("H", MISSING_VALUE_SENTINEL)],
-            [_block_recommendation(), _block_recommendation()],
-        )
+    assert steps[0].block_refs == []
+    assert "br_no_match" in [event.reason_code for event in assembler.last_gate_events]
+
+    assembler = PlanAssembler()
+    steps = assembler.validate_and_derive_build_steps(
+        drafts,
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [_block_recommendation(), _block_recommendation()],
+    )
+
+    assert steps[0].block_refs[0].block_ref_id == "B1"
+    assert "br_ambiguous" in [event.reason_code for event in assembler.last_gate_events]
 
 
 def test_block_ref_id_is_global_and_connection_refs_must_be_visible() -> None:
@@ -562,12 +585,15 @@ def test_block_ref_id_is_global_and_connection_refs_must_be_visible() -> None:
         parameter_refs=[],
     )
 
-    with pytest.raises(BuildStepsSemanticValidationError, match="block_ref_id_duplicate"):
-        PlanAssembler().validate_and_derive_build_steps(
-            drafts,
-            [_mapping("H", MISSING_VALUE_SENTINEL)],
-            [_block_recommendation()],
-        )
+    assembler = PlanAssembler()
+    steps = assembler.validate_and_derive_build_steps(
+        drafts,
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [_block_recommendation()],
+    )
+
+    assert steps[1].block_refs == []
+    assert "block_ref_id_duplicate" in [event.reason_code for event in assembler.last_gate_events]
 
     invisible = _build_step_drafts()
     invisible[2] = replace(
@@ -583,12 +609,17 @@ def test_block_ref_id_is_global_and_connection_refs_must_be_visible() -> None:
         ],
         configuration_hints=[],
     )
-    with pytest.raises(BuildStepsSemanticValidationError, match="connection_ref_not_visible"):
-        PlanAssembler().validate_and_derive_build_steps(
-            invisible,
-            [_mapping("H", MISSING_VALUE_SENTINEL)],
-            [_block_recommendation()],
-        )
+    assembler = PlanAssembler()
+    steps = assembler.validate_and_derive_build_steps(
+        invisible,
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [_block_recommendation()],
+    )
+
+    assert steps[2].connection_hints == []
+    assert "connection_ref_not_visible" in [
+        event.reason_code for event in assembler.last_gate_events
+    ]
 
 
 def test_each_step_must_have_operable_structure_and_cover_recommendations() -> None:
@@ -601,22 +632,26 @@ def test_each_step_must_have_operable_structure_and_cover_recommendations() -> N
         configuration_hints=[],
     )
 
-    with pytest.raises(BuildStepsSemanticValidationError, match="step_not_operable"):
-        PlanAssembler().validate_and_derive_build_steps(
-            drafts,
-            [_mapping("H", MISSING_VALUE_SENTINEL)],
-            [_block_recommendation()],
-        )
+    steps = PlanAssembler().validate_and_derive_build_steps(
+        drafts,
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [_block_recommendation()],
+    )
 
-    with pytest.raises(BuildStepsSemanticValidationError, match="coverage_missing"):
-        PlanAssembler().validate_and_derive_build_steps(
-            _build_step_drafts(),
-            [_mapping("H", MISSING_VALUE_SENTINEL)],
-            [
-                _block_recommendation(),
-                BlockRecommendation("Scope", "Display current.", _document_evidence()),
-            ],
-        )
+    assert steps[2].step_id == "STEP-003"
+
+    assembler = PlanAssembler()
+    steps = assembler.validate_and_derive_build_steps(
+        _build_step_drafts(),
+        [_mapping("H", MISSING_VALUE_SENTINEL)],
+        [
+            _block_recommendation(),
+            BlockRecommendation("Scope", "Display current.", _document_evidence()),
+        ],
+    )
+
+    assert steps
+    assert "coverage_missing" in [event.reason_code for event in assembler.last_gate_events]
 
 
 def test_coverage_is_vacuous_when_recommendations_are_empty() -> None:
@@ -705,12 +740,15 @@ def test_regular_redline_rejects_specific_values_and_contextual_short_integers(
     drafts = _build_step_drafts()
     drafts[0] = replace(drafts[0], intent=intent)
 
-    with pytest.raises(BuildStepsRedLineError, match="parameter_value_leak"):
-        PlanAssembler().validate_and_derive_build_steps(
-            drafts,
-            [_mapping("H", value, unit=unit)],
-            [_block_recommendation()],
-        )
+    assembler = PlanAssembler()
+    steps = assembler.validate_and_derive_build_steps(
+        drafts,
+        [_mapping("H", value, unit=unit)],
+        [_block_recommendation()],
+    )
+
+    assert steps[0].intent == intent
+    assert "parameter_value_leak" in [event.reason_code for event in assembler.last_gate_events]
 
 
 @pytest.mark.parametrize(
@@ -774,20 +812,23 @@ def test_config_redline_rejects_values_in_identifier_fields(
         ],
     )
 
-    with pytest.raises(BuildStepsRedLineError, match="parameter_value_leak"):
-        PlanAssembler().validate_and_derive_build_steps(
-            drafts,
-            [
-                ParameterMapping(
-                    paper_param_name="Rs",
-                    model_param_name="Synchronous Machine.Rs",
-                    value=value,
-                    unit=unit,
-                    source=EvidenceSource.DOCUMENT_EXTRACTED,
-                )
-            ],
-            [_block_recommendation()],
-        )
+    assembler = PlanAssembler()
+    steps = assembler.validate_and_derive_build_steps(
+        drafts,
+        [
+            ParameterMapping(
+                paper_param_name="Rs",
+                model_param_name="Synchronous Machine.Rs",
+                value=value,
+                unit=unit,
+                source=EvidenceSource.DOCUMENT_EXTRACTED,
+            )
+        ],
+        [_block_recommendation()],
+    )
+
+    assert steps[2].configuration_hints[0].target == target
+    assert "parameter_value_leak" in [event.reason_code for event in assembler.last_gate_events]
 
 
 def test_redline_rejects_naked_value_and_config_allowlist_has_reverse_check() -> None:
@@ -802,12 +843,9 @@ def test_redline_rejects_naked_value_and_config_allowlist_has_reverse_check() ->
     leaking = list(drafts)
     leaking[0] = replace(leaking[0], title="Place source with 0.05 Ω")
 
-    with pytest.raises(BuildStepsRedLineError, match="parameter_value_leak"):
-        PlanAssembler().validate_and_derive_build_steps(
-            leaking,
-            [mapping],
-            [_block_recommendation()],
-        )
+    assembler = PlanAssembler()
+    assembler.validate_and_derive_build_steps(leaking, [mapping], [_block_recommendation()])
+    assert "parameter_value_leak" in [event.reason_code for event in assembler.last_gate_events]
 
     allowed = list(drafts)
     allowed[2] = replace(
@@ -835,12 +873,13 @@ def test_redline_rejects_naked_value_and_config_allowlist_has_reverse_check() ->
             )
         ],
     )
-    with pytest.raises(BuildStepsRedLineError, match="parameter_value_leak"):
-        PlanAssembler().validate_and_derive_build_steps(
-            reversed_setting,
-            [mapping],
-            [_block_recommendation()],
-        )
+    assembler = PlanAssembler()
+    assembler.validate_and_derive_build_steps(
+        reversed_setting,
+        [mapping],
+        [_block_recommendation()],
+    )
+    assert "parameter_value_leak" in [event.reason_code for event in assembler.last_gate_events]
 
 
 def test_build_step_evidence_helper_rejects_unresolved_user_supplied_evidence() -> None:

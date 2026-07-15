@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 import features.paper.paper_plan_service as service_module
 from core.domain.exceptions import (
+    LLMAuthError,
     LLMRateLimitError,
     LLMServerError,
     LLMTimeoutError,
@@ -252,7 +253,6 @@ def test_build_step_block_ref_draft_accepts_legal_paper_reference() -> None:
 @pytest.mark.parametrize(
     "case_name",
     [
-        "invalid_paper_reference_shape",
         "missing_required_field",
         "extra_field",
     ],
@@ -269,6 +269,22 @@ def test_block_ref_draft_rejects_invalid_payloads_fail_red(case_name: str) -> No
 
     with pytest.raises((ValidationError, BuildStepsDtoValidationError)):
         _drafts_from_build_steps_payload(payload)
+
+
+@pytest.mark.asyncio
+async def test_block_ref_draft_invalid_paper_reference_degrades_reference_only() -> None:
+    payload = _build_steps_payload()
+    payload["build_steps"][0]["block_refs"][0]["paper_reference"] = _document_evidence_payload()
+    service = PayloadPaperPlanService({"build_step_planner": payload})
+
+    drafts = await service._llm_build_steps(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        _spec(),
+        paper_id="PAPER-001",
+    )
+
+    assert drafts[0].block_refs[0].paper_reference == _document_evidence()
 
 
 def test_block_ref_draft_keeps_public_field_set_aligned() -> None:
@@ -358,21 +374,35 @@ async def test_build_step_draft_evidence_resolves_three_entry_points_from_source
 )
 @pytest.mark.asyncio
 async def test_build_step_draft_evidence_fail_closed_with_machine_codes(
+    monkeypatch: pytest.MonkeyPatch,
     draft_evidence: dict[str, Any],
     reason_code: str,
 ) -> None:
+    info_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_info(*args: object, **kwargs: object) -> None:
+        info_calls.append((args, kwargs))
+
+    monkeypatch.setattr(service_module.logger, "info", fake_info)
     payload = _build_steps_payload()
     payload["build_steps"][0]["evidence"][0] = draft_evidence
     service = PayloadPaperPlanService({"build_step_planner": payload})
 
-    with pytest.raises(BuildStepsDtoValidationError) as exc_info:
-        await service._llm_build_steps(
-            [_block_recommendation()],
-            [_sentinel_mapping()],
-            _spec(),
-        )
+    drafts = await service._llm_build_steps(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        _spec(),
+        paper_id="PAPER-001",
+    )
 
-    assert exc_info.value.reason_code == reason_code
+    if reason_code == "draft_schema_invalid":
+        assert drafts[0].evidence == [_document_evidence()]
+    else:
+        assert drafts[0].evidence == []
+    logged = repr(info_calls)
+    assert reason_code in logged
+    assert "REF-999" not in logged
+    assert "The report states the machine parameter." not in logged
 
 
 @pytest.mark.asyncio
@@ -387,14 +417,15 @@ async def test_build_step_draft_evidence_ambiguous_source_ref_fail_closed(
     )
     service = PayloadPaperPlanService({"build_step_planner": _build_steps_payload()})
 
-    with pytest.raises(BuildStepsDtoValidationError) as exc_info:
-        await service._llm_build_steps(
-            [_block_recommendation()],
-            [_sentinel_mapping()],
-            _spec(),
-        )
+    drafts = await service._llm_build_steps(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        _spec(),
+        paper_id="PAPER-001",
+    )
 
-    assert exc_info.value.reason_code == "source_ref_ambiguous"
+    assert drafts[0].evidence == []
+    assert drafts[0].block_refs[0].paper_reference is None
 
 
 @pytest.mark.asyncio
@@ -417,14 +448,15 @@ async def test_build_step_bridge_final_evidence_invalid_still_fails(
     )
     service = PayloadPaperPlanService({"build_step_planner": _build_steps_payload()})
 
-    with pytest.raises(BuildStepsDtoValidationError) as exc_info:
-        await service._llm_build_steps(
-            [_block_recommendation()],
-            [_sentinel_mapping()],
-            _spec(),
-        )
+    drafts = await service._llm_build_steps(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        _spec(),
+        paper_id="PAPER-001",
+    )
 
-    assert exc_info.value.reason_code == "final_evidence_invalid"
+    assert drafts[0].evidence == []
+    assert drafts[0].block_refs[0].paper_reference is None
 
 
 def test_build_step_public_dto_rejects_source_ref_leak() -> None:
@@ -457,14 +489,14 @@ async def test_build_step_to_block_ref_non_string_fails_dto_validation() -> None
     ]
     service = PayloadPaperPlanService({"build_step_planner": payload})
 
-    with pytest.raises(BuildStepsDtoValidationError) as exc_info:
-        await service._llm_build_steps(
-            [_block_recommendation()],
-            [_sentinel_mapping()],
-            _spec(),
-        )
+    drafts = await service._llm_build_steps(
+        [_block_recommendation()],
+        [_sentinel_mapping()],
+        _spec(),
+        paper_id="PAPER-001",
+    )
 
-    assert exc_info.value.reason_code == "dto_invalid"
+    assert drafts[2].connection_hints == []
 
 
 @pytest.mark.asyncio
@@ -530,8 +562,9 @@ async def test_two_llm_calls_run_concurrently_in_each_dag_phase() -> None:
             block_recommendations: list[BlockRecommendation],
             parameter_mapping: list[ParameterMapping],
             spec: PaperSpec,
+            paper_id: str | None = None,
         ) -> list[ModelBuildStepDraft]:
-            _ = block_recommendations, parameter_mapping, spec
+            _ = block_recommendations, parameter_mapping, spec, paper_id
             return await self._parallel(_build_step_drafts())  # type: ignore[return-value]
 
     service = ConcurrentService()
@@ -577,8 +610,9 @@ async def test_step2_build_step_planner_awaits_plan_composer_block_recommendatio
             block_recommendations: list[BlockRecommendation],
             parameter_mapping: list[ParameterMapping],
             spec: PaperSpec,
+            paper_id: str | None = None,
         ) -> list[ModelBuildStepDraft]:
-            _ = parameter_mapping, spec
+            _ = parameter_mapping, spec, paper_id
             assert self.plan_done
             assert block_recommendations[0].block_type == "Synchronous Machine"
             return _build_step_drafts()
@@ -1173,8 +1207,9 @@ async def test_all_conflicted_parameters_can_abstain_and_fallback_build_steps() 
     assert plan.parameter_mapping == []
     assert missing_prompts == []
     assert missing_bindings == []
-    assert plan.build_steps is None
-    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+    assert plan.build_steps is not None
+    assert plan.build_steps[1].parameter_refs == []
+    assert plan.subsystem_breakdown == [step.display_text for step in plan.build_steps]
 
 
 @pytest.mark.asyncio
@@ -1264,20 +1299,20 @@ async def test_redline_value_leak_falls_back_to_legacy() -> None:
 
     plan, _, _ = await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 
-    assert plan.build_steps is None
-    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+    assert plan.build_steps is not None
+    assert plan.build_steps[0].title == "Place Rs block with 0.05 Ω"
 
 
 @pytest.mark.asyncio
 async def test_structured_fallback_log_is_reason_coded_metadata_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    warning_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    info_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def fake_warning(*args: object, **kwargs: object) -> None:
-        warning_calls.append((args, kwargs))
+    def fake_info(*args: object, **kwargs: object) -> None:
+        info_calls.append((args, kwargs))
 
-    monkeypatch.setattr(service_module.logger, "warning", fake_warning)
+    monkeypatch.setattr(service_module.logger, "info", fake_info)
     payloads = _payloads()
     payloads["missing_detector"] = {"missing_prompts": []}
     payloads["plan_composer"]["parameter_mapping"] = [
@@ -1297,8 +1332,8 @@ async def test_structured_fallback_log_is_reason_coded_metadata_only(
 
     await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 
-    logged = repr(warning_calls)
-    assert "paper_plan_build_steps_fallback reason_code=%s" in logged
+    logged = repr(info_calls)
+    assert "paper_content_gate correlation_id=%s" in logged
     assert "parameter_value_leak" in logged
     assert "0.05" not in logged
     assert "Ω" not in logged
@@ -1309,12 +1344,12 @@ async def test_dependency_audit_shadows_dto_invalid_terminal_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MXA_BUILD_STEPS_DEPENDENCY_AUDIT", "1")
-    warning_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    info_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def fake_warning(*args: object, **kwargs: object) -> None:
-        warning_calls.append((args, kwargs))
+    def fake_info(*args: object, **kwargs: object) -> None:
+        info_calls.append((args, kwargs))
 
-    monkeypatch.setattr(service_module.logger, "warning", fake_warning)
+    monkeypatch.setattr(service_module.logger, "info", fake_info)
     payloads = _payloads()
     payloads["build_step_planner"]["build_steps"][2]["depends_on"] = ["STEP-003"]
     payloads["build_step_planner"]["build_steps"][2]["unexpected"] = "dto failure"
@@ -1323,13 +1358,13 @@ async def test_dependency_audit_shadows_dto_invalid_terminal_reason(
     plan, _, _ = await service.generate(_spec(), "PAPER-001")
 
     audit = service.build_steps_dependency_audit()
-    assert plan.build_steps is None
+    assert plan.build_steps is not None
     assert audit.dependency_audit_status == "violations"
     assert audit.violations_by_code["self"] == 1
-    logged = repr(warning_calls)
-    assert "reason_code=%s" in logged
-    assert "dto_invalid" in logged
-    assert '"dependency_audit_status":"violations"' in logged
+    logged = repr(info_calls)
+    assert "paper_content_gate correlation_id=%s" in logged
+    assert "depends_on_self" in logged
+    assert "draft_schema_invalid" in logged
 
 
 @pytest.mark.asyncio
@@ -1337,21 +1372,20 @@ async def test_dependency_audit_log_does_not_include_nonconforming_dependency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("MXA_BUILD_STEPS_DEPENDENCY_AUDIT", "1")
-    warning_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    info_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    def fake_warning(*args: object, **kwargs: object) -> None:
-        warning_calls.append((args, kwargs))
+    def fake_info(*args: object, **kwargs: object) -> None:
+        info_calls.append((args, kwargs))
 
-    monkeypatch.setattr(service_module.logger, "warning", fake_warning)
+    monkeypatch.setattr(service_module.logger, "info", fake_info)
     leaked_dependency = "STEP-002 求解第3.2节"
     payloads = _payloads()
     payloads["build_step_planner"]["build_steps"][2]["depends_on"] = [leaked_dependency]
 
     await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 
-    logged = repr(warning_calls)
+    logged = repr(info_calls)
     assert "depends_on_unknown" in logged
-    assert "dep_length_bucket" in logged
     assert leaked_dependency not in logged
     assert "求解第3.2节" not in logged
 
@@ -1382,7 +1416,7 @@ async def test_dependency_audit_toggle_does_not_change_plan_output_or_terminal_r
     on_result = await run_once(True)
 
     assert off_result == on_result
-    assert on_result[1] == ["depends_on_self"]
+    assert on_result[1] == []
 
 
 @pytest.mark.asyncio
@@ -1392,8 +1426,8 @@ async def test_user_supplied_build_step_evidence_falls_back_to_legacy() -> None:
 
     plan, _, _ = await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 
-    assert plan.build_steps is None
-    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+    assert plan.build_steps is not None
+    assert plan.build_steps[0].evidence == []
 
 
 @pytest.mark.asyncio
@@ -1405,17 +1439,44 @@ async def test_user_supplied_block_ref_paper_reference_falls_back_to_legacy() ->
 
     plan, _, _ = await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 
-    assert plan.build_steps is None
-    assert plan.subsystem_breakdown == ["第 1 步:放置电机", "第 2 步:接入故障", "第 3 步:观察电流"]
+    assert plan.build_steps is not None
+    assert plan.build_steps[0].block_refs[0].paper_reference is None
 
 
 @pytest.mark.asyncio
-async def test_build_step_provider_error_propagates_without_legacy_fallback() -> None:
+async def test_build_step_transient_provider_error_uses_legacy_fallback() -> None:
     payloads = _payloads()
     payloads["build_step_planner"] = LLMRateLimitError("rate")
     service = PayloadPaperPlanService(payloads)
 
-    with pytest.raises(LLMRateLimitError):
+    plan, _, _ = await service.generate(_spec(), "PAPER-001")
+
+    assert plan.build_steps is None
+    assert "subsystem_planner" in service.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc", [LLMAuthError("auth"), ValueError("config")])
+async def test_build_step_infrastructure_provider_error_propagates(
+    exc: BaseException,
+) -> None:
+    payloads = _payloads()
+    payloads["build_step_planner"] = exc
+    service = PayloadPaperPlanService(payloads)
+
+    with pytest.raises(type(exc)):
+        await service.generate(_spec(), "PAPER-001")
+
+    assert "subsystem_planner" not in service.calls
+
+
+@pytest.mark.asyncio
+async def test_build_step_cancelled_error_propagates_without_legacy_fallback() -> None:
+    payloads = _payloads()
+    payloads["build_step_planner"] = asyncio.CancelledError()
+    service = PayloadPaperPlanService(payloads)
+
+    with pytest.raises(asyncio.CancelledError):
         await service.generate(_spec(), "PAPER-001")
 
     assert "subsystem_planner" not in service.calls

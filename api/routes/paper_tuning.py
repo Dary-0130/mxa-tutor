@@ -54,7 +54,7 @@ async def suggest_tuning(
     record = await store.get_plan_record(paper_id)
     if record is None:
         raise PaperNotFoundError("paper_not_found") from None
-    validate_record_parameter_conflict_integrity(record)
+    record = validate_record_parameter_conflict_integrity(record)
     corrections = await store.list_parameter_corrections(paper_id)
     suggestion = await service.suggest(
         record,

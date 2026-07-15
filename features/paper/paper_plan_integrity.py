@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from core.domain.exceptions import PaperPlanGenerationError
 from core.domain.paper_parameter_conflicts import (
     label_hits_parameter_conflict,
@@ -14,7 +16,7 @@ from core.domain.paper_spec import ParameterConflict
 from core.domain.paper_tuning import TuningSuggestion
 
 
-def validate_record_parameter_conflict_integrity(record: PaperPlanRecord) -> None:
+def validate_record_parameter_conflict_integrity(record: PaperPlanRecord) -> PaperPlanRecord:
     """Reject stale ready bundles that silently resolved parameter conflicts."""
 
     try:
@@ -24,7 +26,23 @@ def validate_record_parameter_conflict_integrity(record: PaperPlanRecord) -> Non
             "parameter_conflicts_mismatch",
             reason_code="parameter_conflicts_mismatch",
         ) from None
-    validate_plan_does_not_resolve_conflicts(record.plan, record.spec.parameter_conflicts)
+    try:
+        validate_plan_does_not_resolve_conflicts(record.plan, record.spec.parameter_conflicts)
+    except PaperPlanGenerationError as exc:
+        if exc.reason_code == "parameter_conflict_build_step_text_stale":
+            return _record_with_stale_build_steps(record)
+        raise
+    return record
+
+
+def _record_with_stale_build_steps(record: PaperPlanRecord) -> PaperPlanRecord:
+    plan = replace(
+        record.plan,
+        build_steps=None,
+        build_guidance=None,
+        guidance_status="stale_pending_regeneration",
+    )
+    return replace(record, plan=plan)
 
 
 def validate_plan_does_not_resolve_conflicts(

@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 
+from core.domain.exceptions import PaperPlanGenerationError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_plan import (
     GuidanceAssessment,
@@ -21,7 +22,6 @@ from core.domain.paper_spec import PaperSpec
 from features.paper.build_guidance_requirements import (
     actionability_for_closure,
     closure_from_resolution,
-    detail_has_document_basis,
     detail_kind_for_target,
     enumerate_guidance_requirements,
     reduce_guidance_requirements,
@@ -377,7 +377,7 @@ def validate_build_guidance_semantics(
         gaps=gaps,
     )
 
-    if not any(detail_has_document_basis(detail) for detail in details):
+    if not details:
         if mode == "stale_snapshot":
             next_plan = replace(
                 plan,
@@ -387,7 +387,7 @@ def validate_build_guidance_semantics(
             record("guidance", None, "drop", "guidance_validator_stale_snapshot_empty")
             return _result(plan, next_plan, item_actions, "mark_stale_empty", machine_codes)
         next_plan = replace(plan, build_guidance=None, guidance_status="generation_failed")
-        record("guidance", None, "drop", "guidance_validator_all_document_details_lost")
+        record("guidance", None, "drop", "guidance_validator_all_details_lost")
         return _result(plan, next_plan, item_actions, "mark_generation_failed", machine_codes)
 
     next_plan = replace(plan, build_guidance=sanitized_guidance)
@@ -553,7 +553,7 @@ def _document_evidence_error(
     if mode == "current_generated":
         try:
             tagger.validate_for_spec(detail.evidence, spec)
-        except Exception:
+        except PaperPlanGenerationError:
             return "non_document_locator_present"
     claim_surface = _resolution_grounding_surface(detail.resolution)
     tokens = high_risk_text_tokens(claim_surface)
@@ -687,7 +687,7 @@ def _validated_document_detail(
     if mode == "current_generated" and detail.evidence:
         try:
             tagger.validate_for_spec(detail.evidence, spec)
-        except Exception:
+        except PaperPlanGenerationError:
             invalid_codes.append("guidance_validator_document_evidence_locator_invalid")
     if detail.evidence:
         tokens = (

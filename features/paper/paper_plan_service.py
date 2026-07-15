@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from collections import Counter
@@ -13,7 +14,9 @@ from typing import Annotated, Any, Literal, NoReturn, cast
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from core.domain.exceptions import (
+    LLMAuthError,
     LLMError,
+    LLMQuotaError,
     LLMRateLimitError,
     LLMServerError,
     LLMTimeoutError,
@@ -45,7 +48,10 @@ from features.paper._prompt_builder import (
     build_messages_for_subsystem_plan,
 )
 from features.paper._prompt_loader import load_prompt_template
-from features.paper.build_guidance_generator import BuildGuidanceGenerator
+from features.paper.build_guidance_generator import (
+    BuildGuidanceGenerator,
+    GuidanceProviderConfigurationError,
+)
 from features.paper.build_guidance_observability import guidance_exception_code
 from features.paper.build_steps_dependency_audit import (
     DependencyAudit,
@@ -57,6 +63,8 @@ from features.paper.paper_plan_helpers import (
     MISSING_VALUE_SENTINEL,
     PLAN_EVIDENCE_SOURCE_REF_FIELD,
     BuildStepsDtoValidationError,
+    BuildStepsEvidenceError,
+    BuildStepsGateEvent,
     BuildStepsJsonParseError,
     BuildStepsStructuredError,
     BuildStepUserEvidenceSourceRef,
@@ -113,6 +121,8 @@ CONTRACT_MISMATCH_REPEAT_COUNT = 3
 MSCRIPT_DRAFT_MAX_ATTEMPTS = 2
 _UNSET = object()
 _MISSING = object()
+_DROP_BUILD_STEP_ITEM = object()
+_DROP_EVIDENCE = object()
 
 MScriptDraftOutcomeKind = Literal["generated", "returned_null", "degraded"]
 MScriptDegradationCode = Literal[
@@ -256,6 +266,7 @@ class PaperPlanService:
                         plan_composer_output.block_recommendations,
                         plan_composer_output.parameter_mapping,
                         spec,
+                        paper_id=paper_id,
                     ),
                     return_exceptions=True,
                 )
@@ -300,7 +311,14 @@ class PaperPlanService:
                 plan_composer_output.parameter_mapping,
                 plan_composer_output.block_recommendations,
             )
-            self._validate_build_step_evidence(build_steps, spec)
+            self._log_build_steps_gate_events(
+                self._plan_assembler.last_gate_events,
+                role_name=BUILD_STEP_ROLE_NAME,
+                paper_id=paper_id,
+                prompt_version=load_prompt_template("paper_plan_build_steps.yaml").version,
+                final_artifact_present=bool(build_steps),
+            )
+            build_steps = self._degrade_build_step_evidence(build_steps, spec, paper_id=paper_id)
             subsystem_steps = [step.display_text for step in build_steps]
         except BuildStepsStructuredError as exc:
             self._log_build_steps_fallback(exc)
@@ -329,6 +347,8 @@ class PaperPlanService:
     ) -> ModelGenerationPlan:
         try:
             return await self._build_guidance_generator.generate(spec, plan)
+        except (LLMAuthError, LLMQuotaError, GuidanceProviderConfigurationError):
+            raise
         except Exception as exc:
             logger.warning(
                 "paper_build_guidance_unhandled_fail_closed reason_code=%s exception_code=%s",
@@ -612,19 +632,24 @@ class PaperPlanService:
         block_recommendations: list[BlockRecommendation],
         parameter_mapping: list[ParameterMapping],
         spec: PaperSpec,
+        *,
+        paper_id: str | None = None,
     ) -> list[ModelBuildStepDraft]:
         self._clear_build_steps_dependency_audit()
         source_refs = build_plan_evidence_source_refs(spec)
         prompt_version = load_prompt_template("paper_plan_build_steps.yaml").version
-        data = await self._call_llm_json(
-            build_messages_for_build_steps(
-                block_recommendations,
-                parameter_mapping,
-                spec.evidence,
-                source_refs,
-            ),
-            BUILD_STEP_ROLE_NAME,
-        )
+        try:
+            data = await self._call_llm_json(
+                build_messages_for_build_steps(
+                    block_recommendations,
+                    parameter_mapping,
+                    spec.evidence,
+                    source_refs,
+                ),
+                BUILD_STEP_ROLE_NAME,
+            )
+        except (LLMTimeoutError, LLMRateLimitError, LLMServerError) as exc:
+            raise BuildStepsDtoValidationError(_build_steps_transient_reason(exc)) from None
         return self._parse_build_steps_output(
             data,
             document_source_refs=source_refs,
@@ -634,6 +659,7 @@ class PaperPlanService:
             block_candidate_count=len(block_recommendations),
             parameter_mapping_count=len(parameter_mapping),
             rendered_prompt_version=prompt_version,
+            paper_id=paper_id,
         )
 
     async def _llm_build_steps_for_regeneration(
@@ -652,18 +678,21 @@ class PaperPlanService:
             allowed_user_evidence_refs,
         )
         prompt_version = load_prompt_template("paper_plan_build_steps_regenerate.yaml").version
-        data = await self._call_llm_json(
-            build_messages_for_regenerate_build_steps(
-                block_recommendations,
-                parameter_mapping,
-                spec.evidence,
-                record_plan_evidence,
-                source_refs,
-                allowed_user_evidence_refs=allowed_user_evidence_refs,
-                allowed_user_prompt_ids=allowed_user_prompt_ids,
-            ),
-            BUILD_STEP_REGENERATION_ROLE_NAME,
-        )
+        try:
+            data = await self._call_llm_json(
+                build_messages_for_regenerate_build_steps(
+                    block_recommendations,
+                    parameter_mapping,
+                    spec.evidence,
+                    record_plan_evidence,
+                    source_refs,
+                    allowed_user_evidence_refs=allowed_user_evidence_refs,
+                    allowed_user_prompt_ids=allowed_user_prompt_ids,
+                ),
+                BUILD_STEP_REGENERATION_ROLE_NAME,
+            )
+        except (LLMTimeoutError, LLMRateLimitError, LLMServerError) as exc:
+            raise BuildStepsDtoValidationError(_build_steps_transient_reason(exc)) from None
         return self._parse_build_steps_output(
             data,
             document_source_refs=source_refs,
@@ -686,8 +715,10 @@ class PaperPlanService:
         block_candidate_count: int | None = None,
         parameter_mapping_count: int | None = None,
         rendered_prompt_version: str | None = None,
+        paper_id: str | None = None,
     ) -> list[ModelBuildStepDraft]:
         raw_data = data
+        gate_events: list[BuildStepsGateEvent] = []
         self._record_build_steps_dependency_audit(
             raw_data,
             role_name=role_name,
@@ -700,22 +731,54 @@ class PaperPlanService:
             data,
             document_source_refs=document_source_refs,
             user_source_refs=user_source_refs,
+            gate_events=gate_events,
         )
         _log_omitted_build_step_block_reference_count(raw_data, role_name=role_name)
-        if data.get("build_steps") == []:
+        build_steps_payload = data.get("build_steps")
+        if build_steps_payload == []:
             raise BuildStepsDtoValidationError("empty_steps")
-        try:
-            model = _BuildStepsOutputModel.model_validate(data)
-        except ValidationError as exc:
-            self._record_build_steps_dto_validation_errors(exc, role_name=role_name)
-            reason_code = _build_steps_final_validation_reason(exc)
-            logger.error(
-                "paper_plan_build_steps_dto_failed role=%s reason_code=%s",
-                role_name,
-                reason_code,
+        if not isinstance(build_steps_payload, list):
+            raise BuildStepsDtoValidationError("dto_invalid")
+        drafts: list[ModelBuildStepDraft] = []
+        for index, item in enumerate(build_steps_payload):
+            sanitized_item = _sanitize_build_step_draft_item(
+                item,
+                gate_events,
+                item_path=f"build_steps[{index}]",
             )
-            raise BuildStepsDtoValidationError(reason_code) from None
-        return model.to_drafts()
+            if sanitized_item is _DROP_BUILD_STEP_ITEM:
+                continue
+            try:
+                model = _ModelBuildStepDraftModel.model_validate(sanitized_item)
+            except ValidationError as exc:
+                self._record_build_steps_dto_validation_errors(exc, role_name=role_name)
+                reason_code = _build_steps_final_validation_reason(exc)
+                gate_events.append(
+                    BuildStepsGateEvent(
+                        stage="draft_dto",
+                        reason_code=reason_code,
+                        item_path=f"build_steps[{index}]",
+                        data_kind="build_steps",
+                        action="item_degraded",
+                    )
+                )
+                logger.error(
+                    "paper_plan_build_steps_dto_failed role=%s reason_code=%s",
+                    role_name,
+                    reason_code,
+                )
+                continue
+            drafts.append(model.to_draft())
+        self._log_build_steps_gate_events(
+            gate_events,
+            role_name=role_name,
+            paper_id=paper_id,
+            prompt_version=rendered_prompt_version,
+            final_artifact_present=bool(drafts),
+        )
+        if not drafts:
+            raise BuildStepsDtoValidationError("dto_invalid")
+        return drafts
 
     def _record_build_steps_dto_validation_errors(
         self,
@@ -1001,32 +1064,97 @@ class PaperPlanService:
             if draft_name != sentinel_name:
                 self._raise_generation_error(role_name, "missing_prompt_parameter_mismatch")
 
+    def _degrade_build_step_evidence(
+        self,
+        build_steps: list[ModelBuildStep],
+        spec: PaperSpec,
+        *,
+        paper_id: str | None = None,
+    ) -> list[ModelBuildStep]:
+        gate_events: list[BuildStepsGateEvent] = []
+        sanitized_steps: list[ModelBuildStep] = []
+        for step_index, step in enumerate(build_steps):
+            step_evidence = self._valid_build_step_evidence_entries(
+                step.evidence,
+                spec,
+                gate_events,
+                item_path=f"steps[{step_index}].evidence",
+            )
+            block_refs = []
+            for ref_index, block_ref in enumerate(step.block_refs):
+                paper_reference = block_ref.paper_reference
+                if paper_reference is not None:
+                    valid_reference = self._valid_build_step_evidence_entries(
+                        [paper_reference],
+                        spec,
+                        gate_events,
+                        item_path=f"steps[{step_index}].block_refs[{ref_index}].paper_reference",
+                    )
+                    paper_reference = valid_reference[0] if valid_reference else None
+                block_refs.append(replace(block_ref, paper_reference=paper_reference))
+            configuration_hints = []
+            for hint_index, configuration_hint in enumerate(step.configuration_hints):
+                hint_evidence = self._valid_build_step_evidence_entries(
+                    configuration_hint.evidence,
+                    spec,
+                    gate_events,
+                    item_path=f"steps[{step_index}].configuration_hints[{hint_index}].evidence",
+                )
+                configuration_hints.append(replace(configuration_hint, evidence=hint_evidence))
+            sanitized_steps.append(
+                replace(
+                    step,
+                    block_refs=block_refs,
+                    configuration_hints=configuration_hints,
+                    evidence=step_evidence,
+                )
+            )
+        self._log_build_steps_gate_events(
+            gate_events,
+            role_name=BUILD_STEP_ROLE_NAME,
+            paper_id=paper_id,
+            prompt_version=load_prompt_template("paper_plan_build_steps.yaml").version,
+            final_artifact_present=bool(sanitized_steps),
+        )
+        return sanitized_steps
+
     def _validate_build_step_evidence(
         self,
         build_steps: list[ModelBuildStep],
         spec: PaperSpec,
-    ) -> None:
-        for step in build_steps:
-            validate_build_step_evidence_for_spec(
-                step.evidence,
-                spec,
-                allowed_user_prompt_ids=frozenset(),
-            )
-            validate_build_step_evidence_for_spec(
-                [
-                    block_ref.paper_reference
-                    for block_ref in step.block_refs
-                    if block_ref.paper_reference is not None
-                ],
-                spec,
-                allowed_user_prompt_ids=frozenset(),
-            )
-            for configuration_hint in step.configuration_hints:
+    ) -> list[ModelBuildStep]:
+        return self._degrade_build_step_evidence(build_steps, spec)
+
+    def _valid_build_step_evidence_entries(
+        self,
+        entries: list[PaperEvidenceEntry],
+        spec: PaperSpec,
+        gate_events: list[BuildStepsGateEvent],
+        *,
+        item_path: str,
+    ) -> list[PaperEvidenceEntry]:
+        valid_entries: list[PaperEvidenceEntry] = []
+        for index, entry in enumerate(entries):
+            try:
                 validate_build_step_evidence_for_spec(
-                    configuration_hint.evidence,
+                    [entry],
                     spec,
                     allowed_user_prompt_ids=frozenset(),
                 )
+            except BuildStepsEvidenceError as exc:
+                gate_events.append(
+                    BuildStepsGateEvent(
+                        stage="evidence_validation",
+                        reason_code=exc.reason_code,
+                        item_path=f"{item_path}[{index}]",
+                        data_kind="evidence",
+                        action="field_degraded",
+                        claimed_source_kind=entry.source.value,
+                    )
+                )
+                continue
+            valid_entries.append(entry)
+        return valid_entries
 
     def _log_build_steps_fallback(self, exc: BuildStepsStructuredError) -> None:
         audit = self.build_steps_dependency_audit()
@@ -1041,6 +1169,46 @@ class PaperPlanService:
             "paper_plan_build_steps_fallback reason_code=%s",
             exc.reason_code,
         )
+
+    def _log_build_steps_gate_events(
+        self,
+        events: list[BuildStepsGateEvent],
+        *,
+        role_name: str,
+        paper_id: str | None,
+        prompt_version: str | None,
+        final_artifact_present: bool,
+    ) -> None:
+        if not events:
+            return
+        model_version = _provider_model_version(self._text_provider)
+        paper_id_pseudonym = _paper_id_pseudonym(paper_id)
+        correlation_id = paper_id_pseudonym or "paper-plan-local"
+        for event in events:
+            logger.info(
+                "paper_content_gate correlation_id=%s paper_id_pseudonym=%s "
+                "artifact_kind=%s role=%s attempt=%s stage=%s rule_code=%s "
+                "existing_subcode=%s item_path=%s data_kind=%s claimed_source_kind=%s "
+                "action=%s opportunity_count=%s hit_count=%s final_artifact_present=%s "
+                "model_version=%s prompt_version=%s",
+                correlation_id,
+                paper_id_pseudonym,
+                "build_steps",
+                role_name,
+                1,
+                event.stage,
+                event.reason_code,
+                event.reason_code,
+                event.item_path,
+                event.data_kind,
+                event.claimed_source_kind,
+                event.action,
+                1,
+                1,
+                final_artifact_present,
+                model_version,
+                prompt_version,
+            )
 
     def build_steps_dependency_audit(self) -> DependencyAudit:
         if self._last_build_steps_dependency_audit is None:
@@ -1197,12 +1365,12 @@ class _ModelBuildStepDraftModel(BaseModel):
     step_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
     intent: str = Field(min_length=1)
-    block_refs: list[_StepBlockRefDraftModel]
-    parameter_refs: list[ParameterMappingRefModel]
-    connection_hints: list[ConnectionHintModel]
-    configuration_hints: list[ConfigurationHintModel]
-    depends_on: list[str]
-    evidence: list[PaperEvidenceEntryModel]
+    block_refs: list[_StepBlockRefDraftModel] = Field(default_factory=list)
+    parameter_refs: list[ParameterMappingRefModel] = Field(default_factory=list)
+    connection_hints: list[ConnectionHintModel] = Field(default_factory=list)
+    configuration_hints: list[ConfigurationHintModel] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list)
+    evidence: list[PaperEvidenceEntryModel] = Field(default_factory=list)
 
     def to_draft(self) -> ModelBuildStepDraft:
         return ModelBuildStepDraft(
@@ -1225,6 +1393,16 @@ class _BuildStepsOutputModel(BaseModel):
 
     def to_drafts(self) -> list[ModelBuildStepDraft]:
         return [step.to_draft() for step in self.build_steps]
+
+
+def _build_steps_transient_reason(
+    exc: LLMTimeoutError | LLMRateLimitError | LLMServerError,
+) -> str:
+    if isinstance(exc, LLMTimeoutError):
+        return "provider_timeout"
+    if isinstance(exc, LLMRateLimitError):
+        return "provider_rate_limited"
+    return "provider_server_error"
 
 
 def _mscript_degradation_code(exc: Exception) -> MScriptDegradationCode:
@@ -1251,8 +1429,9 @@ def _resolve_build_steps_draft_evidence_payload(
     *,
     document_source_refs: list[PlanEvidenceSourceRef],
     user_source_refs: list[BuildStepUserEvidenceSourceRef],
+    gate_events: list[BuildStepsGateEvent] | None = None,
 ) -> dict[str, Any]:
-    source_index = _build_step_source_ref_index(
+    source_index, invalid_source_refs = _build_step_source_ref_index(
         document_source_refs=document_source_refs,
         user_source_refs=user_source_refs,
     )
@@ -1261,7 +1440,14 @@ def _resolve_build_steps_draft_evidence_payload(
     if not isinstance(steps, list):
         return result
     result["build_steps"] = [
-        _resolve_build_step_draft_evidence(step, source_index) for step in steps
+        _resolve_build_step_draft_evidence(
+            step,
+            source_index,
+            invalid_source_refs,
+            gate_events=gate_events,
+            item_path=f"build_steps[{index}]",
+        )
+        for index, step in enumerate(steps)
     ]
     return result
 
@@ -1270,24 +1456,30 @@ def _build_step_source_ref_index(
     *,
     document_source_refs: list[PlanEvidenceSourceRef],
     user_source_refs: list[BuildStepUserEvidenceSourceRef],
-) -> dict[str, list[dict[str, Any]]]:
+) -> tuple[dict[str, list[dict[str, Any]]], set[str]]:
     index: dict[str, list[dict[str, Any]]] = {}
+    invalid_source_refs: set[str] = set()
     for document_entry in document_source_refs:
-        index.setdefault(document_entry.source_ref, []).append(
-            _document_evidence_payload_from_source_ref(document_entry)
-        )
+        payload = _document_evidence_payload_from_source_ref(document_entry)
+        if payload is _DROP_EVIDENCE:
+            invalid_source_refs.add(document_entry.source_ref)
+            continue
+        index.setdefault(document_entry.source_ref, []).append(cast(dict[str, Any], payload))
     for user_entry in user_source_refs:
         try:
             payload = PaperEvidenceEntryModel.from_domain(user_entry.evidence).model_dump(
                 mode="json"
             )
         except ValidationError:
-            raise BuildStepsDtoValidationError("final_evidence_invalid") from None
+            invalid_source_refs.add(user_entry.source_ref)
+            continue
         index.setdefault(user_entry.source_ref, []).append(payload)
-    return index
+    return index, invalid_source_refs
 
 
-def _document_evidence_payload_from_source_ref(entry: PlanEvidenceSourceRef) -> dict[str, Any]:
+def _document_evidence_payload_from_source_ref(
+    entry: PlanEvidenceSourceRef,
+) -> dict[str, Any] | object:
     payload: dict[str, Any] = {
         "source": EvidenceSource.DOCUMENT_EXTRACTED.value,
         "document_id": entry.document_id,
@@ -1304,12 +1496,16 @@ def _document_evidence_payload_from_source_ref(entry: PlanEvidenceSourceRef) -> 
     try:
         return PaperEvidenceEntryModel.model_validate(payload).model_dump(mode="json")
     except ValidationError:
-        raise BuildStepsDtoValidationError("final_evidence_invalid") from None
+        return _DROP_EVIDENCE
 
 
 def _resolve_build_step_draft_evidence(
     step: object,
     source_index: dict[str, list[dict[str, Any]]],
+    invalid_source_refs: set[str],
+    *,
+    gate_events: list[BuildStepsGateEvent] | None,
+    item_path: str,
 ) -> object:
     if not isinstance(step, dict):
         return step
@@ -1318,78 +1514,189 @@ def _resolve_build_step_draft_evidence(
     block_refs = result.get("block_refs")
     if isinstance(block_refs, list):
         result["block_refs"] = [
-            _resolve_build_step_block_ref_evidence(block_ref, source_index)
-            for block_ref in block_refs
+            _resolve_build_step_block_ref_evidence(
+                block_ref,
+                source_index,
+                invalid_source_refs,
+                gate_events=gate_events,
+                item_path=f"{item_path}.block_refs[{index}]",
+            )
+            for index, block_ref in enumerate(block_refs)
         ]
 
     configuration_hints = result.get("configuration_hints")
     if isinstance(configuration_hints, list):
         result["configuration_hints"] = [
-            _resolve_build_step_configuration_hint_evidence(hint, source_index)
-            for hint in configuration_hints
+            _resolve_build_step_configuration_hint_evidence(
+                hint,
+                source_index,
+                invalid_source_refs,
+                gate_events=gate_events,
+                item_path=f"{item_path}.configuration_hints[{index}]",
+            )
+            for index, hint in enumerate(configuration_hints)
         ]
 
     evidence = result.get("evidence")
     if isinstance(evidence, list):
-        result["evidence"] = [
-            _resolve_build_step_draft_evidence_entry(entry, source_index) for entry in evidence
-        ]
+        resolved_evidence = []
+        for index, entry in enumerate(evidence):
+            resolved = _resolve_build_step_draft_evidence_entry(
+                entry,
+                source_index,
+                invalid_source_refs,
+                gate_events=gate_events,
+                item_path=f"{item_path}.evidence[{index}]",
+            )
+            if resolved is not _DROP_EVIDENCE:
+                resolved_evidence.append(resolved)
+        result["evidence"] = resolved_evidence
     return result
 
 
 def _resolve_build_step_block_ref_evidence(
     block_ref: object,
     source_index: dict[str, list[dict[str, Any]]],
+    invalid_source_refs: set[str],
+    *,
+    gate_events: list[BuildStepsGateEvent] | None,
+    item_path: str,
 ) -> object:
     if not isinstance(block_ref, dict):
         return block_ref
     result = dict(block_ref)
     if result.get("paper_reference") is not None:
-        result["paper_reference"] = _resolve_build_step_draft_evidence_entry(
+        resolved = _resolve_build_step_draft_evidence_entry(
             result["paper_reference"],
             source_index,
+            invalid_source_refs,
+            gate_events=gate_events,
+            item_path=f"{item_path}.paper_reference",
         )
+        result["paper_reference"] = None if resolved is _DROP_EVIDENCE else resolved
     return result
 
 
 def _resolve_build_step_configuration_hint_evidence(
     hint: object,
     source_index: dict[str, list[dict[str, Any]]],
+    invalid_source_refs: set[str],
+    *,
+    gate_events: list[BuildStepsGateEvent] | None,
+    item_path: str,
 ) -> object:
     if not isinstance(hint, dict):
         return hint
     result = dict(hint)
     evidence = result.get("evidence")
     if isinstance(evidence, list):
-        result["evidence"] = [
-            _resolve_build_step_draft_evidence_entry(entry, source_index) for entry in evidence
-        ]
+        resolved_evidence = []
+        for index, entry in enumerate(evidence):
+            resolved = _resolve_build_step_draft_evidence_entry(
+                entry,
+                source_index,
+                invalid_source_refs,
+                gate_events=gate_events,
+                item_path=f"{item_path}.evidence[{index}]",
+            )
+            if resolved is not _DROP_EVIDENCE:
+                resolved_evidence.append(resolved)
+        result["evidence"] = resolved_evidence
     return result
 
 
 def _resolve_build_step_draft_evidence_entry(
     payload: object,
     source_index: dict[str, list[dict[str, Any]]],
-) -> dict[str, Any]:
+    invalid_source_refs: set[str],
+    *,
+    gate_events: list[BuildStepsGateEvent] | None,
+    item_path: str,
+) -> dict[str, Any] | object:
     if not isinstance(payload, dict):
-        raise BuildStepsDtoValidationError("draft_schema_invalid") from None
+        _append_build_steps_gate_event(
+            gate_events,
+            "draft_dto",
+            "draft_schema_invalid",
+            item_path,
+            "evidence",
+            "field_degraded",
+        )
+        return _DROP_EVIDENCE
     source_ref = payload.get(PLAN_EVIDENCE_SOURCE_REF_FIELD, _MISSING)
     if source_ref is _MISSING or source_ref is None:
-        raise BuildStepsDtoValidationError("source_ref_missing") from None
+        _append_build_steps_gate_event(
+            gate_events,
+            "source_ref_resolution",
+            "source_ref_missing",
+            item_path,
+            "evidence",
+            "field_degraded",
+        )
+        return _DROP_EVIDENCE
     if not isinstance(source_ref, str):
-        raise BuildStepsDtoValidationError("source_ref_type_invalid") from None
+        _append_build_steps_gate_event(
+            gate_events,
+            "source_ref_resolution",
+            "source_ref_type_invalid",
+            item_path,
+            "evidence",
+            "field_degraded",
+        )
+        return _DROP_EVIDENCE
     if not source_ref.strip():
-        raise BuildStepsDtoValidationError("source_ref_missing") from None
+        _append_build_steps_gate_event(
+            gate_events,
+            "source_ref_resolution",
+            "source_ref_missing",
+            item_path,
+            "evidence",
+            "field_degraded",
+        )
+        return _DROP_EVIDENCE
     try:
         _BuildStepDraftEvidenceModel.model_validate(payload)
     except ValidationError:
-        raise BuildStepsDtoValidationError("draft_schema_invalid") from None
+        _append_build_steps_gate_event(
+            gate_events,
+            "draft_dto",
+            "draft_schema_invalid",
+            item_path,
+            "evidence",
+            "field_degraded",
+        )
 
+    if source_ref in invalid_source_refs:
+        _append_build_steps_gate_event(
+            gate_events,
+            "source_ref_resolution",
+            "final_evidence_invalid",
+            item_path,
+            "evidence",
+            "field_degraded",
+        )
+        return _DROP_EVIDENCE
     matches = source_index.get(source_ref, [])
     if not matches:
-        raise BuildStepsDtoValidationError("source_ref_no_match") from None
+        _append_build_steps_gate_event(
+            gate_events,
+            "source_ref_resolution",
+            "source_ref_no_match",
+            item_path,
+            "evidence",
+            "field_degraded",
+        )
+        return _DROP_EVIDENCE
     if len(matches) > 1:
-        raise BuildStepsDtoValidationError("source_ref_ambiguous") from None
+        _append_build_steps_gate_event(
+            gate_events,
+            "source_ref_resolution",
+            "source_ref_ambiguous",
+            item_path,
+            "evidence",
+            "field_degraded",
+        )
+        return _DROP_EVIDENCE
     return dict(matches[0])
 
 
@@ -1404,6 +1711,177 @@ def _build_steps_final_validation_reason(exc: ValidationError) -> str:
         if loc_parts & {"evidence", "paper_reference"}:
             return "final_evidence_invalid"
     return "dto_invalid"
+
+
+def _sanitize_build_step_draft_item(
+    item: object,
+    gate_events: list[BuildStepsGateEvent],
+    *,
+    item_path: str,
+) -> object:
+    if not isinstance(item, dict):
+        gate_events.append(
+            BuildStepsGateEvent(
+                stage="draft_dto",
+                reason_code="dto_invalid",
+                item_path=item_path,
+                data_kind="build_steps",
+                action="item_degraded",
+            )
+        )
+        return _DROP_BUILD_STEP_ITEM
+    allowed_keys = set(_ModelBuildStepDraftModel.model_fields)
+    sanitized = {key: value for key, value in item.items() if key in allowed_keys}
+    if len(sanitized) != len(item):
+        gate_events.append(
+            BuildStepsGateEvent(
+                stage="draft_dto",
+                reason_code="draft_schema_invalid",
+                item_path=item_path,
+                data_kind="build_steps",
+                action="field_degraded",
+            )
+        )
+    for field_name in (
+        "block_refs",
+        "parameter_refs",
+        "connection_hints",
+        "configuration_hints",
+        "depends_on",
+        "evidence",
+    ):
+        value = sanitized.get(field_name)
+        if value is None:
+            sanitized[field_name] = []
+            continue
+        if not isinstance(value, list):
+            gate_events.append(
+                BuildStepsGateEvent(
+                    stage="draft_dto",
+                    reason_code=f"{field_name}_must_be_array",
+                    item_path=f"{item_path}.{field_name}",
+                    data_kind=_data_kind_for_build_step_field(field_name),
+                    action="field_degraded",
+                )
+            )
+            sanitized[field_name] = []
+    for field_name, model_cls in (
+        ("block_refs", _StepBlockRefDraftModel),
+        ("parameter_refs", ParameterMappingRefModel),
+        ("connection_hints", ConnectionHintModel),
+        ("configuration_hints", ConfigurationHintModel),
+        ("evidence", PaperEvidenceEntryModel),
+    ):
+        value = sanitized.get(field_name)
+        if isinstance(value, list):
+            sanitized[field_name] = _sanitize_build_step_nested_items(
+                value,
+                model_cls,
+                gate_events,
+                item_path=f"{item_path}.{field_name}",
+                data_kind=_data_kind_for_build_step_field(field_name),
+            )
+    return sanitized
+
+
+def _sanitize_build_step_nested_items(
+    items: list[object],
+    model_cls: type[BaseModel],
+    gate_events: list[BuildStepsGateEvent],
+    *,
+    item_path: str,
+    data_kind: str,
+) -> list[object]:
+    sanitized_items: list[object] = []
+    allowed_keys = set(model_cls.model_fields)
+    for index, item in enumerate(items):
+        nested_path = f"{item_path}[{index}]"
+        if not isinstance(item, dict):
+            gate_events.append(
+                BuildStepsGateEvent(
+                    stage="draft_dto",
+                    reason_code="dto_invalid",
+                    item_path=nested_path,
+                    data_kind=data_kind,
+                    action="item_degraded",
+                )
+            )
+            continue
+        nested = {key: value for key, value in item.items() if key in allowed_keys}
+        if len(nested) != len(item):
+            gate_events.append(
+                BuildStepsGateEvent(
+                    stage="draft_dto",
+                    reason_code="draft_schema_invalid",
+                    item_path=nested_path,
+                    data_kind=data_kind,
+                    action="field_degraded",
+                )
+            )
+        try:
+            model_cls.model_validate(nested)
+        except ValidationError:
+            gate_events.append(
+                BuildStepsGateEvent(
+                    stage="draft_dto",
+                    reason_code="dto_invalid",
+                    item_path=nested_path,
+                    data_kind=data_kind,
+                    action="item_degraded",
+                )
+            )
+            continue
+        sanitized_items.append(nested)
+    return sanitized_items
+
+
+def _data_kind_for_build_step_field(field_name: str) -> str:
+    if field_name == "block_refs":
+        return "block"
+    if field_name == "parameter_refs":
+        return "parameter"
+    if field_name == "connection_hints":
+        return "connection"
+    if field_name == "configuration_hints":
+        return "configuration"
+    if field_name == "evidence":
+        return "evidence"
+    return "build_steps"
+
+
+def _append_build_steps_gate_event(
+    gate_events: list[BuildStepsGateEvent] | None,
+    stage: str,
+    reason_code: str,
+    item_path: str,
+    data_kind: str,
+    action: str,
+    *,
+    claimed_source_kind: str | None = None,
+) -> None:
+    if gate_events is None:
+        return
+    gate_events.append(
+        BuildStepsGateEvent(
+            stage=stage,
+            reason_code=reason_code,
+            item_path=item_path,
+            data_kind=data_kind,
+            action=action,
+            claimed_source_kind=claimed_source_kind,
+        )
+    )
+
+
+def _paper_id_pseudonym(paper_id: str | None) -> str | None:
+    if paper_id is None:
+        return None
+    digest = hashlib.sha256(paper_id.encode("utf-8")).hexdigest()
+    return digest[:16]
+
+
+def _provider_model_version(provider: TextProvider) -> str | None:
+    return provider.capability().model_name
 
 
 def _log_omitted_build_step_block_reference_count(

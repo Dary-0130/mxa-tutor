@@ -680,11 +680,6 @@ class ModelGenerationPlanModel(_StrictBaseModel):
                 raise ValueError("generated guidance requires v2 build_guidance")
             if not self.build_guidance.details:
                 raise ValueError("generated guidance requires details")
-            if not any(
-                detail.basis in {"document_extracted", "document_derived"} and detail.evidence
-                for detail in self.build_guidance.details
-            ):
-                raise ValueError("generated guidance requires document detail evidence")
             self._validate_generated_block_ref_choices()
             return self
         if (

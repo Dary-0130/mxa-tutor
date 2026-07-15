@@ -355,8 +355,10 @@ async def test_build_step_redline_does_not_retry() -> None:
     updated = await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
 
     assert plan_service.build_calls == 1
-    assert updated.build_steps is None
+    assert updated.build_steps is not None
+    assert updated.build_steps[0].title == "Bind H with 3.5 s"
     assert updated.m_script_skeleton == "clear; clc;"
+    assert updated.guidance_status == "stale_pending_regeneration"
 
 
 @pytest.mark.asyncio
