@@ -451,7 +451,7 @@ export function guidanceViewState(plan: ModelGenerationPlan): GuidanceViewState 
     return "failed_retryable";
   }
   if (plan.guidance_status === "no_document_basis") {
-    return "no_basis";
+    return plan.build_guidance ? "no_basis" : "failed_retryable";
   }
   return "not_generated";
 }

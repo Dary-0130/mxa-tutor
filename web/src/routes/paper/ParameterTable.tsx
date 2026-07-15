@@ -41,6 +41,12 @@ type SourceRow = {
   user_supplied_value?: string | null;
 };
 
+const EMPTY_ARRAY: never[] = [];
+
+function arrayOrEmpty<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : EMPTY_ARRAY;
+}
+
 function mergeRows(
   mappings: ParameterMapping[],
   prompts: MissingParameterPrompt[],
@@ -141,9 +147,13 @@ export function ParameterTable({
   const [drafts, setDrafts] = useState<DraftMap>({});
   const [correctionDrafts, setCorrectionDrafts] = useState<CorrectionDraftMap>({});
   const [editingCorrectionKey, setEditingCorrectionKey] = useState<string | null>(null);
+  const parameterMappings = arrayOrEmpty(plan.parameter_mapping);
+  const missingPrompts = arrayOrEmpty(remainingMissingPrompts);
+  const corrections = arrayOrEmpty(parameterCorrections);
+  const planEvidence = arrayOrEmpty(plan.evidence);
   const rows = useMemo(
-    () => mergeRows(plan.parameter_mapping, remainingMissingPrompts),
-    [plan.parameter_mapping, remainingMissingPrompts],
+    () => mergeRows(parameterMappings, missingPrompts),
+    [parameterMappings, missingPrompts],
   );
   const { status, submit } = useUserSupply({ paperId, onPlanUpdate });
   const {
@@ -155,7 +165,7 @@ export function ParameterTable({
   } = useParameterCorrection({ paperId, onPlanUpdate });
   const message = statusMessage(status);
   const correctionMessage = correctionErrorMessage(correctionError);
-  const hasPendingPrompts = remainingMissingPrompts.length > 0;
+  const hasPendingPrompts = missingPrompts.length > 0;
 
   const updateDraft = (promptId: string, field: "value" | "unit", value: string) => {
     setDrafts((current) => ({
@@ -168,7 +178,7 @@ export function ParameterTable({
   };
 
   const submitDrafts = () => {
-    const responses: UserSuppliedResponse[] = remainingMissingPrompts.flatMap((prompt) => {
+    const responses: UserSuppliedResponse[] = missingPrompts.flatMap((prompt) => {
       const draft = drafts[prompt.prompt_id];
       const value = draft?.value.trim();
       if (!value) {
@@ -255,7 +265,7 @@ export function ParameterTable({
           const prompt = row.prompt;
           const activeCorrection =
             row.mapping && row.mappingIndex !== undefined
-              ? correctionForMapping(parameterCorrections, row.mapping, row.mappingIndex)
+              ? correctionForMapping(corrections, row.mapping, row.mappingIndex)
               : undefined;
           const promptAnchorId = prompt ? makeMissingPromptAnchorId(prompt.prompt_id) : undefined;
           const mappingAnchorId =
@@ -416,7 +426,7 @@ export function ParameterTable({
         <button
           className="paper-primary-button"
           type="button"
-          disabled={status === "submitting" || remainingMissingPrompts.length === 0}
+          disabled={status === "submitting" || missingPrompts.length === 0}
           onClick={submitDrafts}
         >
           提交补充
@@ -427,11 +437,11 @@ export function ParameterTable({
       </div>
       <GlassCard className="paper-readable-card paper-plan-evidence">
         <h3>路线图整体依据</h3>
-        {plan.evidence.length === 0 ? (
+        {planEvidence.length === 0 ? (
           <p className="empty-state-text">暂无可展示的参数对照。</p>
         ) : (
           <ul>
-            {plan.evidence.map((entry, index) => (
+            {planEvidence.map((entry, index) => (
               <li key={`${entry.paper_section_id ?? "evidence"}-${index}`}>
                 {formatEvidence(entry, { emptyText: "依据:未标注" })}
               </li>
