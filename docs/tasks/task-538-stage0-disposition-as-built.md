@@ -12,6 +12,13 @@ Contract resolutions applied in this PR:
 
 Old-cache strategy: historical ready bundles with `build_steps=null` are not auto-migrated. They remain bounded as old records and require existing rerun/manual regeneration paths. SQLite DDL and public schema stay byte-stable.
 
+Deferred work explicitly left out of this backend block:
+
+- 2410 true-run + `root_json_failure_rate`: run after blocks 2 + 3 + 4 are all present, using Decision 28 paired-eval reporting. This is a supporting observation only, not the correctness proof for this PR.
+- Complete deploy compatibility matrix (`new frontend + old backend`, `old frontend + new backend`, `new + new`): deferred to 538-2b.
+- Guidance recovery entry and retry-button predicate: block 3.
+- Raw completion recorder and one unified cross-sink privacy sentinel spanning production logs / DB / API / telemetry: block 4.
+
 ## 47-Row Disposition Table
 
 | # | Baseline file:line | Branch / risk | As-built disposition |
@@ -48,8 +55,8 @@ Old-cache strategy: historical ready bundles with `build_steps=null` are not aut
 | 30 | `features/paper/paper_plan_service.py:639` | build_steps regeneration transient provider error | Same precise transient fallback. |
 | 31 | `features/paper/paper_plan_service.py:325` | guidance generator broad failure | Fail-closed only for content/guidance exceptions; auth/config propagate. |
 | 32 | `features/paper/build_guidance_generator.py:446` | guidance no document basis terminal | New generation returns `generation_failed`, not new `no_document_basis`; old status remains readable. |
-| 33 | `features/paper/build_guidance_generator.py:446` | guidance unresolved evidence handle | Generated guidance can survive as unverified detail plus gaps. |
-| 34 | `features/paper/build_guidance_generator.py:446` | guidance grounding mismatch | Detail is downgraded to unverified; no fake evidence badge. |
+| 33 | `features/paper/build_guidance_generator.py:446` | guidance unresolved evidence handle | Content/grounding honesty: body remains renderable, evidence is empty, basis is `document_claim_unverified`, and product badge must read as unverified/pending rather than verified-paper. |
+| 34 | `features/paper/build_guidance_generator.py:446` | guidance grounding mismatch | Content/grounding honesty: body remains renderable, evidence is empty, basis is `document_claim_unverified`, and product badge must read as unverified/pending rather than verified-paper. |
 | 35 | `features/paper/build_guidance_generator.py:446` | guidance provider auth/config | Auth and configuration failures propagate; transient provider errors still use retry/failure. |
 | 36 | `features/paper/build_guidance_semantic_validator.py:269` | validator rewrites returns | Changed return rewriting so non-empty downgraded details are kept. |
 | 37 | `features/paper/build_guidance_semantic_validator.py:390` | all document details lost | No longer clears if renderable downgraded details remain; clears only when details are empty. |
@@ -70,4 +77,4 @@ Old-cache strategy: historical ready bundles with `build_steps=null` are not aut
 - Provider carve-out regression tests: build_steps auth/config/cancel propagation and transient fallback; guidance auth/config propagation.
 - Full backend loop: `tests/api/test_paper_query.py::test_get_paper_plan_preserves_unverified_guidance_after_sqlite_readback` covers write, SQLite readback, API serialization, and non-empty build_steps/guidance.
 - Conflict stale carve-out: `tests/features/paper/test_paper_plan_integrity.py` and `tests/api/test_paper_query.py` cover composer hard fail vs API/readback local degradation.
-
+- New `paper_content_gate` log privacy coverage in this PR is split by branch: `tests/features/paper/test_paper_plan_service.py::test_structured_fallback_log_is_reason_coded_metadata_only` covers redline value/unit omission; `tests/features/paper/test_paper_plan_service.py::test_build_step_draft_evidence_fail_closed_with_machine_codes` covers reason-code-only source_ref/evidence failure logs without raw `source_ref` or excerpt; `tests/features/paper/test_paper_plan_service.py::test_dependency_audit_shadows_dto_invalid_terminal_reason` covers dependency/DTO gate logging. A single cross-sink sentinel is deferred to block 4 with the raw completion recorder.
