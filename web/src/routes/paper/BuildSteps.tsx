@@ -4,9 +4,16 @@ import type {
   ModelBuildStep,
   ModelGenerationPlan,
   PaperEvidenceEntry,
+  ConfigurationHint,
   StepBlockRef,
 } from "../../lib/paperTypes";
 import { SourceBadge, type SourceBadgeKind } from "./SourceBadge";
+
+const EMPTY_ARRAY: never[] = [];
+
+function arrayOrEmpty<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : EMPTY_ARRAY;
+}
 
 function sourceToBadgeKind(source: PaperEvidenceEntry["source"]): SourceBadgeKind | null {
   if (source === "document_extracted") return "document_extracted";
@@ -82,6 +89,25 @@ function renderEvidenceItems(entries: PaperEvidenceEntry[]) {
     .filter(Boolean);
 }
 
+function normalizeConfigurationHint(hint: ConfigurationHint): ConfigurationHint {
+  return {
+    ...hint,
+    evidence: arrayOrEmpty(hint.evidence),
+  };
+}
+
+function normalizeBuildStep(step: ModelBuildStep): ModelBuildStep {
+  return {
+    ...step,
+    block_refs: arrayOrEmpty(step.block_refs),
+    parameter_refs: arrayOrEmpty(step.parameter_refs),
+    connection_hints: arrayOrEmpty(step.connection_hints),
+    configuration_hints: arrayOrEmpty(step.configuration_hints).map(normalizeConfigurationHint),
+    depends_on: arrayOrEmpty(step.depends_on),
+    evidence: arrayOrEmpty(step.evidence),
+  };
+}
+
 interface BuildStepsProps {
   plan: ModelGenerationPlan;
   regenerating?: boolean;
@@ -99,10 +125,10 @@ export function BuildSteps({
   onRegenerate,
   onDismissRegenerateMessage,
 }: BuildStepsProps) {
-  const structuredSteps =
-    Array.isArray(plan.build_steps) && plan.build_steps.length > 0 ? plan.build_steps : null;
-  const blockLookup = structuredSteps ? getBlockLookup(structuredSteps) : null;
-  const stepLookup = structuredSteps ? getStepLookup(structuredSteps) : null;
+  const structuredSteps = Array.isArray(plan.build_steps) && plan.build_steps.length > 0 ? plan.build_steps : null;
+  const normalizedSteps = structuredSteps ? structuredSteps.map(normalizeBuildStep) : null;
+  const blockLookup = normalizedSteps ? getBlockLookup(normalizedSteps) : null;
+  const stepLookup = normalizedSteps ? getStepLookup(normalizedSteps) : null;
   const regenerateButton = onRegenerate ? (
     <button
       className="paper-primary-button paper-regenerate-steps-button"
@@ -126,7 +152,7 @@ export function BuildSteps({
       </aside>
     ) : null;
 
-  if (structuredSteps) {
+  if (normalizedSteps) {
     return (
       <div className="paper-build-steps">
         {regenerateButton ? (
@@ -137,7 +163,7 @@ export function BuildSteps({
         ) : null}
         {regenerateNotice}
         <ol className="paper-step-list paper-build-step-list">
-          {structuredSteps.map((step, index) => {
+          {normalizedSteps.map((step, index) => {
             const titleId = `paper-build-step-${index + 1}-title`;
             const stepEvidenceItems = renderEvidenceItems(step.evidence);
             return (

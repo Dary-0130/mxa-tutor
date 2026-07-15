@@ -36,6 +36,12 @@ export type PaperPlanUpdate = {
   parameterCorrections?: ParameterCorrection[];
 };
 
+const EMPTY_ARRAY: never[] = [];
+
+function arrayOrEmpty<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : EMPTY_ARRAY;
+}
+
 type LoadState = {
   data: PaperResultData | null;
   loading: boolean;
@@ -71,17 +77,15 @@ function isUploadDocumentResponse(value: unknown): value is UploadDocumentRespon
     return false;
   }
   const candidate = value as Partial<UploadDocumentResponse>;
-  return Boolean(
-    candidate.paper_id && candidate.spec && candidate.plan && candidate.missing_prompts,
-  );
+  return Boolean(candidate.paper_id && candidate.spec && candidate.plan);
 }
 
 function applyPlanResponse(data: PaperResultData, response: PaperPlanResponse): PaperResultData {
   return {
     ...data,
     plan: response.plan,
-    missingPrompts: response.missing_prompts,
-    remainingMissingPrompts: response.remaining_missing_prompts,
+    missingPrompts: arrayOrEmpty(response.missing_prompts),
+    remainingMissingPrompts: arrayOrEmpty(response.remaining_missing_prompts),
   };
 }
 
@@ -95,9 +99,9 @@ async function fetchPaperResult(paperId: string): Promise<PaperResultData> {
     paperId,
     spec: specResponse.spec,
     plan: planResponse.plan,
-    missingPrompts: planResponse.missing_prompts,
-    remainingMissingPrompts: planResponse.remaining_missing_prompts,
-    parameterCorrections: correctionsResponse.corrections,
+    missingPrompts: arrayOrEmpty(planResponse.missing_prompts),
+    remainingMissingPrompts: arrayOrEmpty(planResponse.remaining_missing_prompts),
+    parameterCorrections: arrayOrEmpty(correctionsResponse.corrections),
     version: 0,
   };
 }
@@ -112,8 +116,8 @@ export function usePaperResult(paperId: string | undefined) {
       paperId,
       spec: location.state.spec,
       plan: location.state.plan,
-      missingPrompts: location.state.missing_prompts,
-      remainingMissingPrompts: location.state.missing_prompts,
+      missingPrompts: arrayOrEmpty(location.state.missing_prompts),
+      remainingMissingPrompts: arrayOrEmpty(location.state.missing_prompts),
       parameterCorrections: [],
       documentStatuses: location.state.document_statuses,
       version: 0,
@@ -219,7 +223,7 @@ export function usePaperResult(paperId: string | undefined) {
                   ...current,
                   data: {
                     ...applyPlanResponse(current.data, response),
-                    parameterCorrections: corrections.corrections,
+                    parameterCorrections: arrayOrEmpty(corrections.corrections),
                   },
                   loading: false,
                   error: null,
@@ -243,10 +247,18 @@ export function usePaperResult(paperId: string | undefined) {
         data: {
           ...current.data,
           plan: update.plan,
-          missingPrompts: update.missingPrompts ?? current.data.missingPrompts,
+          missingPrompts:
+            update.missingPrompts === undefined
+              ? current.data.missingPrompts
+              : arrayOrEmpty(update.missingPrompts),
           remainingMissingPrompts:
-            update.remainingMissingPrompts ?? current.data.remainingMissingPrompts,
-          parameterCorrections: update.parameterCorrections ?? current.data.parameterCorrections,
+            update.remainingMissingPrompts === undefined
+              ? current.data.remainingMissingPrompts
+              : arrayOrEmpty(update.remainingMissingPrompts),
+          parameterCorrections:
+            update.parameterCorrections === undefined
+              ? current.data.parameterCorrections
+              : arrayOrEmpty(update.parameterCorrections),
         },
         loading: false,
         error: null,
@@ -279,8 +291,8 @@ export function usePaperResult(paperId: string | undefined) {
             paperId: response.paper_id,
             spec: response.spec,
             plan: response.plan,
-            missingPrompts: response.missing_prompts,
-            remainingMissingPrompts: response.remaining_missing_prompts,
+            missingPrompts: arrayOrEmpty(response.missing_prompts),
+            remainingMissingPrompts: arrayOrEmpty(response.remaining_missing_prompts),
             parameterCorrections: [],
             documentStatuses: undefined,
             version: previousVersion + 1,
