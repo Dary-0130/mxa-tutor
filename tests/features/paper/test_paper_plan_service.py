@@ -11,7 +11,12 @@ import pytest
 from pydantic import ValidationError
 
 import features.paper.paper_plan_service as service_module
-from core.domain.exceptions import LLMRateLimitError, PaperPlanGenerationError
+from core.domain.exceptions import (
+    LLMRateLimitError,
+    LLMServerError,
+    LLMTimeoutError,
+    PaperPlanGenerationError,
+)
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry, UserEvidenceAction
 from core.domain.paper_missing import MissingParameterPrompt
 from core.domain.paper_parameter_conflicts import with_parameter_conflicts
@@ -94,7 +99,7 @@ class QueueTextProvider(TextProvider):
 class PayloadPaperPlanService(PaperPlanService):
     def __init__(
         self,
-        payloads: dict[str, dict[str, Any] | Exception],
+        payloads: dict[str, dict[str, Any] | BaseException],
         evidence_tagger: EvidenceTagger | None = None,
     ) -> None:
         super().__init__(NoopTextProvider(), evidence_tagger=evidence_tagger)
@@ -109,7 +114,7 @@ class PayloadPaperPlanService(PaperPlanService):
         _ = messages
         self.calls.append(role_name)
         payload = self.payloads[role_name]
-        if isinstance(payload, Exception):
+        if isinstance(payload, BaseException):
             raise payload
         return copy.deepcopy(payload)
 
@@ -117,7 +122,7 @@ class PayloadPaperPlanService(PaperPlanService):
 class SequencedPayloadPaperPlanService(PaperPlanService):
     def __init__(
         self,
-        payloads: dict[str, list[dict[str, Any] | Exception] | dict[str, Any] | Exception],
+        payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException],
     ) -> None:
         super().__init__(NoopTextProvider())
         self.payloads = payloads
@@ -132,9 +137,27 @@ class SequencedPayloadPaperPlanService(PaperPlanService):
         self.calls.append(role_name)
         payload = self.payloads[role_name]
         item = payload.pop(0) if isinstance(payload, list) else payload
-        if isinstance(item, Exception):
+        if isinstance(item, BaseException):
             raise item
         return copy.deepcopy(item)
+
+
+class CountingPayloadPaperPlanService(SequencedPayloadPaperPlanService):
+    def __init__(
+        self,
+        payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException],
+    ) -> None:
+        super().__init__(payloads)
+        self.guidance_calls = 0
+
+    async def _generate_build_guidance(
+        self,
+        spec: PaperSpec,
+        plan: ModelGenerationPlan,
+    ) -> ModelGenerationPlan:
+        _ = spec
+        self.guidance_calls += 1
+        return plan
 
 
 class RecordingEvidenceTagger(EvidenceTagger):
@@ -277,7 +300,14 @@ async def test_omitted_block_ref_paper_reference_logs_metadata_only(
 
     await PayloadPaperPlanService(payloads).generate(_spec(), "PAPER-001")
 
-    assert info_calls == [
+    build_step_info_calls = [
+        call
+        for call in info_calls
+        if call[0][0]
+        == "paper_plan_build_steps_draft_default_applied role=%s stage=%s field_path=%s "
+        "reason_code=%s count=%s"
+    ]
+    assert build_step_info_calls == [
         (
             (
                 "paper_plan_build_steps_draft_default_applied role=%s stage=%s field_path=%s "
@@ -583,6 +613,86 @@ async def test_plan_composer_structured_retry_reruns_leaf_and_preserves_mscript(
         "build_step_planner",
     ]
     assert context.rescued_leaves == {"plan_composer"}
+
+
+@pytest.mark.asyncio
+async def test_plan_composer_failure_still_aborts_before_build_steps_and_guidance() -> None:
+    payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException] = (
+        _payloads()
+    )
+    payloads["plan_composer"] = [
+        PaperPlanGenerationError(
+            "validation_failed",
+            reason_code="schema_validation",
+            finish_reason="length",
+            leaf="plan_composer",
+            loc=("library_choice",),
+        )
+    ]
+    service = CountingPayloadPaperPlanService(payloads)
+
+    with pytest.raises(PaperPlanGenerationError) as exc_info:
+        await service.generate(_spec(), "PAPER-001", retry_context=StructuredRetryContext())
+
+    assert exc_info.value.leaf == "plan_composer"
+    assert exc_info.value.reason_code == "schema_validation"
+    assert "build_step_planner" not in service.calls
+    assert service.guidance_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_composer_failure_remains_primary_when_mscript_also_degrades() -> None:
+    payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException] = (
+        _payloads()
+    )
+    payloads["plan_composer"] = [
+        PaperPlanGenerationError(
+            "validation_failed",
+            reason_code="schema_validation",
+            finish_reason="length",
+            leaf="plan_composer",
+            loc=("library_choice",),
+        )
+    ]
+    payloads["mscript_drafter"] = [RuntimeError("SECRET_MSCRIPT")]
+    service = CountingPayloadPaperPlanService(payloads)
+
+    with pytest.raises(PaperPlanGenerationError) as exc_info:
+        await service.generate(_spec(), "PAPER-001", retry_context=StructuredRetryContext())
+
+    assert exc_info.value.leaf == "plan_composer"
+    assert exc_info.value.reason_code == "schema_validation"
+    outcome = service.last_mscript_draft_outcome()
+    assert outcome is not None
+    assert outcome.outcome == "degraded"
+    assert outcome.degradation_code == "internal-error"
+    assert "build_step_planner" not in service.calls
+    assert service.guidance_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_build_steps_failure_remains_primary_after_mscript_degradation() -> None:
+    payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException] = (
+        _payloads()
+    )
+    payloads["mscript_drafter"] = [RuntimeError("SECRET_MSCRIPT")]
+    payloads["build_step_planner"] = [
+        PaperPlanGenerationError(
+            "role=build_step_planner: original_failure",
+            reason_code="build_steps_original",
+            leaf="build_step_planner",
+        )
+    ]
+    service = CountingPayloadPaperPlanService(payloads)
+
+    with pytest.raises(PaperPlanGenerationError) as exc_info:
+        await service.generate(_spec(), "PAPER-001")
+
+    assert exc_info.value.reason_code == "build_steps_original"
+    outcome = service.last_mscript_draft_outcome()
+    assert outcome is not None
+    assert outcome.degradation_code == "internal-error"
+    assert service.guidance_calls == 0
 
 
 @pytest.mark.asyncio
@@ -959,6 +1069,90 @@ async def test_mscript_drafter_allows_null_output() -> None:
     assert plan.m_script_skeleton is None
 
 
+@pytest.mark.parametrize(
+    ("mscript_results", "expected_value", "expected_outcome", "expected_code"),
+    [
+        ([{"m_script_skeleton": "clear; clc;"}], "clear; clc;", "generated", None),
+        ([{"m_script_skeleton": None}], None, "returned_null", None),
+        (
+            [LLMTimeoutError("SECRET_TIMEOUT"), LLMTimeoutError("SECRET_TIMEOUT")],
+            None,
+            "degraded",
+            "timeout",
+        ),
+        (
+            [LLMRateLimitError("SECRET_RATE"), LLMServerError("SECRET_SERVER")],
+            None,
+            "degraded",
+            "transient",
+        ),
+        (
+            [
+                PaperPlanGenerationError(
+                    "SECRET_RAW_JSON",
+                    reason_code="invalid_json",
+                    finish_reason="length",
+                    leaf="mscript_drafter",
+                )
+            ],
+            None,
+            "degraded",
+            "truncated",
+        ),
+        ([{"m_script_skeleton": 3.5}], None, "degraded", "schema-invalid"),
+        ([RuntimeError("SECRET_RUNTIME")], None, "degraded", "internal-error"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_mscript_outcomes_do_not_block_build_steps_or_guidance(
+    mscript_results: list[dict[str, Any] | BaseException],
+    expected_value: str | None,
+    expected_outcome: str,
+    expected_code: str | None,
+) -> None:
+    payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException] = (
+        _payloads()
+    )
+    payloads["mscript_drafter"] = mscript_results
+    service = CountingPayloadPaperPlanService(payloads)
+
+    plan, _, _ = await service.generate(_spec(), "PAPER-001")
+
+    assert plan.m_script_skeleton == expected_value
+    outcome = service.last_mscript_draft_outcome()
+    assert outcome is not None
+    assert outcome.outcome == expected_outcome
+    assert outcome.degradation_code == expected_code
+    assert service.calls.count("build_step_planner") == 1
+    assert service.guidance_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_mscript_unparseable_degrades_separately_from_returned_null() -> None:
+    payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException] = (
+        _payloads()
+    )
+    payloads["mscript_drafter"] = [
+        PaperPlanGenerationError(
+            "SECRET_RAW_JSON",
+            reason_code="invalid_json",
+            finish_reason="stop",
+            leaf="mscript_drafter",
+        )
+    ]
+    service = CountingPayloadPaperPlanService(payloads)
+
+    plan, _, _ = await service.generate(_spec(), "PAPER-001")
+
+    assert plan.m_script_skeleton is None
+    outcome = service.last_mscript_draft_outcome()
+    assert outcome is not None
+    assert outcome.outcome == "degraded"
+    assert outcome.degradation_code == "unparseable"
+    assert service.calls.count("build_step_planner") == 1
+    assert service.guidance_calls == 1
+
+
 @pytest.mark.asyncio
 async def test_conflicted_parameter_mapping_is_rejected_without_pruning() -> None:
     with pytest.raises(PaperPlanGenerationError, match="parameter_conflict_mapping"):
@@ -990,8 +1184,31 @@ async def test_mscript_drafter_rejects_conflict_candidate_assignment() -> None:
     payloads["missing_detector"] = {"missing_prompts": []}
     payloads["mscript_drafter"] = {"m_script_skeleton": "clear; clc;\nH = 3.5;"}
 
-    with pytest.raises(PaperPlanGenerationError, match="parameter_conflict_mscript"):
-        await PayloadPaperPlanService(payloads).generate(_conflict_spec(), "PAPER-001")
+    service = CountingPayloadPaperPlanService(payloads)
+    plan, _, _ = await service.generate(_conflict_spec(), "PAPER-001")
+
+    assert plan.m_script_skeleton is None
+    outcome = service.last_mscript_draft_outcome()
+    assert outcome is not None
+    assert outcome.outcome == "degraded"
+    assert outcome.degradation_code == "conflict-guard"
+    assert service.calls.count("build_step_planner") == 1
+    assert service.guidance_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_mscript_cancelled_error_propagates() -> None:
+    payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException] = (
+        _payloads()
+    )
+    payloads["mscript_drafter"] = [asyncio.CancelledError()]
+    service = CountingPayloadPaperPlanService(payloads)
+
+    with pytest.raises(asyncio.CancelledError):
+        await service.generate(_spec(), "PAPER-001")
+
+    assert "build_step_planner" not in service.calls
+    assert service.guidance_calls == 0
 
 
 @pytest.mark.asyncio
@@ -1450,6 +1667,54 @@ async def test_logger_does_not_leak_llm_response_text(monkeypatch: pytest.Monkey
 
     logged_text = " ".join(repr(item) for call in error_calls for item in call[0])
     assert "SECRET_LLM_RAW_TEXT" not in logged_text
+
+
+@pytest.mark.asyncio
+async def test_mscript_degradation_log_sink_failure_does_not_abort_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException] = (
+        _payloads()
+    )
+    payloads["mscript_drafter"] = [RuntimeError("SECRET_MSCRIPT_MESSAGE")]
+    service = CountingPayloadPaperPlanService(payloads)
+
+    def failing_info(*args: object, **kwargs: object) -> None:
+        _ = args, kwargs
+        raise RuntimeError("telemetry sink down")
+
+    monkeypatch.setattr(service_module.logger, "info", failing_info)
+
+    plan, _, _ = await service.generate(_spec(), "PAPER-001")
+
+    assert plan.build_steps is not None
+    assert plan.m_script_skeleton is None
+    outcome = service.last_mscript_draft_outcome()
+    assert outcome is not None
+    assert outcome.degradation_code == "internal-error"
+
+
+@pytest.mark.asyncio
+async def test_mscript_degradation_logs_do_not_include_exception_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    info_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    payloads: dict[str, list[dict[str, Any] | BaseException] | dict[str, Any] | BaseException] = (
+        _payloads()
+    )
+    payloads["mscript_drafter"] = [RuntimeError("SECRET_MSCRIPT_MESSAGE")]
+    service = CountingPayloadPaperPlanService(payloads)
+
+    def fake_info(*args: object, **kwargs: object) -> None:
+        info_calls.append((args, kwargs))
+
+    monkeypatch.setattr(service_module.logger, "info", fake_info)
+
+    await service.generate(_spec(), "PAPER-001")
+
+    logged_text = " ".join(repr(item) for call in info_calls for item in call[0])
+    assert "internal-error" in logged_text
+    assert "SECRET_MSCRIPT_MESSAGE" not in logged_text
 
 
 class _FallbackRecordingPaperPlanService(PayloadPaperPlanService):

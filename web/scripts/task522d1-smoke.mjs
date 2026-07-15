@@ -41,9 +41,10 @@ assert(
 );
 assert(
   resultPage.includes("hasRegenerationWork") &&
-    resultPage.includes("data.plan.m_script_skeleton === null") &&
+    resultPage.includes("structuredSteps == null") &&
+    !resultPage.includes("data.plan.m_script_skeleton === null") &&
     !resultPage.includes("data.parameterCorrections.length > 0"),
-  "regenerate button predicate must stay stricter than backend correction fallback",
+  "regenerate button predicate must only use structured build steps",
 );
 assert(
   errors.includes("regenerate_lock_conflict") && errors.includes("regenerate_store_failed"),
@@ -59,12 +60,9 @@ for (const forbidden of ["AI 重新生成", "基于当前参数重新推导", "�
 }
 
 function shouldShowRegenerateButton(plan) {
-  const structuredSteps = Array.isArray(plan.build_steps) && plan.build_steps.length > 0;
-  return (
-    !structuredSteps ||
-    plan.m_script_skeleton === null ||
-    plan.m_script_skeleton === undefined
-  );
+  const structuredSteps =
+    Array.isArray(plan.build_steps) && plan.build_steps.length > 0 ? plan.build_steps : null;
+  return structuredSteps == null;
 }
 
 assert(
@@ -76,12 +74,26 @@ assert(
   "corrected plan with suppressed build_steps must show regenerate button",
 );
 assert(
+  shouldShowRegenerateButton({
+    build_steps: null,
+    m_script_skeleton: null,
+  }),
+  "suppressed build_steps must show regenerate button even when m_script is null",
+);
+assert(
   !shouldShowRegenerateButton({
     build_steps: [{ step_id: "STEP-001" }],
     m_script_skeleton: "clear; clc;",
     parameterCorrections: [{ correction_id: "CORR-1" }],
   }),
   "complete regenerated plan must hide button even when an active correction remains",
+);
+assert(
+  !shouldShowRegenerateButton({
+    build_steps: [{ step_id: "STEP-001" }],
+    m_script_skeleton: null,
+  }),
+  "complete build steps must hide regenerate button even when m_script is null",
 );
 
 for (const cssClass of [

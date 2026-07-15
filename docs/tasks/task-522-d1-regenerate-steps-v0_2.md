@@ -82,7 +82,7 @@
 
 - [ ] **B. 重生成服务:切 generate 子路径 + mapping-aware mscript**(依据现状地基①②④;★ 顺序按 P0-1 修正)
   - **★ 严格顺序(P0-1,先锁后读,不得颠倒)**:`acquire per-paper 锁`(§ F,失败 409)→ **锁内**读 `record = get(paper_id)`(None → 404 paper_not_found)+ `corrections = list_active_corrections(paper_id)` → 前置谓词判定(§ E)→ 跑 LLM → 护栏 → 断言 → `set_plan` 写回 → 出锁块释放。**禁止在 acquire 前读 record/corrections**(否则读到加锁间隙的 stale snapshot、覆盖期间的撤销/纠错)。对齐 522-B reparse 先例(R6 坐实:reparse 持锁跑完整 LLM 重解析再写回、无读写分离、无写回前 CAS)。
-  - **前置谓词**(§ E 硬谓词):`active corrections 非空 OR build_steps is None OR m_script_skeleton is None` → 允许重生成;否则(无 active 纠错且 build_steps + m_script 均完整)→ 400 regenerate_nothing_to_do(§ E-1)。**冲突参数存在不拒绝重生成**(重生成不消解、护栏兜底)。
+  - **前置谓词**(§ E 硬谓词;TASK-537-A 收窄):`active corrections 非空 OR build_steps is None OR guidance_status="stale_pending_regeneration"` → 允许重生成;否则 → 400 regenerate_nothing_to_do(§ E-1)。`m_script_skeleton=null` 本身不再构成重生成工作。**冲突参数存在不拒绝重生成**(重生成不消解、护栏兜底)。
   - **★ 只切 mscript + build_steps 两段,禁重跑 plan_compose/missing_detect**(R6 坐实可切):
     - `build_steps_result = _llm_build_steps(record.plan.block_recommendations, record.plan.parameter_mapping, record.spec)` —— 复用现函数、传工作值(带纠错值)。**但 R6 坑②:现 build_steps prompt 明写"禁止 user_supplied",须用重生成专用 prompt/role 让 corrected 值可进 build_steps**(§ C-prompt)。
     - `mscript = _llm_mscript_draft_from_mapping(record.plan.parameter_mapping, record.spec.equations, record.spec.parameter_conflicts)` —— 新 mapping-aware helper(§ C-builder)。
@@ -114,9 +114,9 @@
     ```
     允许重生成(任一成立):
       1. build_steps is None(被 C2 压掉 / 首次生成回退)  ← 主用例
-      2. m_script_skeleton is None
-      3. active corrections 非空(即便 build_steps 完整、允许带纠错值覆盖刷新)
-    拒绝(无 active 纠错 且 build_steps + m_script 均完整):
+      2. active corrections 非空(即便 build_steps 完整、允许带纠错值覆盖刷新)
+      3. guidance_status="stale_pending_regeneration"(TASK-528-B guidance 过期恢复入口)
+    拒绝(无 active 纠错 且 build_steps 完整 且 guidance 不过期):
       → 400 regenerate_nothing_to_do;前端不暴露按钮入口
     ```
     理由:有 active correction 即便 build_steps 非 None 也允许覆盖(避免竞态/残留卡死用户);无纠错且产物完整时重跑只是烧 LLM。**比"永远允许覆盖"稳(挡无谓消耗)、比"非 None 就拒"贴纠错场景**。冲突参数存在**不拒绝**(护栏兜底、D2 才消解)。
@@ -192,7 +192,7 @@ async def regenerate_steps(self, paper_id: str) -> ModelGenerationPlan:
         record = await store.get_plan_record(paper_id)          # None → 404 paper_not_found
         corrections = await store.list_active_corrections(paper_id)   # C1 CRUD;拿 acquire 之后的最新值
         # 前置谓词(§ E-1):
-        #   not (active corrections or plan.build_steps is None or plan.m_script_skeleton is None)
+        #   not (active corrections or plan.build_steps is None or stale guidance)
         #     → 400 regenerate_nothing_to_do
         allowed_refs   = resolved_user_evidence_refs(record, corrections)   # § C(无条件)
         allowed_prompts = resolved_prompt_ids(record)                        # § C(无条件)
@@ -289,8 +289,8 @@ async def _llm_mscript_draft_from_mapping(
 ```text
 前置谓词(E-1 定案,收窄):
   record None                                          → 404 paper_not_found
-  active corrections 非空 OR build_steps None OR m_script_skeleton None → 允许重生成
-  以上均否(无 active 纠错 且 build_steps + m_script 均完整)            → 400 regenerate_nothing_to_do(前端不暴露入口)
+  active corrections 非空 OR build_steps None OR stale guidance → 允许重生成
+  以上均否(无 active 纠错 且 build_steps 完整 且 guidance 不过期) → 400 regenerate_nothing_to_do(前端不暴露入口)
   冲突参数存在                                          → 允许(不消解、护栏兜底);不拒绝
 
 失败语义(E-2 定案:重试 + fail-closed + 中性提示):
@@ -308,7 +308,7 @@ E-3 定案:fail-closed 时保留原 subsystem_breakdown(不重跑 _llm_subsystem
 |---|---|---|
 | 404 | paper_not_found | paper_id 无 bundle |
 | 409 | regenerate_lock_conflict | 锁被占(reparse / correction / undo / user-supply / 另一重生成);`PaperReparseInProgressError` 映射 |
-| 400 | regenerate_nothing_to_do | E-1 定案:无 active 纠错 且 build_steps + m_script 均完整 |
+| 400 | regenerate_nothing_to_do | E-1 定案(TASK-537-A 收窄):无 active 纠错 且 build_steps 完整且 guidance 不过期 |
 | 500 | regenerate_store_failed | 写回事务/序列化失败;body 只 type name |
 
 > **无 `regenerate_failed` 码**:E-2 定案为 fail-closed 回 200(build_steps 保持 None + 前端中性提示),LLM 失败不回 5xx。仅写回事务失败回 500 store_failed。
@@ -353,7 +353,7 @@ fail-closed(仍 None):保持回退推荐块视图 + 按钮可再点;
 - [ ] **纠错不被清**:重生成后 correction 表该行仍在、correct_extracted evidence 仍在、GET 纠错清单该条 can_undo=active;重生成**不产生新 correction 行**。
 - [ ] **evidence 校验放行**:重生成 build_steps 引用 correct_extracted 参数 → 过 validator(传 `resolved_user_evidence_refs` + `resolved_prompt_ids`)不 raise;**去掉 refs 的对照测试必须 raise**(证明放行靠传参、非绕过校验)。**fill_missing 参数也覆盖**(P1-3:两类 allowlist 都放行)。
 - [ ] **切 generate 后半段(P0 核心)**:fake provider 计数,POST regenerate 后确认 `_llm_plan_compose` / `_llm_missing_detect` **未被调用**,只调 mapping-aware mscript helper + build_steps 重生成 helper。
-- [ ] **E-1 谓词**:build_steps=None → 允许;m_script=None → 允许;有 active correction 即便 build_steps 完整 → 允许(覆盖);**无 active 纠错 且 build_steps + m_script 均完整 → 400 regenerate_nothing_to_do、不烧 LLM**(断言 provider 未被调)。
+- [ ] **E-1 谓词(TASK-537-A 收窄)**:build_steps=None → 允许;stale guidance → 允许;有 active correction 即便 build_steps 完整 → 允许(覆盖);**单独 m_script=None 不放行;无 active 纠错且 build_steps 完整且 guidance 不过期 → 400 regenerate_nothing_to_do、不烧 LLM**(断言 provider 未被调)。
 - [ ] **★ 重试(PM 拍:4 次、仅瞬时类)**:注入瞬时失败(DTO/结构化)前 3 次、第 4 次成功 → 最终成功、provider 被调 4 次;注入瞬时失败全 4 次 → fail-closed;**注入红线失败(mscript_assigns_conflict_value / 护栏)→ provider 只被调 1 次(不重试)、立即 fail-closed**。build_steps 与 m_script 各自独立重试(一个失败不触发另一个重试)。
 - [ ] **★ fail-closed(E-2)**:build_steps 4 次瞬时失败 → 回 200、updated_plan.build_steps=None、无脏数据、parameter_mapping 不变;telemetry 记 regenerated_fail_closed。**已有非 None build_steps 的覆盖场景(谓词 3)重生成失败 → 旧 build_steps 不被清空**(断言保护)。
 - [ ] **★ m_script partial(P0-4)**:m_script 4 次失败但 build_steps 成功 → build_steps 写回、m_script_skeleton 保持 None/原值;telemetry 记 regenerated_with_steps_mscript_fail_closed。

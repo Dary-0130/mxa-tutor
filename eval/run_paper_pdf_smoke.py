@@ -89,6 +89,7 @@ from features.paper.paper_plan_service import (
     MISSING_DETECTOR_ROLE_NAME,
     PLAN_COMPOSER_ROLE_NAME,
     PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS,
+    MScriptDraftOutcome,
     PaperPlanService,
 )
 from features.paper.paper_reparse_service import PaperReparseLockRegistry
@@ -152,6 +153,8 @@ SUMMARY_COLUMNS = [
     "build_steps_max_tokens",
     "build_steps_response_model",
     "build_steps_system_fingerprint",
+    "mscript_outcome",
+    "mscript_degradation_code",
     "llm_model_identifiers",
     "llm_model_identifier_counts",
     "llm_system_fingerprints",
@@ -330,6 +333,8 @@ class BuildStepsTelemetry:
     all_document_details_lost: bool | None = None
     guidance_artifact_snapshots: list[GuidanceArtifactSnapshot] = field(default_factory=list)
     guidance_drafts: list[dict[str, Any]] = field(default_factory=list)
+    mscript_outcome: str | None = None
+    mscript_degradation_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -371,6 +376,8 @@ class SmokeSummaryRow:
     build_steps_max_tokens: int | None
     build_steps_response_model: str | None
     build_steps_system_fingerprint: str | None
+    mscript_outcome: str | None
+    mscript_degradation_code: str | None
     llm_model_identifiers: list[str]
     llm_model_identifier_counts: dict[str, int]
     llm_system_fingerprints: list[str]
@@ -733,6 +740,12 @@ class RecordingPaperPlanService(PaperPlanService):
         finally:
             _CURRENT_LLM_ROLE.reset(token)
 
+    async def _llm_mscript_draft_outcome(self, spec: PaperSpec) -> MScriptDraftOutcome:
+        outcome = await super()._llm_mscript_draft_outcome(spec)
+        self._smoke_telemetry.mscript_outcome = outcome.outcome
+        self._smoke_telemetry.mscript_degradation_code = outcome.degradation_code
+        return outcome
+
     async def _generate_build_guidance(
         self,
         spec: PaperSpec,
@@ -774,7 +787,7 @@ class RecordingPaperPlanService(PaperPlanService):
         remaining_structured_retries = PLAN_STRUCTURED_RETRY_EXTRA_ATTEMPTS
         retried_leaves: set[str] = set()
         plan_composer_output: ModelGenerationPlan | None = None
-        mscript: str | None = None
+        mscript_outcome: MScriptDraftOutcome | None = None
         mscript_ready = False
 
         while plan_composer_output is None:
@@ -783,22 +796,28 @@ class RecordingPaperPlanService(PaperPlanService):
                     self._llm_plan_compose(spec, plan_id, paper_spec_id),
                     PLAN_COMPOSER_ROLE_NAME,
                 )
-                mscript_result: str | BaseException | None = mscript
+                mscript_result: MScriptDraftOutcome | BaseException | None = mscript_outcome
             else:
                 plan_result, mscript_result = await asyncio.gather(
                     self._capture_plan_leaf(
                         self._llm_plan_compose(spec, plan_id, paper_spec_id),
                         PLAN_COMPOSER_ROLE_NAME,
                     ),
-                    self._llm_mscript_draft(spec),
+                    self._llm_mscript_draft_outcome(spec),
                     return_exceptions=True,
                 )
-                if not isinstance(mscript_result, BaseException):
-                    mscript = mscript_result
-                    mscript_ready = True
 
             if isinstance(mscript_result, BaseException):
                 raise mscript_result
+            if mscript_result is None:
+                raise PaperPlanGenerationError(
+                    "role=mscript_drafter: missing_outcome",
+                    reason_code="mscript_outcome_missing",
+                    leaf="mscript_drafter",
+                )
+            mscript_outcome = cast(MScriptDraftOutcome, mscript_result)
+            self._last_mscript_draft_outcome = mscript_outcome
+            mscript_ready = True
             if isinstance(plan_result, BaseException):
                 if self._should_retry_plan_leaf(
                     plan_result,
@@ -818,6 +837,7 @@ class RecordingPaperPlanService(PaperPlanService):
             plan_composer_output = cast(ModelGenerationPlan, plan_result)
             self._record_plan_rescue_if_needed(PLAN_COMPOSER_ROLE_NAME, retried_leaves)
 
+        assert mscript_outcome is not None
         sentinel_mappings = self._sentinel_mappings(plan_composer_output.parameter_mapping)
         build_steps_result: object = _UNSET
         missing_prompts: list[MissingParameterPrompt] | None = None
@@ -873,7 +893,7 @@ class RecordingPaperPlanService(PaperPlanService):
                 spec=spec,
                 paper_id=paper_id,
                 plan_composer_output=plan_composer_output,
-                mscript=mscript,
+                mscript=mscript_outcome.value,
                 missing_prompts=missing_prompts,
             )
 
@@ -1408,6 +1428,8 @@ def build_summary_row(
         build_steps_system_fingerprint=(
             build_steps_call.system_fingerprint if build_steps_call else None
         ),
+        mscript_outcome=telemetry.mscript_outcome,
+        mscript_degradation_code=telemetry.mscript_degradation_code,
         llm_model_identifiers=llm_model_summary["model_identifiers"],
         llm_model_identifier_counts=llm_model_summary["model_identifier_counts"],
         llm_system_fingerprints=llm_model_summary["system_fingerprints"],

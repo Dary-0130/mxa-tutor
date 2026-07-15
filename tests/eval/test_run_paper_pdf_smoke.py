@@ -315,6 +315,111 @@ async def test_paired_full_records_per_arm_validation_and_guidance() -> None:
 
 
 @pytest.mark.asyncio
+async def test_paired_full_mscript_degradation_matches_production_runway() -> None:
+    class MscriptFailureService(subject.RecordingPaperPlanService):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            self.build_calls = 0
+            self.guidance_calls = 0
+
+        async def _llm_plan_compose(
+            self,
+            spec: PaperSpec,
+            plan_id: str,
+            paper_spec_id: str,
+        ) -> subject.ModelGenerationPlan:
+            return subject.ModelGenerationPlan(
+                plan_id=plan_id,
+                paper_spec_id=paper_spec_id,
+                library_choice="simulink",
+                block_recommendations=[_block_recommendation()],
+                parameter_mapping=[replace(_parameter_mapping(), value="1")],
+                subsystem_breakdown=[],
+                m_script_skeleton=None,
+                evidence=spec.evidence,
+            )
+
+        async def _llm_mscript_draft(self, spec: PaperSpec) -> str | None:
+            _ = spec
+            raise RuntimeError("SECRET_EVAL_MSCRIPT")
+
+        async def _llm_missing_detect(
+            self,
+            spec: PaperSpec,
+            paper_id: str,
+            sentinel_mappings: list[subject.ParameterMapping],
+        ) -> list[subject.MissingParameterPrompt]:
+            _ = spec, paper_id, sentinel_mappings
+            return []
+
+        async def _paired_build_step_drafts(
+            self,
+            block_recommendations: list[BlockRecommendation],
+            parameter_mapping: list[ParameterMapping],
+            spec: PaperSpec,
+        ) -> dict[str, list[subject.ModelBuildStepDraft]]:
+            _ = block_recommendations, parameter_mapping, spec
+            self.build_calls += 1
+            self._smoke_telemetry.paired_arm_order = ["off", "on"]
+            self._smoke_telemetry.paired_downstream_arm = "on"
+            self._smoke_telemetry.paired_build_steps_arms = [
+                {
+                    "arm_label": "off",
+                    "call_order": 1,
+                    "downstream_used": False,
+                    "dependency_salience_enabled": False,
+                    "result_code": "parsed",
+                    "dto_invalid_errors": [],
+                    "dependency_audit": subject.DependencyAudit.unavailable(
+                        "draft_parse"
+                    ).to_dict(),
+                },
+                {
+                    "arm_label": "on",
+                    "call_order": 2,
+                    "downstream_used": True,
+                    "dependency_salience_enabled": True,
+                    "result_code": "parsed",
+                    "dto_invalid_errors": [],
+                    "dependency_audit": subject.DependencyAudit.unavailable(
+                        "draft_parse"
+                    ).to_dict(),
+                },
+            ]
+            return {"off": _model_build_step_drafts(), "on": _model_build_step_drafts()}
+
+        async def _generate_build_guidance(
+            self,
+            spec: PaperSpec,
+            plan: subject.ModelGenerationPlan,
+        ) -> subject.ModelGenerationPlan:
+            _ = spec
+            self.guidance_calls += 1
+            return plan
+
+    telemetry = subject.BuildStepsTelemetry()
+    service = MscriptFailureService(
+        subject.RecordingTextProvider(_SequenceProvider([])),
+        telemetry=telemetry,
+        paired_build_steps_full=True,
+    )
+
+    plan, missing_prompts, missing_bindings = await service._generate_with_retries(
+        _paper_spec(),
+        "paper",
+    )
+
+    assert plan.build_steps is not None
+    assert plan.m_script_skeleton is None
+    assert missing_prompts == []
+    assert missing_bindings == []
+    assert service.build_calls == 1
+    assert service.guidance_calls == 2
+    assert telemetry.mscript_outcome == "degraded"
+    assert telemetry.mscript_degradation_code == "internal-error"
+
+
+@pytest.mark.asyncio
 async def test_run_smoke_wires_temp_db_upload_dir_and_mock_runner(tmp_path: Path) -> None:
     paper_dir = tmp_path / "papers"
     paper_dir.mkdir()
@@ -666,6 +771,8 @@ def _summary_row(
         build_steps_max_tokens=8000,
         build_steps_response_model=model_fingerprint,
         build_steps_system_fingerprint="fp-test",
+        mscript_outcome=None,
+        mscript_degradation_code=None,
         llm_model_identifiers=[model_fingerprint],
         llm_model_identifier_counts={model_fingerprint: 1},
         llm_system_fingerprints=["fp-test"],
@@ -970,6 +1077,52 @@ def _model_build_step() -> ModelBuildStep:
         evidence=[_document_evidence()],
         display_text="Place the gain block.",
     )
+
+
+def _model_build_step_drafts() -> list[subject.ModelBuildStepDraft]:
+    return [
+        subject.ModelBuildStepDraft(
+            step_id="STEP-001",
+            title="Place gain",
+            intent="Place the reusable gain block.",
+            block_refs=[
+                StepBlockRef(
+                    block_ref_id="B1",
+                    block_type="Gain",
+                    library_path=None,
+                    purpose="Scale the input signal",
+                    paper_reference=_document_evidence(),
+                )
+            ],
+            parameter_refs=[ParameterMappingRef(paper_param_name="K", model_param_name="Gain.K")],
+            connection_hints=[],
+            configuration_hints=[],
+            depends_on=[],
+            evidence=[_document_evidence()],
+        ),
+        subject.ModelBuildStepDraft(
+            step_id="STEP-002",
+            title="Bind gain parameter",
+            intent="Bind the documented gain value.",
+            block_refs=[],
+            parameter_refs=[ParameterMappingRef(paper_param_name="K", model_param_name="Gain.K")],
+            connection_hints=[],
+            configuration_hints=[],
+            depends_on=["STEP-001"],
+            evidence=[_document_evidence()],
+        ),
+        subject.ModelBuildStepDraft(
+            step_id="STEP-003",
+            title="Check output",
+            intent="Confirm the gain block output is available.",
+            block_refs=[],
+            parameter_refs=[ParameterMappingRef(paper_param_name="K", model_param_name="Gain.K")],
+            connection_hints=[],
+            configuration_hints=[],
+            depends_on=["STEP-002"],
+            evidence=[_document_evidence()],
+        ),
+    ]
 
 
 def _build_step_payload(

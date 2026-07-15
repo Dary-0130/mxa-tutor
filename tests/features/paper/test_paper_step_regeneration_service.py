@@ -98,6 +98,114 @@ async def test_nothing_to_regenerate_raises_400_without_llm() -> None:
     assert plan_cache.set_calls == []
 
 
+@pytest.mark.parametrize(
+    ("has_correction", "has_build_steps", "has_mscript", "allowed"),
+    [
+        (False, True, True, False),
+        (False, True, False, False),
+        (False, False, True, True),
+        (False, False, False, True),
+        (True, True, True, True),
+        (True, True, False, True),
+        (True, False, True, True),
+        (True, False, False, True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_regeneration_predicate_ignores_mscript_null(
+    has_correction: bool,
+    has_build_steps: bool,
+    has_mscript: bool,
+    allowed: bool,
+) -> None:
+    correction = _correction()
+    corrections = [correction] if has_correction else []
+    plan_evidence = [_document_evidence()]
+    if has_correction:
+        plan_evidence.append(_correction_evidence(correction))
+    record = _record(
+        build_steps=_derived_build_steps() if has_build_steps else None,
+        mscript="clear; clc;" if has_mscript else None,
+        mapping_value="3.7" if has_correction else MISSING_VALUE_SENTINEL,
+        mapping_source=EvidenceSource.USER_SUPPLIED
+        if has_correction
+        else EvidenceSource.DOCUMENT_EXTRACTED,
+        plan_evidence=plan_evidence,
+    )
+    store = _FakeBundleStore(record, corrections=corrections)
+    plan_cache = _FakePlanCache()
+    plan_service = _FakePlanService(
+        build_results=[_build_step_drafts()],
+        mscript_results=["clear; clc;"],
+    )
+
+    if not allowed:
+        with pytest.raises(PaperStepRegenerationError) as exc_info:
+            await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+        assert exc_info.value.error_code == "regenerate_nothing_to_do"
+        assert plan_service.build_calls == 0
+        assert plan_service.mscript_calls == 0
+        return
+
+    await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+
+    assert plan_service.build_calls == 1
+    assert plan_service.mscript_calls == 1
+    assert len(plan_cache.set_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_d1_mscript_null_with_complete_steps_does_not_regenerate_again() -> None:
+    record = _record(build_steps=_derived_build_steps(), mscript=None)
+    store = _FakeBundleStore(record)
+    plan_cache = _FakePlanCache()
+    plan_service = _FakePlanService()
+
+    with pytest.raises(PaperStepRegenerationError) as exc_info:
+        await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+
+    assert exc_info.value.error_code == "regenerate_nothing_to_do"
+    assert exc_info.value.status_code == 400
+    assert plan_service.build_calls == 0
+    assert plan_service.mscript_calls == 0
+    assert plan_cache.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_d2_suppressed_steps_regenerate_once_then_become_complete() -> None:
+    store = _FakeBundleStore(_record(build_steps=None, mscript=None))
+    plan_cache = _FakePlanCache()
+    completed_plan = replace(
+        _record().plan,
+        build_steps=_derived_build_steps(),
+        m_script_skeleton="clear; clc;",
+        guidance_status="not_generated",
+    )
+    plan_service = _FakePlanService(
+        build_results=[_build_step_drafts()],
+        mscript_results=["clear; clc;"],
+        guidance_results=[completed_plan],
+    )
+
+    updated = await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+
+    assert updated.build_steps is not None
+    assert updated.m_script_skeleton == "clear; clc;"
+    assert plan_service.build_calls == 1
+    assert plan_service.mscript_calls == 1
+    assert len(plan_cache.set_calls) == 1
+
+    store.records["paper-1"] = plan_cache.set_calls[-1]
+    second_plan_service = _FakePlanService()
+
+    with pytest.raises(PaperStepRegenerationError) as exc_info:
+        await _service(store, plan_cache, second_plan_service).regenerate_steps("paper-1")
+
+    assert exc_info.value.error_code == "regenerate_nothing_to_do"
+    assert second_plan_service.build_calls == 0
+    assert second_plan_service.mscript_calls == 0
+
+
 @pytest.mark.asyncio
 async def test_stale_guidance_status_triggers_regeneration_and_refreshes_guidance() -> None:
     old_guidance = _build_guidance("Old frozen guidance.")
@@ -179,7 +287,12 @@ async def test_build_step_four_transient_failures_fail_closed_but_do_not_500() -
 @pytest.mark.asyncio
 async def test_fail_closed_preserves_existing_build_steps_when_regeneration_fails() -> None:
     original_steps = _derived_build_steps()
-    store = _FakeBundleStore(_record(build_steps=original_steps))
+    record = _record(build_steps=original_steps)
+    record = replace(
+        record,
+        plan=replace(record.plan, guidance_status="stale_pending_regeneration"),
+    )
+    store = _FakeBundleStore(record)
     plan_cache = _FakePlanCache()
     plan_service = _FakePlanService(
         build_results=[LLMRateLimitError("rate") for _ in range(4)],
