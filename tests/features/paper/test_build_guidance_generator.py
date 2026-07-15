@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import pytest
 
+from core.domain.exceptions import LLMAuthError
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_plan import (
     BlockRecommendation,
@@ -29,6 +30,7 @@ from core.interfaces.llm_provider import LLMMessage, LLMResponse, ModelCapabilit
 from features.paper.build_guidance_generator import (
     BuildGuidanceGenerator,
     GroundingTruthIndex,
+    GuidanceProviderConfigurationError,
     build_guidance_evidence_pool,
     high_risk_claim_tokens,
     synthesize_guidance_gaps,
@@ -157,6 +159,22 @@ async def test_document_claim_requires_resolved_handle_and_grounding_normalizes_
     assert updated.build_guidance is not None
     assert updated.build_guidance.details[0].basis == "document_extracted"
     assert updated.build_guidance.details[0].evidence == [_evidence()]
+
+
+@pytest.mark.asyncio
+async def test_guidance_provider_auth_error_propagates_without_fallback() -> None:
+    provider = QueueProvider([LLMAuthError("auth")])
+
+    with pytest.raises(LLMAuthError):
+        await BuildGuidanceGenerator(provider).generate(_spec(), _plan())
+
+
+@pytest.mark.asyncio
+async def test_guidance_provider_configuration_error_propagates_without_fallback() -> None:
+    provider = QueueProvider([ValueError("config")])
+
+    with pytest.raises(GuidanceProviderConfigurationError):
+        await BuildGuidanceGenerator(provider).generate(_spec(), _plan())
 
 
 def test_guidance_requirements_prompt_payload_exposes_slim_req_handles() -> None:
@@ -441,9 +459,12 @@ async def test_raw_document_claim_with_unresolved_handle_never_becomes_no_basis(
     generator = BuildGuidanceGenerator(provider)
     updated = await generator.generate(_spec(), _plan_without_linked_evidence())
 
-    assert updated.guidance_status == "generation_failed"
-    assert guidance_view_state(updated) == "failed_retryable"
-    assert updated.build_guidance is None
+    assert updated.guidance_status == "generated"
+    assert guidance_view_state(updated) == "current"
+    assert updated.build_guidance is not None
+    detail = updated.build_guidance.details[0]
+    assert detail.basis == "document_claim_unverified"
+    assert detail.confirmation_reason_code == "document_evidence_unverified"
     assert "handle_no_match" in generator.last_telemetry.attempts[0].resolver_event_codes
 
 
@@ -478,9 +499,12 @@ async def test_raw_document_claim_with_grounding_failure_never_becomes_no_basis(
     generator = BuildGuidanceGenerator(provider)
     updated = await generator.generate(_spec(), _plan())
 
-    assert updated.guidance_status == "generation_failed"
-    assert guidance_view_state(updated) == "failed_retryable"
-    assert updated.build_guidance is None
+    assert updated.guidance_status == "generated"
+    assert guidance_view_state(updated) == "current"
+    assert updated.build_guidance is not None
+    detail = updated.build_guidance.details[0]
+    assert detail.basis == "document_claim_unverified"
+    assert detail.confirmation_reason_code == "document_evidence_unverified"
     assert (
         "grounding_whitelist_no_match" in generator.last_telemetry.attempts[0].resolver_event_codes
     )
@@ -494,8 +518,8 @@ async def test_no_basis_requires_zero_raw_document_claims_and_unlinked_evidence_
         _spec(), _plan_without_linked_evidence()
     )
 
-    assert updated.guidance_status == "no_document_basis"
-    assert guidance_view_state(updated) == "no_basis"
+    assert updated.guidance_status == "generation_failed"
+    assert guidance_view_state(updated) == "failed_retryable"
     assert updated.build_guidance is None
 
 
@@ -811,17 +835,18 @@ async def test_one_detail_covering_multiple_parameter_requirements_does_not_pass
     assert "requirement_mismatch" in generator.last_telemetry.attempts[0].resolver_event_codes
 
 
-def test_semantic_validator_all_document_details_lost_is_generation_failed() -> None:
-    # T2/P0-2 source: document grounding failures downgrade per item; if all document
-    # details are lost, readback corruption is generation_failed, not no_document_basis.
+def test_semantic_validator_all_document_details_lost_keeps_downgraded_content() -> None:
+    # TASK-538 v0.2: document grounding failures downgrade per item; generated
+    # guidance survives when renderable confirmation details remain.
     plan = _replace_first_detail(_generated_plan(), evidence=[])
 
     validation = validate_build_guidance_semantics(_spec(), plan)
 
-    assert validation.plan.guidance_status == "generation_failed"
-    assert validation.plan.build_guidance is None
-    assert validation.whole_action == "mark_generation_failed"
-    assert "guidance_validator_all_document_details_lost" in validation.machine_codes
+    assert validation.plan.guidance_status == "generated"
+    assert validation.plan.build_guidance is not None
+    assert validation.plan.build_guidance.details[0].basis == "document_claim_unverified"
+    assert validation.whole_action == "keep"
+    assert "resolution_missing" in validation.machine_codes
 
 
 def test_high_risk_terms_include_non_numeric_engineering_decisions() -> None:

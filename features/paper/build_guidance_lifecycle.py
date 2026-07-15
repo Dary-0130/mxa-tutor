@@ -58,11 +58,6 @@ def validate_generated_guidance(guidance: BuildGuidance | None) -> None:
         raise ValueError("generated_guidance_version_required")
     if not guidance.details:
         raise ValueError("generated_guidance_details_required")
-    if not any(
-        detail.basis in {"document_extracted", "document_derived"} and detail.evidence
-        for detail in guidance.details
-    ):
-        raise ValueError("generated_guidance_document_detail_required")
 
 
 def mark_guidance_stale_for_parameter_change(

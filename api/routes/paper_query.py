@@ -60,7 +60,7 @@ async def get_paper_plan(
     record = await store.get_plan_record(paper_id)
     if record is None:
         raise PaperNotFoundError("paper_not_found") from None
-    validate_record_parameter_conflict_integrity(record)
+    record = validate_record_parameter_conflict_integrity(record)
 
     resolved_ids = resolved_prompt_ids(record)
     remaining_prompts = [

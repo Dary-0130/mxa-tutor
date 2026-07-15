@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +25,15 @@ from core.domain.paper_parameter_conflicts import with_parameter_conflicts
 from core.domain.paper_parameter_correction import PaperParameterCorrection
 from core.domain.paper_plan import (
     BlockRecommendation,
+    BuildGuidance,
+    GuidanceAssessment,
+    GuidanceDetail,
+    GuidanceTarget,
+    ModelBuildStep,
     ModelGenerationPlan,
     PaperPlanRecord,
     ParameterMapping,
+    StepBlockRef,
 )
 from core.domain.paper_spec import (
     EquationEntry,
@@ -156,6 +163,44 @@ def test_get_paper_plan_rejects_stale_conflict_mapping(tmp_path: Path) -> None:
 
     assert response.status_code == 502
     assert response.json()["error"] == "paper_plan_generation_failed"
+
+
+def test_get_paper_plan_degrades_stale_conflict_build_steps(tmp_path: Path) -> None:
+    store = _initialized_store(tmp_path)
+    asyncio.run(store.save_ready_bundle(_stale_build_step_conflict_record()))
+    app = _create_app(store)
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/papers/paper-1/plan")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["plan"]["build_steps"] is None
+    assert body["plan"]["guidance_status"] == "stale_pending_regeneration"
+
+
+def test_get_paper_plan_preserves_unverified_guidance_after_sqlite_readback(
+    tmp_path: Path,
+) -> None:
+    store = _initialized_store(tmp_path)
+    record = _record_with_unverified_guidance()
+    asyncio.run(store.save_ready_bundle(record))
+
+    loaded = asyncio.run(store.get_plan_record(record.paper_id))
+    assert loaded is not None
+    assert loaded.plan.build_steps is not None
+    assert loaded.plan.build_guidance is not None
+
+    app = _create_app(store)
+    with TestClient(app) as client:
+        response = client.get("/api/v1/papers/paper-1/plan")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["plan"]["build_steps"]
+    assert body["plan"]["guidance_status"] == "generated"
+    assert body["plan"]["build_guidance"]["details"][0]["basis"] == "document_claim_unverified"
+    assert body["plan"]["build_guidance"]["details"][0]["evidence"] == []
 
 
 def test_sqlite_get_plan_record_reads_legacy_plan_without_build_steps(
@@ -338,6 +383,103 @@ def _stale_conflict_record() -> PaperPlanRecord:
         ),
         missing_prompts=[],
         missing_bindings=[],
+    )
+
+
+def _stale_build_step_conflict_record() -> PaperPlanRecord:
+    plan = _plan(
+        first_value="null",
+        first_source=EvidenceSource.DOCUMENT_EXTRACTED,
+        plan_evidence=[_document_evidence()],
+    )
+    stale_plan = replace(
+        plan,
+        parameter_mapping=[],
+        build_steps=[
+            ModelBuildStep(
+                step_id="STEP-001",
+                title="Configure resistance",
+                intent="Keep the conflict pending confirmation.",
+                block_refs=[],
+                parameter_refs=[],
+                connection_hints=[],
+                configuration_hints=[],
+                depends_on=[],
+                evidence=[],
+                display_text="STEP-001 Configure resistance | Set Rs to 3.5 s",
+            )
+        ],
+    )
+    return PaperPlanRecord(
+        paper_id="paper-1",
+        spec=_conflict_spec(),
+        plan=stale_plan,
+        missing_prompts=[],
+        missing_bindings=[],
+    )
+
+
+def _record_with_unverified_guidance() -> PaperPlanRecord:
+    record = _record()
+    evidence = _document_evidence()
+    step = ModelBuildStep(
+        step_id="STEP-001",
+        title="Place machine",
+        intent="Create the machine subsystem.",
+        block_refs=[
+            StepBlockRef(
+                block_ref_id="B1",
+                block_type="Synchronous Machine",
+                library_path=None,
+                purpose="Model the generator.",
+                paper_reference=evidence,
+            )
+        ],
+        parameter_refs=[],
+        connection_hints=[],
+        configuration_hints=[],
+        depends_on=[],
+        evidence=[evidence],
+        display_text="Place machine.",
+    )
+    guidance = BuildGuidance(
+        version="v2",
+        assessment=GuidanceAssessment(
+            content_status="outline_with_gaps",
+            environment_status="not_checked",
+            overall_status="outline_with_gaps",
+            blocking_gap_ids=[],
+            open_requirement_count=1,
+        ),
+        details=[
+            GuidanceDetail(
+                detail_id="GD-001",
+                step_id="STEP-001",
+                detail_kind="block_selection",
+                basis="document_claim_unverified",
+                actionability="blocked_pending_confirmation",
+                display_text="Confirm the recommended block before reproducing the model.",
+                evidence=[],
+                convention_code=None,
+                confirmation_reason_code="document_evidence_unverified",
+                target=GuidanceTarget(target_kind="block_choice", block_role_ref="B1"),
+                obligation_kind="select_component",
+                resolution=None,
+                execution_closure="open",
+                input_fact_refs=[],
+                punt_reason_code=None,
+            )
+        ],
+        gaps=[],
+    )
+    return replace(
+        record,
+        plan=replace(
+            record.plan,
+            build_steps=[step],
+            build_guidance=guidance,
+            guidance_status="generated",
+        ),
     )
 
 
