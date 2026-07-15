@@ -566,6 +566,7 @@ Python 实现路径:`core/domain/paper_evidence.py` domain dataclass /
 - 重生成不新增、不删除、不更新纠错记录;`correct_extracted` evidence 保持原样。
 - `build_steps` 生成成功时会替换为新的完整步骤;若暂未生成成功,可以仍为 `null`。
 - `m_script_skeleton` 生成失败不阻断 `build_steps`;失败时保持原值或 `null`。
+- `m_script_skeleton=null` 本身不构成重生成工作;端点资格由 `build_steps=null`、活跃纠错或 `guidance_status="stale_pending_regeneration"` 决定。
 - `build_steps` 的表述可能与上一版不同,但必须继续遵守 evidence 双源契约与冲突参数守门。
 - `guidance_status="stale_pending_regeneration"` 本身即构成重生成工作;补参保留旧 `build_guidance` 冻结快照,纠错继续清 `build_steps` / `m_script_skeleton` 但保留快照,步骤重生成会清空旧 step-bound guidance 并重新生成。
 

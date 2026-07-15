@@ -11,12 +11,16 @@ from core.domain.exceptions import PaperNotFoundError, PaperReparseInProgressErr
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_plan import (
     BlockRecommendation,
+    ModelBuildStep,
     ModelGenerationPlan,
     PaperPlanRecord,
     ParameterMapping,
 )
 from core.domain.paper_spec import EquationEntry, PaperDocument, PaperSpec, ParameterEntry
-from features.paper.paper_step_regeneration_service import PaperStepRegenerationError
+from features.paper.paper_step_regeneration_service import (
+    PaperStepRegenerationError,
+    PaperStepRegenerationService,
+)
 
 
 @pytest.mark.parametrize("json_body", [None, {}])
@@ -83,7 +87,27 @@ def test_regenerate_steps_error_codes(error: Exception, status: int, code: str) 
     assert response.json()["error"] == code
 
 
-def _create_app(service: _FakeRegenerationService) -> Any:
+def test_regenerate_steps_build_steps_present_mscript_null_returns_400_without_llm() -> None:
+    plan_service = _NoopPlanService()
+    service = PaperStepRegenerationService(
+        bundle_store=_FakeBundleStore(_record(build_steps=[_build_step()], mscript=None)),  # type: ignore[arg-type]
+        plan_cache=_FakePlanCache(),  # type: ignore[arg-type]
+        plan_service=plan_service,  # type: ignore[arg-type]
+        lock_registry=_FakeLockRegistry(),  # type: ignore[arg-type]
+        retry_backoff_base_seconds=0,
+    )
+    app = _create_app(service)
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/papers/paper-1/regenerate-steps", json={})
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "regenerate_nothing_to_do"
+    assert plan_service.build_calls == 0
+    assert plan_service.mscript_calls == 0
+
+
+def _create_app(service: Any) -> Any:
     get_settings.cache_clear()
     app = create_app()
     app.dependency_overrides[get_paper_step_regeneration_service] = lambda: service
@@ -109,7 +133,60 @@ class _FakeRegenerationService:
         return self.plan
 
 
-def _record() -> PaperPlanRecord:
+class _FakeBundleStore:
+    def __init__(self, record: PaperPlanRecord) -> None:
+        self.record = record
+
+    async def get_plan_record(self, paper_id: str) -> PaperPlanRecord | None:
+        _ = paper_id
+        return self.record
+
+    async def list_parameter_corrections(self, paper_id: str) -> list[Any]:
+        _ = paper_id
+        return []
+
+
+class _FakePlanCache:
+    async def set(self, paper_id: str, record: PaperPlanRecord) -> None:
+        _ = paper_id, record
+        raise AssertionError("plan cache must not be written")
+
+
+class _FakeLockRegistry:
+    async def acquire(self, paper_id: str) -> _FakeLockToken:
+        _ = paper_id
+        return _FakeLockToken()
+
+
+class _FakeLockToken:
+    async def __aenter__(self) -> _FakeLockToken:
+        return self
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+        _ = exc_type, exc, tb
+
+
+class _NoopPlanService:
+    def __init__(self) -> None:
+        self.build_calls = 0
+        self.mscript_calls = 0
+
+    async def _llm_build_steps_for_regeneration(self, *args: object) -> object:
+        _ = args
+        self.build_calls += 1
+        raise AssertionError("build_steps regeneration must not run")
+
+    async def _llm_mscript_draft_from_mapping(self, *args: object) -> object:
+        _ = args
+        self.mscript_calls += 1
+        raise AssertionError("mscript regeneration must not run")
+
+
+def _record(
+    *,
+    build_steps: list[ModelBuildStep] | None = None,
+    mscript: str | None = None,
+) -> PaperPlanRecord:
     evidence = PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
         document_id="DOC-001",
@@ -162,8 +239,9 @@ def _record() -> PaperPlanRecord:
             )
         ],
         subsystem_breakdown=["Place machine", "Apply fault", "Observe current"],
-        m_script_skeleton=None,
+        m_script_skeleton=mscript,
         evidence=[evidence],
+        build_steps=build_steps,
     )
     return PaperPlanRecord(
         paper_id="paper-1",
@@ -171,4 +249,19 @@ def _record() -> PaperPlanRecord:
         plan=plan,
         missing_prompts=[],
         missing_bindings=[],
+    )
+
+
+def _build_step() -> ModelBuildStep:
+    return ModelBuildStep(
+        step_id="STEP-001",
+        title="Place machine",
+        intent="Place the synchronous machine block.",
+        block_refs=[],
+        parameter_refs=[],
+        connection_hints=[],
+        configuration_hints=[],
+        depends_on=[],
+        evidence=[],
+        display_text="Place the synchronous machine block.",
     )
