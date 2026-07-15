@@ -103,4 +103,8 @@ def guidance_view_state(plan: ModelGenerationPlan) -> GuidanceViewState:
 def guidance_status_requires_regeneration(status: GuidanceStatus) -> bool:
     """Return whether a user retry button should have real regeneration work."""
 
-    return status == "stale_pending_regeneration"
+    return status in {
+        "not_generated",
+        "stale_pending_regeneration",
+        "generation_failed",
+    }

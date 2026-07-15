@@ -46,6 +46,7 @@ from features.paper.paper_plan_helpers import (
     MissingBindingModel,
     ModelBuildStepDraft,
 )
+from features.paper.paper_schemas import ModelGenerationPlanModel
 from features.paper.paper_step_regeneration_service import (
     PaperStepRegenerationError,
     PaperStepRegenerationService,
@@ -84,6 +85,10 @@ async def test_acquires_lock_before_reading_and_holds_it_through_llm() -> None:
 @pytest.mark.asyncio
 async def test_nothing_to_regenerate_raises_400_without_llm() -> None:
     record = _record(build_steps=_derived_build_steps(), mscript="clear; clc;")
+    record = replace(
+        record,
+        plan=replace(record.plan, build_guidance=_build_guidance(), guidance_status="generated"),
+    )
     store = _FakeBundleStore(record)
     plan_cache = _FakePlanCache()
     plan_service = _FakePlanService()
@@ -132,6 +137,11 @@ async def test_regeneration_predicate_ignores_mscript_null(
         else EvidenceSource.DOCUMENT_EXTRACTED,
         plan_evidence=plan_evidence,
     )
+    if has_build_steps:
+        record = replace(
+            record,
+            plan=replace(record.plan, build_guidance=_build_guidance(), guidance_status="generated"),
+        )
     store = _FakeBundleStore(record, corrections=corrections)
     plan_cache = _FakePlanCache()
     plan_service = _FakePlanService(
@@ -157,6 +167,10 @@ async def test_regeneration_predicate_ignores_mscript_null(
 @pytest.mark.asyncio
 async def test_d1_mscript_null_with_complete_steps_does_not_regenerate_again() -> None:
     record = _record(build_steps=_derived_build_steps(), mscript=None)
+    record = replace(
+        record,
+        plan=replace(record.plan, build_guidance=_build_guidance(), guidance_status="generated"),
+    )
     store = _FakeBundleStore(record)
     plan_cache = _FakePlanCache()
     plan_service = _FakePlanService()
@@ -179,7 +193,8 @@ async def test_d2_suppressed_steps_regenerate_once_then_become_complete() -> Non
         _record().plan,
         build_steps=_derived_build_steps(),
         m_script_skeleton="clear; clc;",
-        guidance_status="not_generated",
+        build_guidance=_build_guidance(),
+        guidance_status="generated",
     )
     plan_service = _FakePlanService(
         build_results=[_build_step_drafts()],
@@ -243,6 +258,152 @@ async def test_stale_guidance_status_triggers_regeneration_and_refreshes_guidanc
     assert updated.guidance_status == "generated"
     assert updated.build_guidance == refreshed_guidance
     assert plan_cache.set_calls[0].plan.guidance_status == "generated"
+
+
+@pytest.mark.parametrize("guidance_status", ["not_generated", "generation_failed"])
+@pytest.mark.asyncio
+async def test_empty_guidance_status_triggers_regeneration_and_refreshes_guidance(
+    guidance_status: str,
+) -> None:
+    record = _record(build_steps=_derived_build_steps(), mscript="clear; clc;")
+    record = replace(
+        record,
+        plan=replace(record.plan, build_guidance=None, guidance_status=guidance_status),
+    )
+    refreshed_guidance = _build_guidance("Fresh guidance.")
+    plan_service = _FakePlanService(
+        build_results=[_build_step_drafts()],
+        mscript_results=["clear; clc;"],
+        guidance_results=[
+            replace(
+                record.plan,
+                build_guidance=refreshed_guidance,
+                guidance_status="generated",
+            )
+        ],
+    )
+    store = _FakeBundleStore(record)
+    plan_cache = _FakePlanCache()
+
+    updated = await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+
+    assert plan_service.build_calls == 1
+    assert plan_service.mscript_calls == 1
+    assert plan_service.guidance_calls == 1
+    assert plan_service.guidance_inputs[0].guidance_status == "stale_pending_regeneration"
+    assert plan_service.guidance_inputs[0].build_guidance is None
+    assert updated.guidance_status == "generated"
+    assert updated.build_guidance == refreshed_guidance
+
+
+@pytest.mark.asyncio
+async def test_generated_unverified_guidance_does_not_trigger_regeneration() -> None:
+    guidance = _build_guidance()
+    unverified_guidance = replace(
+        guidance,
+        details=[
+            replace(
+                guidance.details[0],
+                basis="document_claim_unverified",
+                evidence=[],
+                confirmation_reason_code="document_evidence_unverified",
+            )
+        ],
+    )
+    record = _record(build_steps=_derived_build_steps(), mscript="clear; clc;")
+    record = replace(
+        record,
+        plan=replace(
+            record.plan,
+            build_guidance=unverified_guidance,
+            guidance_status="generated",
+        ),
+    )
+    store = _FakeBundleStore(record)
+    plan_cache = _FakePlanCache()
+    plan_service = _FakePlanService()
+
+    with pytest.raises(PaperStepRegenerationError) as exc_info:
+        await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+
+    assert exc_info.value.error_code == "regenerate_nothing_to_do"
+    assert plan_service.build_calls == 0
+    assert plan_service.mscript_calls == 0
+    assert plan_service.guidance_calls == 0
+    assert plan_cache.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_no_document_basis_guidance_status_does_not_trigger_regeneration() -> None:
+    record = _record(build_steps=_derived_build_steps(), mscript="clear; clc;")
+    record = replace(
+        record,
+        plan=replace(record.plan, build_guidance=None, guidance_status="no_document_basis"),
+    )
+    store = _FakeBundleStore(record)
+    plan_cache = _FakePlanCache()
+    plan_service = _FakePlanService()
+
+    with pytest.raises(PaperStepRegenerationError) as exc_info:
+        await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+
+    assert exc_info.value.error_code == "regenerate_nothing_to_do"
+    assert plan_service.build_calls == 0
+    assert plan_service.mscript_calls == 0
+    assert plan_service.guidance_calls == 0
+    assert plan_cache.set_calls == []
+
+
+def test_plan_evidence_bytes_match_full_model_evidence_for_normal_nonempty_steps() -> None:
+    record = _record(build_steps=_derived_build_steps(), mscript="clear; clc;")
+    plan = replace(
+        record.plan,
+        build_guidance=_build_guidance(),
+        guidance_status="generated",
+    )
+    same_evidence_plan = replace(
+        plan,
+        build_guidance=_build_guidance("Fresh guidance."),
+    )
+
+    def previous_plan_evidence_bytes(candidate: ModelGenerationPlan) -> bytes:
+        payload = ModelGenerationPlanModel.from_domain(candidate).model_dump(mode="json")["evidence"]
+        return regeneration_module._stable_json_bytes(payload)
+
+    assert regeneration_module._plan_evidence_bytes(plan) == previous_plan_evidence_bytes(plan)
+    assert (
+        regeneration_module._plan_evidence_bytes(plan)
+        == regeneration_module._plan_evidence_bytes(same_evidence_plan)
+    ) == (previous_plan_evidence_bytes(plan) == previous_plan_evidence_bytes(same_evidence_plan))
+
+
+@pytest.mark.asyncio
+async def test_empty_build_steps_list_triggers_regeneration() -> None:
+    record = _record(build_steps=[], mscript="clear; clc;")
+    record = replace(
+        record,
+        plan=replace(record.plan, build_guidance=_build_guidance(), guidance_status="generated"),
+    )
+    completed_plan = replace(
+        record.plan,
+        build_steps=_derived_build_steps(),
+        build_guidance=_build_guidance("Fresh guidance."),
+        guidance_status="generated",
+    )
+    store = _FakeBundleStore(record)
+    plan_cache = _FakePlanCache()
+    plan_service = _FakePlanService(
+        build_results=[_build_step_drafts()],
+        mscript_results=["clear; clc;"],
+        guidance_results=[completed_plan],
+    )
+
+    updated = await _service(store, plan_cache, plan_service).regenerate_steps("paper-1")
+
+    assert plan_service.build_calls == 1
+    assert plan_service.mscript_calls == 1
+    assert plan_service.guidance_calls == 1
+    assert updated.build_steps == completed_plan.build_steps
 
 
 @pytest.mark.asyncio

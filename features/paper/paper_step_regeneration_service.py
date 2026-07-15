@@ -44,7 +44,11 @@ from features.paper.paper_plan_helpers import (
 from features.paper.paper_plan_integrity import validate_plan_does_not_resolve_conflicts
 from features.paper.paper_plan_service import PaperPlanService
 from features.paper.paper_reparse_service import PaperReparseLockRegistry
-from features.paper.paper_schemas import ModelGenerationPlanModel, ParameterMappingModel
+from features.paper.paper_schemas import (
+    ModelGenerationPlanModel,
+    PaperEvidenceEntryModel,
+    ParameterMappingModel,
+)
 
 RegenerationResultKind = Literal[
     "regenerated_with_steps",
@@ -328,7 +332,7 @@ def _has_regeneration_work(
 ) -> bool:
     return bool(
         corrections
-        or record.plan.build_steps is None
+        or not record.plan.build_steps
         or guidance_status_requires_regeneration(record.plan.guidance_status)
     )
 
@@ -414,7 +418,7 @@ def _parameter_mapping_bytes(plan: ModelGenerationPlan) -> bytes:
 
 
 def _plan_evidence_bytes(plan: ModelGenerationPlan) -> bytes:
-    payload = ModelGenerationPlanModel.from_domain(plan).model_dump(mode="json")["evidence"]
+    payload = [PaperEvidenceEntryModel.from_domain(entry).model_dump(mode="json") for entry in plan.evidence]
     return _stable_json_bytes(payload)
 
 
