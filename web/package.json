@@ -19,7 +19,8 @@
     "smoke:task521d": "node scripts/task521d-smoke.mjs",
     "smoke:task522b": "node scripts/task522b-smoke.mjs",
     "smoke:task522c2": "node scripts/task522c2-smoke.mjs",
-    "smoke:task522d1": "node scripts/task522d1-smoke.mjs"
+    "smoke:task522d1": "node scripts/task522d1-smoke.mjs",
+    "test:task538b": "node --experimental-strip-types scripts/task538b-substrate-test.ts"
   },
   "dependencies": {
     "react": "^19.2.6",

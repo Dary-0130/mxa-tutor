@@ -1,3 +1,4 @@
+import { useEffect, useId, useRef, useState } from "react";
 import { GlassCard } from "../../components/ui/GlassCard";
 import { formatEvidence } from "../../lib/paperEvidence";
 import type {
@@ -7,6 +8,15 @@ import type {
   ConfigurationHint,
   StepBlockRef,
 } from "../../lib/paperTypes";
+import {
+  buildGuidanceDisplayModel,
+  type DisplayGuidanceBucket,
+  type DisplayGuidanceGroup,
+  type DisplayGuidanceItem,
+  type DisplayGuidanceModel,
+  type GuidanceEvidenceDisplay,
+  type GuidanceSourceDisplay,
+} from "./buildGuidanceDisplay";
 import { SourceBadge, type SourceBadgeKind } from "./SourceBadge";
 
 const EMPTY_ARRAY: never[] = [];
@@ -48,6 +58,7 @@ function renderEvidenceMeta(entry: PaperEvidenceEntry | null | undefined, key?: 
   return (
     <span className="paper-build-step-meta" key={key}>
       <SourceBadge kind={meta.kind} />
+      <small className="paper-build-step-origin-label">步骤原始依据</small>
       {meta.text ? <small>{meta.text}</small> : null}
     </span>
   );
@@ -89,6 +100,216 @@ function renderEvidenceItems(entries: PaperEvidenceEntry[]) {
     .filter(Boolean);
 }
 
+function GuidanceSourcePill({ source }: { source: GuidanceSourceDisplay }) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const tooltipId = useId();
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+    function closeOnOutsidePointer(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && buttonRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    };
+  }, [open]);
+
+  return (
+    <span className="paper-guidance-source-wrap">
+      <button
+        ref={buttonRef}
+        type="button"
+        className="paper-guidance-source-pill"
+        data-tone={source.tone}
+        aria-describedby={open ? tooltipId : undefined}
+        aria-expanded={open}
+        aria-label={`${source.label}: ${source.description}`}
+        onBlur={() => setOpen(false)}
+        onClick={() => setOpen((value) => !value)}
+        onFocus={() => setOpen(true)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+      >
+        {source.label}
+      </button>
+      {open ? (
+        <span id={tooltipId} role="tooltip" className="paper-guidance-source-tip">
+          {source.description}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function GuidanceEvidence({ evidence }: { evidence: GuidanceEvidenceDisplay }) {
+  return (
+    <details className="paper-guidance-evidence" open>
+      <summary>
+        <span>{evidence.title}</span>
+        <span>{evidence.chips.length > 1 ? `${evidence.summary} · 展开全部` : evidence.summary}</span>
+      </summary>
+      <ul>
+        {evidence.chips.map((chip) => (
+          <li key={chip.key}>
+            <strong>{chip.title}</strong>
+            {chip.excerpt ? <p>{chip.excerpt}</p> : <p>已关联到论文摘录</p>}
+            <small>{chip.locatorText}</small>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function GuidanceItem({ item }: { item: DisplayGuidanceItem }) {
+  return (
+    <li className="paper-guidance-item" data-tone={item.source?.tone ?? "gap"}>
+      <div className="paper-guidance-item-head">
+        <span className="paper-guidance-kind">
+          <span aria-hidden="true">{item.kind.mark}</span>
+          {item.kind.label}
+        </span>
+        {item.source ? <GuidanceSourcePill source={item.source} /> : null}
+        {item.severityLabel ? (
+          <span
+            className="paper-guidance-severity"
+            title={item.severityHint ?? undefined}
+            data-level={item.severityLabel === "关键待确认" ? "critical" : "review"}
+          >
+            {item.severityLabel}
+          </span>
+        ) : null}
+      </div>
+      <p className="paper-copy">{item.text}</p>
+      {item.reasonText ? <p className="paper-guidance-reason">{item.reasonText}</p> : null}
+      {item.targetLine ? <p className="paper-secondary">{item.targetLine}</p> : null}
+      {item.evidence ? <GuidanceEvidence evidence={item.evidence} /> : null}
+    </li>
+  );
+}
+
+function GuidanceGroup({ group }: { group: DisplayGuidanceGroup }) {
+  return (
+    <section className="paper-guidance-group" aria-label={group.label}>
+      <header>
+        <h5>{group.label}</h5>
+        <span>
+          说明 {group.detailCount} · 缺口 {group.gapCount}
+        </span>
+      </header>
+      <ul>
+        {group.items.map((item) => (
+          <GuidanceItem key={item.key} item={item} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function GuidanceBucket({
+  bucket,
+  showWhenEmpty = false,
+}: {
+  bucket: DisplayGuidanceBucket;
+  showWhenEmpty?: boolean;
+}) {
+  if (bucket.totalCount === 0 && !showWhenEmpty) {
+    return null;
+  }
+  return (
+    <section id={bucket.anchorId} className="paper-build-guidance" aria-label={bucket.title}>
+      <header className="paper-build-guidance-head">
+        <h4>{bucket.title}</h4>
+        <span>
+          建模建议 {bucket.detailCount} 条 · 待核对缺口 {bucket.gapCount} 条
+        </span>
+      </header>
+      {bucket.gapCount > 0 ? (
+        <p className="paper-guidance-gap-title">待核对的缺口 · 需你逐条确认</p>
+      ) : null}
+      {bucket.totalCount > 0 ? (
+        <div className="paper-guidance-groups">
+          {bucket.groups.map((group) => (
+            <GuidanceGroup key={group.key} group={group} />
+          ))}
+        </div>
+      ) : (
+        <p className="paper-secondary">暂无未归入具体步骤的建议。</p>
+      )}
+    </section>
+  );
+}
+
+function GuidanceHead({ model }: { model: DisplayGuidanceModel }) {
+  const hasRows = model.counts.visibleTotal > 0;
+  if (!hasRows && !model.statusText && !model.dataNotice) {
+    return null;
+  }
+  const stepGuidanceBuckets = Array.from(model.stepBuckets, (entry) => entry[1]);
+  const links = [
+    ...stepGuidanceBuckets
+      .filter((bucket) => bucket.totalCount > 0)
+      .map((bucket) => ({
+        href: `#${bucket.anchorId}`,
+        label: bucket.title,
+        total: bucket.totalCount,
+      })),
+    ...(model.looseBucket.totalCount > 0
+      ? [
+          {
+            href: `#${model.looseBucket.anchorId}`,
+            label: "全局待确认",
+            total: model.looseBucket.totalCount,
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <section className="paper-guidance-summary" aria-label="逐条建模建议汇总">
+      <div className="paper-guidance-summary-line">
+        <strong>逐条建模建议</strong>
+        <span>
+          建模建议 {model.counts.details} 条 · 待核对缺口 {model.counts.gaps} 条
+        </span>
+      </div>
+      {links.length > 0 ? (
+        <nav aria-label="逐条建模建议跳转">
+          {links.map((link) => (
+            <a key={link.href} href={link.href}>
+              {link.label} · {link.total}
+            </a>
+          ))}
+        </nav>
+      ) : null}
+      {model.dataNotice && hasRows ? (
+        <p className="paper-guidance-format-note">{model.dataNotice}</p>
+      ) : null}
+      {model.statusText ? <p className="paper-secondary">{model.statusText}</p> : null}
+      {hasRows ? (
+        <p className="paper-secondary paper-guidance-scope-note">
+          以下建议分别以各自来源章为准
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function normalizeConfigurationHint(hint: ConfigurationHint): ConfigurationHint {
   return {
     ...hint,
@@ -127,6 +348,7 @@ export function BuildSteps({
 }: BuildStepsProps) {
   const structuredSteps = Array.isArray(plan.build_steps) && plan.build_steps.length > 0 ? plan.build_steps : null;
   const normalizedSteps = structuredSteps ? structuredSteps.map(normalizeBuildStep) : null;
+  const guidanceModel = buildGuidanceDisplayModel(plan, normalizedSteps ?? []);
   const blockLookup = normalizedSteps ? getBlockLookup(normalizedSteps) : null;
   const stepLookup = normalizedSteps ? getStepLookup(normalizedSteps) : null;
   const regenerateButton = onRegenerate ? (
@@ -162,10 +384,12 @@ export function BuildSteps({
           </div>
         ) : null}
         {regenerateNotice}
+        <GuidanceHead model={guidanceModel} />
         <ol className="paper-step-list paper-build-step-list">
           {normalizedSteps.map((step, index) => {
             const titleId = `paper-build-step-${index + 1}-title`;
             const stepEvidenceItems = renderEvidenceItems(step.evidence);
+            const guidanceBucket = guidanceModel.stepBuckets.get(step.step_id);
             return (
               <li key={step.step_id || index} aria-labelledby={titleId}>
                 <GlassCard className="paper-readable-card paper-step-card paper-build-step-card">
@@ -315,12 +539,16 @@ export function BuildSteps({
                         <div className="paper-build-step-meta-list">{stepEvidenceItems}</div>
                       </section>
                     ) : null}
+                    {guidanceBucket ? <GuidanceBucket bucket={guidanceBucket} /> : null}
                   </div>
                 </GlassCard>
               </li>
             );
           })}
         </ol>
+        {guidanceModel.counts.visibleTotal > 0 ? (
+          <GuidanceBucket bucket={guidanceModel.looseBucket} showWhenEmpty />
+        ) : null}
       </div>
     );
   }
@@ -332,6 +560,7 @@ export function BuildSteps({
         {regenerateButton}
       </div>
       {regenerateNotice}
+      <GuidanceHead model={guidanceModel} />
       <p className="paper-library-choice">
         <span>推荐库:</span>
         <strong className="paper-token">{plan.library_choice}</strong>
@@ -362,6 +591,9 @@ export function BuildSteps({
           })}
         </ol>
       )}
+      {guidanceModel.counts.visibleTotal > 0 ? (
+        <GuidanceBucket bucket={guidanceModel.looseBucket} showWhenEmpty />
+      ) : null}
     </div>
   );
 }
