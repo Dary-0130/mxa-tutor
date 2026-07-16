@@ -11,6 +11,9 @@ from core.domain.exceptions import PaperNotFoundError, PaperReparseInProgressErr
 from core.domain.paper_evidence import EvidenceSource, PaperEvidenceEntry
 from core.domain.paper_plan import (
     BlockRecommendation,
+    BuildGuidance,
+    GuidanceAssessment,
+    GuidanceDetail,
     ModelBuildStep,
     ModelGenerationPlan,
     PaperPlanRecord,
@@ -90,7 +93,9 @@ def test_regenerate_steps_error_codes(error: Exception, status: int, code: str) 
 def test_regenerate_steps_build_steps_present_mscript_null_returns_400_without_llm() -> None:
     plan_service = _NoopPlanService()
     service = PaperStepRegenerationService(
-        bundle_store=_FakeBundleStore(_record(build_steps=[_build_step()], mscript=None)),  # type: ignore[arg-type]
+        bundle_store=_FakeBundleStore(
+            _record(build_steps=[_build_step()], mscript=None, complete_guidance=True)
+        ),  # type: ignore[arg-type]
         plan_cache=_FakePlanCache(),  # type: ignore[arg-type]
         plan_service=plan_service,  # type: ignore[arg-type]
         lock_registry=_FakeLockRegistry(),  # type: ignore[arg-type]
@@ -186,6 +191,7 @@ def _record(
     *,
     build_steps: list[ModelBuildStep] | None = None,
     mscript: str | None = None,
+    complete_guidance: bool = False,
 ) -> PaperPlanRecord:
     evidence = PaperEvidenceEntry(
         source=EvidenceSource.DOCUMENT_EXTRACTED,
@@ -242,6 +248,8 @@ def _record(
         m_script_skeleton=mscript,
         evidence=[evidence],
         build_steps=build_steps,
+        build_guidance=_build_guidance(evidence) if complete_guidance else None,
+        guidance_status="generated" if complete_guidance else "not_generated",
     )
     return PaperPlanRecord(
         paper_id="paper-1",
@@ -264,4 +272,30 @@ def _build_step() -> ModelBuildStep:
         depends_on=[],
         evidence=[],
         display_text="Place the synchronous machine block.",
+    )
+
+
+def _build_guidance(evidence: PaperEvidenceEntry) -> BuildGuidance:
+    return BuildGuidance(
+        version="v2",
+        assessment=GuidanceAssessment(
+            content_status="outline_only",
+            environment_status="not_checked",
+            overall_status="outline_only",
+            blocking_gap_ids=[],
+        ),
+        details=[
+            GuidanceDetail(
+                detail_id="GD-001",
+                step_id="STEP-001",
+                detail_kind="configuration",
+                basis="document_extracted",
+                actionability="notice_only",
+                display_text="Use the documented machine setup.",
+                evidence=[evidence],
+                convention_code=None,
+                confirmation_reason_code=None,
+            )
+        ],
+        gaps=[],
     )
