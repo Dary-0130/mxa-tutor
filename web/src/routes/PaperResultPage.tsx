@@ -12,6 +12,17 @@ import { SectionNav } from "./paper/SectionNav";
 import { SubsystemMap } from "./paper/SubsystemMap";
 import { TuningPanel } from "./paper/TuningPanel";
 import { usePaperResult } from "./paper/usePaperResult";
+import type { GuidanceStatus } from "../lib/paperTypes";
+
+const GUIDANCE_STATUSES_REQUIRING_REGENERATION: ReadonlySet<GuidanceStatus> = new Set([
+  "not_generated",
+  "stale_pending_regeneration",
+  "generation_failed",
+]);
+
+function guidanceStatusRequiresRegeneration(status: GuidanceStatus): boolean {
+  return GUIDANCE_STATUSES_REQUIRING_REGENERATION.has(status);
+}
 
 function PaperLoading() {
   return (
@@ -87,7 +98,8 @@ export function PaperResultPage() {
     Array.isArray(data.plan.build_steps) && data.plan.build_steps.length > 0
       ? data.plan.build_steps
       : null;
-  const hasRegenerationWork = structuredSteps == null;
+  const hasRegenerationWork =
+    structuredSteps == null || guidanceStatusRequiresRegeneration(data.plan.guidance_status);
 
   return (
     <main className="paper-page">
@@ -142,6 +154,7 @@ export function PaperResultPage() {
               aria-labelledby="paper-build-steps-title"
             >
               <h2 id="paper-build-steps-title">建模步骤</h2>
+              <p className="paper-guidance-honesty-banner">这是 AI 生成的搭建建议,仅供参考</p>
               <BuildSteps
                 plan={data.plan}
                 regenerating={regeneratingSteps}

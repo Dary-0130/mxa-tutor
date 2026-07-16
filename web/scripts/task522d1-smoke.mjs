@@ -42,9 +42,17 @@ assert(
 assert(
   resultPage.includes("hasRegenerationWork") &&
     resultPage.includes("structuredSteps == null") &&
+    resultPage.includes("guidanceStatusRequiresRegeneration(data.plan.guidance_status)") &&
+    resultPage.includes('"generation_failed"') &&
+    resultPage.includes('"not_generated"') &&
+    resultPage.includes('"stale_pending_regeneration"') &&
     !resultPage.includes("data.plan.m_script_skeleton === null") &&
     !resultPage.includes("data.parameterCorrections.length > 0"),
-  "regenerate button predicate must only use structured build steps",
+  "regenerate button predicate must use structured build steps and recoverable guidance statuses",
+);
+assert(
+  resultPage.includes("这是 AI 生成的搭建建议,仅供参考"),
+  "build steps section must show the fixed AI guidance banner",
 );
 assert(
   errors.includes("regenerate_lock_conflict") && errors.includes("regenerate_store_failed"),
@@ -62,13 +70,18 @@ for (const forbidden of ["AI 重新生成", "基于当前参数重新推导", "�
 function shouldShowRegenerateButton(plan) {
   const structuredSteps =
     Array.isArray(plan.build_steps) && plan.build_steps.length > 0 ? plan.build_steps : null;
-  return structuredSteps == null;
+  const guidanceStatusRequiresRegeneration =
+    plan.guidance_status === "not_generated" ||
+    plan.guidance_status === "stale_pending_regeneration" ||
+    plan.guidance_status === "generation_failed";
+  return structuredSteps == null || guidanceStatusRequiresRegeneration;
 }
 
 assert(
   shouldShowRegenerateButton({
     build_steps: null,
     m_script_skeleton: "clear; clc;",
+    guidance_status: "generated",
     parameterCorrections: [{ correction_id: "CORR-1" }],
   }),
   "corrected plan with suppressed build_steps must show regenerate button",
@@ -77,6 +90,7 @@ assert(
   shouldShowRegenerateButton({
     build_steps: null,
     m_script_skeleton: null,
+    guidance_status: "generated",
   }),
   "suppressed build_steps must show regenerate button even when m_script is null",
 );
@@ -84,6 +98,7 @@ assert(
   !shouldShowRegenerateButton({
     build_steps: [{ step_id: "STEP-001" }],
     m_script_skeleton: "clear; clc;",
+    guidance_status: "generated",
     parameterCorrections: [{ correction_id: "CORR-1" }],
   }),
   "complete regenerated plan must hide button even when an active correction remains",
@@ -92,8 +107,26 @@ assert(
   !shouldShowRegenerateButton({
     build_steps: [{ step_id: "STEP-001" }],
     m_script_skeleton: null,
+    guidance_status: "generated",
   }),
   "complete build steps must hide regenerate button even when m_script is null",
+);
+assert(
+  shouldShowRegenerateButton({
+    build_steps: [{ step_id: "STEP-001" }],
+    m_script_skeleton: "clear; clc;",
+    guidance_status: "generation_failed",
+  }),
+  "complete build steps with failed guidance must show regenerate button",
+);
+assert(
+  !shouldShowRegenerateButton({
+    build_steps: [{ step_id: "STEP-001" }],
+    m_script_skeleton: "clear; clc;",
+    guidance_status: "generated",
+    guidance_basis: "document_claim_unverified",
+  }),
+  "generated unverified guidance must not show regenerate button",
 );
 
 for (const cssClass of [
@@ -101,6 +134,7 @@ for (const cssClass of [
   ".paper-regenerate-steps-notice",
   ".paper-interaction-lock",
   ".paper-button-spinner",
+  ".paper-guidance-honesty-banner",
 ]) {
   assert(css.includes(cssClass), `missing CSS class: ${cssClass}`);
 }

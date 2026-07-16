@@ -537,6 +537,15 @@
   display: grid;
   gap: 18px;
 }
+.paper-guidance-honesty-banner {
+  border: 1px solid rgba(255, 213, 128, 0.34);
+  background: rgba(35, 29, 12, 0.5);
+  color: #ffd580;
+  margin: 0;
+  padding: 10px 12px;
+  font: 850 0.86rem var(--font-display);
+  line-height: 1.45;
+}
 .paper-build-step-return-head {
   display: flex;
   flex-wrap: wrap;

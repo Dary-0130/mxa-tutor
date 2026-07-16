@@ -90,7 +90,7 @@ for (const cssClass of [
     throw new Error(`Missing build step CSS class: ${cssClass}`);
   }
 }
-if (!/\.paper-build-step-card \.paper-token\{[^}]*overflow-wrap:anywhere/.test(paperCss)) {
+if (!/\.paper-build-step-card \.paper-token\s*\{[^}]*overflow-wrap\s*:\s*anywhere/.test(paperCss)) {
   throw new Error("Build step tokens must wrap long content");
 }
 
