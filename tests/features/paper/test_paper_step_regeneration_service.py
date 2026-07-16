@@ -140,7 +140,9 @@ async def test_regeneration_predicate_ignores_mscript_null(
     if has_build_steps:
         record = replace(
             record,
-            plan=replace(record.plan, build_guidance=_build_guidance(), guidance_status="generated"),
+            plan=replace(
+                record.plan, build_guidance=_build_guidance(), guidance_status="generated"
+            ),
         )
     store = _FakeBundleStore(record, corrections=corrections)
     plan_cache = _FakePlanCache()
@@ -367,7 +369,9 @@ def test_plan_evidence_bytes_match_full_model_evidence_for_normal_nonempty_steps
     )
 
     def previous_plan_evidence_bytes(candidate: ModelGenerationPlan) -> bytes:
-        payload = ModelGenerationPlanModel.from_domain(candidate).model_dump(mode="json")["evidence"]
+        payload = ModelGenerationPlanModel.from_domain(candidate).model_dump(mode="json")[
+            "evidence"
+        ]
         return regeneration_module._stable_json_bytes(payload)
 
     assert regeneration_module._plan_evidence_bytes(plan) == previous_plan_evidence_bytes(plan)

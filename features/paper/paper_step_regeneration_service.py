@@ -418,7 +418,10 @@ def _parameter_mapping_bytes(plan: ModelGenerationPlan) -> bytes:
 
 
 def _plan_evidence_bytes(plan: ModelGenerationPlan) -> bytes:
-    payload = [PaperEvidenceEntryModel.from_domain(entry).model_dump(mode="json") for entry in plan.evidence]
+    payload = [
+        PaperEvidenceEntryModel.from_domain(entry).model_dump(mode="json")
+        for entry in plan.evidence
+    ]
     return _stable_json_bytes(payload)
 
 
